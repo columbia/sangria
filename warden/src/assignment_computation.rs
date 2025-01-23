@@ -669,19 +669,19 @@ mod tests {
         // This is a workaround.
         let mut res = context
             .session
-            .query("TRUNCATE chardonnay.range_leases", ())
+            .query("TRUNCATE atomix.range_leases", ())
             .await;
         match res {
-            Ok(_) => info!("Truncated chardonnay.range_leases"),
-            Err(e) => panic!("Failed to truncate chardonnay.range_leases: {}", e),
+            Ok(_) => info!("Truncated atomix.range_leases"),
+            Err(e) => panic!("Failed to truncate atomix.range_leases: {}", e),
         }
         res = context
             .session
-            .query("TRUNCATE chardonnay.range_map", ())
+            .query("TRUNCATE atomix.range_map", ())
             .await;
         match res {
-            Ok(_) => info!("Truncated chardonnay.range_map"),
-            Err(e) => panic!("Failed to truncate chardonnay.range_map: {}", e),
+            Ok(_) => info!("Truncated atomix.range_map"),
+            Err(e) => panic!("Failed to truncate atomix.range_map: {}", e),
         }
         // One base range and have one server to assign.
         // This test feeds the base ranges through the universe server. Other tests directly populate
@@ -732,7 +732,7 @@ mod tests {
             context
                 .session
                 .query(
-                    "SELECT * from chardonnay.range_leases where range_id = ?",
+                    "SELECT * from atomix.range_leases where range_id = ?",
                     (range.id,)
                 )
                 .await
@@ -745,7 +745,7 @@ mod tests {
         let ranges = context
             .session
             .query(
-                "SELECT * from chardonnay.range_map where keyspace_id = ? and range_id = ?",
+                "SELECT * from atomix.range_map where keyspace_id = ? and range_id = ?",
                 (range.keyspace_id.id, range.id),
             )
             .await

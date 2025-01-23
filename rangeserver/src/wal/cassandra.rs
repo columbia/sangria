@@ -44,34 +44,34 @@ fn scylla_query_error_to_wal_error(qe: QueryError) -> Error {
 }
 
 static SYNC_WAL_QUERY: &str = r#"
-  SELECT first_offset, next_offset FROM chardonnay.wal
+  SELECT first_offset, next_offset FROM atomix.wal
     WHERE wal_id = ? and offset = ?;
 "#;
 
 static UPDATE_FIRST_OFFSET_QUERY: &str = r#"
-    UPDATE chardonnay.wal SET first_offset = ? 
+    UPDATE atomix.wal SET first_offset = ? 
       WHERE wal_id = ? and offset = ? 
       IF first_offset = ? 
 "#;
 
 static TRIM_LOG_QUERY: &str = r#"
-    DELETE FROM chardonnay.wal
+    DELETE FROM atomix.wal
       WHERE wal_id = ? and offset < ?
 "#;
 
 static UPDATE_METADATA_QUERY: &str = r#"
-    UPDATE chardonnay.wal SET next_offset = ?, first_offset = ?
+    UPDATE atomix.wal SET next_offset = ?, first_offset = ?
       WHERE wal_id = ? and offset = ? 
       IF next_offset = ? 
 "#;
 
 static APPEND_ENTRY_QUERY: &str = r#"
-    INSERT INTO chardonnay.wal (wal_id, offset, content, write_id)
+    INSERT INTO atomix.wal (wal_id, offset, content, write_id)
     VALUES (?, ?, ?, ?)
 "#;
 
 static RETRIEVE_LOG_ENTRY: &str = r#"
-    SELECT * FROM chardonnay.wal
+    SELECT * FROM atomix.wal
       WHERE wal_id = ? and offset = ? and write_id = ?
       ALLOW FILTERING
 "#;
@@ -266,7 +266,7 @@ pub mod tests {
         async fn create_test() -> CassandraWal {
             let cassandra = CassandraWal::new("127.0.0.1:9042".to_string(), Uuid::new_v4()).await;
             let mut query = Query::new(
-                "INSERT INTO chardonnay.wal (wal_id, offset, next_offset) VALUES (?, ?, ?)",
+                "INSERT INTO atomix.wal (wal_id, offset, next_offset) VALUES (?, ?, ?)",
             );
             query.set_serial_consistency(Some(SerialConsistency::Serial));
             cassandra
@@ -278,7 +278,7 @@ pub mod tests {
         }
 
         async fn cleanup(&self) {
-            let mut query = Query::new("DELETE FROM chardonnay.wal WHERE wal_id = ?");
+            let mut query = Query::new("DELETE FROM atomix.wal WHERE wal_id = ?");
             query.set_serial_consistency(Some(SerialConsistency::Serial));
             let _ = self.session.query(query, (self.wal_id,)).await;
         }

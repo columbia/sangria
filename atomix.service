@@ -1,5 +1,5 @@
 [Unit]
-Description=Chardonnay Service
+Description=Atomix Service
 After=network.target
 StartLimitIntervalSec=0
 [Service]
@@ -7,8 +7,8 @@ Type=simple
 Restart=always
 RestartSec=1
 Environment="RUST_BACKTRACE=1"
-ExecStart=/usr/bin/chardonnay
-WorkingDirectory=/etc/chardonnay
+ExecStart=/usr/bin/atomix
+WorkingDirectory=/etc/atomix
 
 [Install]
 WantedBy=multi-user.target

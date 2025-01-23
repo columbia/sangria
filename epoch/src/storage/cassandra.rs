@@ -15,18 +15,18 @@ pub struct Cassandra {
 }
 
 static INITIALIZE_EPOCH_QUERY: &str = r#"
-  INSERT INTO chardonnay.epoch (region, epoch, timestamp) 
+  INSERT INTO atomix.epoch (region, epoch, timestamp) 
     VALUES (?, 1, ?) 
     IF NOT EXISTS
 "#;
 
 static GET_LATEST_EPOCH_QUERY: &str = r#"
-  SELECT epoch, timestamp FROM chardonnay.epoch
+  SELECT epoch, timestamp FROM atomix.epoch
     WHERE region = ?;
 "#;
 
 static UPDATE_EPOCH_QUERY: &str = r#"
-  UPDATE chardonnay.epoch SET epoch = ?, timestamp = ?
+  UPDATE atomix.epoch SET epoch = ?, timestamp = ?
     WHERE region = ? 
     IF epoch = ? 
 "#;

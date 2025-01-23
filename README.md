@@ -61,11 +61,11 @@ To run the tests you need:
    docker run -d -p 9042:9042 --name cassandra cassandra:5.0
    ```
 
-1. Load the Chardonnay schema:
+1. Load the Atomix schema:
 
    ```sh
-   docker exec -i cassandra cqlsh < schema/cassandra/chardonnay/keyspace.cql
-   docker exec -i cassandra cqlsh -k chardonnay < schema/cassandra/chardonnay/schema.cql
+   docker exec -i cassandra cqlsh < schema/cassandra/atomix/keyspace.cql
+   docker exec -i cassandra cqlsh -k atomix < schema/cassandra/atomix/schema.cql
    ```
 
 ### Run Tests
@@ -76,16 +76,16 @@ Run:
 cargo test
 ```
 
-## Building Chardonnay with Docker
+## Building Atomix with Docker
 
 Run:
 
 ```sh
-RANGESERVER_IMG="chardonnay-rangeserver"
-WARDEN_IMG="chardonnay-warden"
-EPOCH_PUBLISHER_IMG="chardonnay-epoch-publisher"
-EPOCH_IMG="chardonnay-epoch"
-UNIVERSE_IMG="chardonnay-universe"
+RANGESERVER_IMG="atomix-rangeserver"
+WARDEN_IMG="atomix-warden"
+EPOCH_PUBLISHER_IMG="atomix-epoch-publisher"
+EPOCH_IMG="atomix-epoch"
+UNIVERSE_IMG="atomix-universe"
 
 TAG="latest"
 
@@ -96,7 +96,7 @@ docker build -t "$EPOCH_IMG:$TAG" --target epoch .
 docker build -t "$UNIVERSE_IMG:$TAG" --target universe .
 ```
 
-## Running Chardonnay on Kubernetes
+## Running Atomix on Kubernetes
 
 Prerequisites:
 - Minikube installation
@@ -110,7 +110,7 @@ Prerequisites:
    minikube start
    ```
 
-2. Load chardonnay docker images on minikube:
+2. Load atomix docker images on minikube:
 
    ```sh
    minikube image load --overwrite "$RANGESERVER_IMG:$TAG"
@@ -130,7 +130,7 @@ Prerequisites:
    minikube image rm "$UNIVERSE_IMG:$TAG"
    ```
 
-3. Apply chardonnay manifests for deploying on Kubernetes:
+3. Apply atomix manifests for deploying on Kubernetes:
 
    ```sh
    kubectl apply \
@@ -143,7 +143,7 @@ Prerequisites:
       -f kubernetes/universe.yaml
    ```
 
-   :warning: Many components of Chardonnay currently crash when their
+   :warning: Many components of Atomix currently crash when their
    dependencies are not available yet, instead of simply retrying. This means
    you may need to wait for some minutes for the deployment to stabilize.
 
@@ -151,17 +151,17 @@ Prerequisites:
    schema:
 
    ```sh
-   kubectl exec -it -n chardonnay cassandra-0 -- bash
+   kubectl exec -it -n atomix cassandra-0 -- bash
 
    # Open a cql shell
    cqlsh
    # Copy paste the commands from keyspace.cql
-   USE chardonnay;
+   USE atomix;
    # Copy paste the commands from schema.cql
    ```
 
 5. Confirm that everything becomes ready:
 
    ```sh
-   kubectl get pods -n chardonnay
+   kubectl get pods -n atomix
    ```

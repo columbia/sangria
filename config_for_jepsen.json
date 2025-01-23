@@ -8,17 +8,17 @@
     "fast_network_addr": "0.0.0.0:50055"
   },
   "universe": {
-    "proto_server_addr": "chardonnay-universe:50056"
+    "proto_server_addr": "atomix-universe:50056"
   },
   "epoch": {
-    "proto_server_addr": "chardonnay-epoch:50050"
+    "proto_server_addr": "atomix-epoch:50050"
   },
   "cassandra": {
     "cql_addr": "cassandra:9042"
   },
   "regions": {
     "test-region": {
-      "warden_address": "chardonnay-warden:50053",
+      "warden_address": "atomix-warden:50053",
       "epoch_publishers": [
         {
           "name": "ps1",
@@ -26,8 +26,8 @@
           "publishers": [
             {
               "name": "ep1",
-              "backend_addr": "chardonnay-epoch-publisher:50051",
-              "fast_network_addr": "chardonnay-epoch-publisher:50052"
+              "backend_addr": "atomix-epoch-publisher:50051",
+              "fast_network_addr": "atomix-epoch-publisher:50052"
             }
           ]
         }

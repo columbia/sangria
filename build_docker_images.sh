@@ -1,10 +1,10 @@
-RANGESERVER_IMG="chardonnay-rangeserver"
-WARDEN_IMG="chardonnay-warden"
-EPOCH_PUBLISHER_IMG="chardonnay-epoch-publisher"
-EPOCH_IMG="chardonnay-epoch"
-UNIVERSE_IMG="chardonnay-universe"
+RANGESERVER_IMG="atomix-rangeserver"
+WARDEN_IMG="atomix-warden"
+EPOCH_PUBLISHER_IMG="atomix-epoch-publisher"
+EPOCH_IMG="atomix-epoch"
+UNIVERSE_IMG="atomix-universe"
 BUILD_TYPE="${BUILD_TYPE:-release}"
-CASSANDRA_CLIENT_IMG="chardonnay-cassandra-client"
+CASSANDRA_CLIENT_IMG="atomix-cassandra-client"
 
 TAG="latest"
 

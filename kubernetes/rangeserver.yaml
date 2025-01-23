@@ -1,26 +1,26 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: chardonnay-rangeserver
-  namespace: chardonnay
+  name: atomix-rangeserver
+  namespace: atomix
 spec:
-  serviceName: "chardonnay-rangeserver"
+  serviceName: "atomix-rangeserver"
   replicas: 1
   selector:
     matchLabels:
-      app: chardonnay-rangeserver
+      app: atomix-rangeserver
   template:
     metadata:
       labels:
-        app: chardonnay-rangeserver
+        app: atomix-rangeserver
     spec:
       containers:
       - name: rangeserver
-        image: chardonnay-rangeserver:latest
+        image: atomix-rangeserver:latest
         imagePullPolicy: IfNotPresent
-        workingDir: /etc/chardonnay
+        workingDir: /etc/atomix
         command: ["/bin/sh", "-c"]
-        args: ["cat /etc/chardonnay/config.json && rangeserver"]
+        args: ["cat /etc/atomix/config.json && rangeserver"]
         env:
           - name: RUST_BACKTRACE
             value: "1"
@@ -35,20 +35,20 @@ spec:
           protocol: UDP
         volumeMounts:
         - name: config
-          mountPath: /etc/chardonnay
+          mountPath: /etc/atomix
       volumes:
       - name: config
         configMap:
-          name: chardonnay-rangeserver-config
+          name: atomix-rangeserver-config
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: chardonnay-rangeserver
-  namespace: chardonnay
+  name: atomix-rangeserver
+  namespace: atomix
 spec:
   selector:
-    app: chardonnay-rangeserver
+    app: atomix-rangeserver
   clusterIP: None
   ports:
     - protocol: TCP
@@ -64,8 +64,8 @@ spec:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: chardonnay-rangeserver-config
-  namespace: chardonnay
+  name: atomix-rangeserver-config
+  namespace: atomix
 data:
   config.json: |
     {
@@ -78,17 +78,17 @@ data:
             "fast_network_addr": "0.0.0.0:50055"
         },
         "universe": {
-            "proto_server_addr": "chardonnay-universe:50056"
+            "proto_server_addr": "atomix-universe:50056"
         },
         "epoch": {
-            "proto_server_addr": "chardonnay-epoch:50050"
+            "proto_server_addr": "atomix-epoch:50050"
         },
         "cassandra": {
             "cql_addr": "cassandra:9042"
         },
         "regions": {
             "test-region": {
-                "warden_address": "chardonnay-warden:50053",
+                "warden_address": "atomix-warden:50053",
                 "epoch_publishers": [
                     {
                         "name": "ps1",
@@ -96,8 +96,8 @@ data:
                         "publishers": [
                             {
                                 "name": "ep1",
-                                "backend_addr": "chardonnay-epoch-publisher:50051",
-                                "fast_network_addr": "chardonnay-epoch-publisher:50052"
+                                "backend_addr": "atomix-epoch-publisher:50051",
+                                "fast_network_addr": "atomix-epoch-publisher:50052"
                             }
                         ]
                     }

@@ -2,7 +2,7 @@
 # Configuration variables
 ARG RUST_VERSION=1.81
 ARG FLATBUFFERS_VERSION=23.5.26
-# Set BUILD_TYPE to 'jepsen' to build the jepsen-specific version of Chardonnay.
+# Set BUILD_TYPE to 'jepsen' to build the jepsen-specific version of Atomix.
 ARG BUILD_TYPE=release
 
 ###############################################################################
@@ -33,8 +33,8 @@ RUN git clone https://github.com/google/flatbuffers.git && \
     make -j$(nproc) && \
     make install
 
-# Build chardonnay
-WORKDIR /chardonnay_build
+# Build atomix
+WORKDIR /atomix_build
 
 # Copy the entire project
 COPY . .
@@ -46,7 +46,7 @@ RUN cargo build --release
 # node-jepsen #################################################################
 ###############################################################################
 # This is a arm64 build of jgoerzen/debian-base-minimal:bookworm pulled from Docker hub.
-FROM purujit/chardonnay:debian-base-minimal AS debian-addons
+FROM purujit/atomix:debian-base-minimal AS debian-addons
 FROM debian:bookworm AS node-jepsen
 
 COPY --from=debian-addons /usr/local/preinit/ /usr/local/preinit/
@@ -73,9 +73,9 @@ RUN apt-get -qy update && \
 ADD setup-jepsen.sh /usr/local/preinit/03-setup-jepsen
 RUN chmod +x /usr/local/preinit/03-setup-jepsen
 # Add a service for systemd to run on startup. See https://medium.com/@benmorel/creating-a-linux-service-with-systemd-611b5c8b91d6
-ADD chardonnay.service /etc/systemd/system/chardonnay.service
-ADD config_for_jepsen.json /etc/chardonnay/config.json
-RUN systemctl enable chardonnay.service
+ADD atomix.service /etc/systemd/system/atomix.service
+ADD config_for_jepsen.json /etc/atomix/config.json
+RUN systemctl enable atomix.service
 
 # Configure SSHD
 RUN sed -i "s/#PermitRootLogin prohibit-password/PermitRootLogin yes/g" /etc/ssh/sshd_config
@@ -108,8 +108,8 @@ FROM node-${BUILD_TYPE} AS node
 FROM node AS rangeserver
 
 # Copy the built executable from the builder stage
-COPY --from=builder /chardonnay_build/target/release/rangeserver /usr/bin/rangeserver
-COPY --from=builder /chardonnay_build/target/release/rangeserver /usr/bin/chardonnay
+COPY --from=builder /atomix_build/target/release/rangeserver /usr/bin/rangeserver
+COPY --from=builder /atomix_build/target/release/rangeserver /usr/bin/atomix
 
 ###############################################################################
 # warden ######################################################################
@@ -118,8 +118,8 @@ COPY --from=builder /chardonnay_build/target/release/rangeserver /usr/bin/chardo
 FROM node AS warden
 
 # Copy the built executable from the builder stage
-COPY --from=builder /chardonnay_build/target/release/warden /usr/bin/warden
-COPY --from=builder /chardonnay_build/target/release/warden /usr/bin/chardonnay
+COPY --from=builder /atomix_build/target/release/warden /usr/bin/warden
+COPY --from=builder /atomix_build/target/release/warden /usr/bin/atomix
 
 ###############################################################################
 # epoch_publisher #############################################################
@@ -128,8 +128,8 @@ COPY --from=builder /chardonnay_build/target/release/warden /usr/bin/chardonnay
 FROM node AS epoch_publisher
 
 # Copy the built executable from the builder stage
-COPY --from=builder /chardonnay_build/target/release/epoch_publisher /usr/bin/epoch_publisher
-COPY --from=builder /chardonnay_build/target/release/epoch_publisher /usr/bin/chardonnay
+COPY --from=builder /atomix_build/target/release/epoch_publisher /usr/bin/epoch_publisher
+COPY --from=builder /atomix_build/target/release/epoch_publisher /usr/bin/atomix
 
 ###############################################################################
 # epoch_service ###############################################################
@@ -138,8 +138,8 @@ COPY --from=builder /chardonnay_build/target/release/epoch_publisher /usr/bin/ch
 FROM node AS epoch
 
 # Copy the built executable from the builder stage
-COPY --from=builder /chardonnay_build/target/release/epoch /usr/bin/epoch
-COPY --from=builder /chardonnay_build/target/release/epoch /usr/bin/chardonnay
+COPY --from=builder /atomix_build/target/release/epoch /usr/bin/epoch
+COPY --from=builder /atomix_build/target/release/epoch /usr/bin/atomix
 
 ###############################################################################
 # universe ####################################################################
@@ -148,15 +148,15 @@ COPY --from=builder /chardonnay_build/target/release/epoch /usr/bin/chardonnay
 FROM node AS universe
 
 # Copy the built executable from the builder stage
-COPY --from=builder /chardonnay_build/target/release/universe /usr/bin/universe
-COPY --from=builder /chardonnay_build/target/release/universe /usr/bin/chardonnay
+COPY --from=builder /atomix_build/target/release/universe /usr/bin/universe
+COPY --from=builder /atomix_build/target/release/universe /usr/bin/atomix
 
 ###############################################################################
 # cassandra ###################################################################
 ###############################################################################
 FROM cassandra:5.0 AS cassandra-client
-ADD schema/cassandra/chardonnay/keyspace.cql /etc/chardonnay/cassandra/keyspace.cql
-ADD schema/cassandra/chardonnay/schema.cql /etc/chardonnay/cassandra/schema.cql
+ADD schema/cassandra/atomix/keyspace.cql /etc/atomix/cassandra/keyspace.cql
+ADD schema/cassandra/atomix/schema.cql /etc/atomix/cassandra/schema.cql
 ADD create_schema.sh /usr/local/bin/create_schema.sh
 RUN chmod +x /usr/local/bin/create_schema.sh
 
