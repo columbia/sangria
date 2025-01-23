@@ -1,4 +1,4 @@
-# chardonnay
+# Atomix
 
 The World's Best Transactional Database System.
 
@@ -16,7 +16,7 @@ https://www.cidrdb.org/cidr2024/papers/p4-eldeeb_v2.pdf
 
 ### Dev Dependencies
 
-**Building Chardonnay requires:**
+**Building Atomix requires:**
 
 - Rust toolchain
 - Flatbuf compiler aka `flatc`
