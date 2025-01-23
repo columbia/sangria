@@ -1,22 +1,22 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: chardonnay-warden
-  namespace: chardonnay
+  name: atomix-warden
+  namespace: atomix
 spec:
-  serviceName: "chardonnay-warden"
+  serviceName: "atomix-warden"
   replicas: 1
   selector:
     matchLabels:
-      app: chardonnay-warden
+      app: atomix-warden
   template:
     metadata:
       labels:
-        app: chardonnay-warden
+        app: atomix-warden
     spec:
       containers:
       - name: warden
-        image: chardonnay-warden:latest
+        image: atomix-warden:latest
         imagePullPolicy: IfNotPresent
         env:
           - name: RUST_BACKTRACE
@@ -25,26 +25,26 @@ spec:
             value: "info"
         ports:
         - containerPort: 50053
-        workingDir: /etc/chardonnay
+        workingDir: /etc/atomix
         command: ["/bin/sh", "-c"]
-        args: ["cat /etc/chardonnay/config.json && warden"]
+        args: ["cat /etc/atomix/config.json && warden"]
         volumeMounts:
         - name: config
-          mountPath: /etc/chardonnay
+          mountPath: /etc/atomix
       volumes:
       - name: config
         configMap:
-          name: chardonnay-warden-config
+          name: atomix-warden-config
 
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: chardonnay-warden
-  namespace: chardonnay
+  name: atomix-warden
+  namespace: atomix
 spec:
   selector:
-    app: chardonnay-warden
+    app: atomix-warden
   # TODO: Expose warden ports
   clusterIP: None
   ports:
@@ -56,8 +56,8 @@ spec:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: chardonnay-warden-config
-  namespace: chardonnay
+  name: atomix-warden-config
+  namespace: atomix
 data:
   config.json: |
     {
@@ -70,10 +70,10 @@ data:
             "fast_network_addr": "0.0.0.0:50055"
         },
         "universe": {
-            "proto_server_addr": "chardonnay-universe:50056"
+            "proto_server_addr": "atomix-universe:50056"
         },
         "epoch": {
-            "proto_server_addr": "chardonnay-epoch:50050"
+            "proto_server_addr": "atomix-epoch:50050"
         },
         "cassandra": {
             "cql_addr": "cassandra:9042"
@@ -88,8 +88,8 @@ data:
                         "publishers": [
                             {
                                 "name": "ep1",
-                                "backend_addr": "chardonnay-epoch-publisher:50051",
-                                "fast_network_addr": "chardonnay-epoch-publisher:50052"
+                                "backend_addr": "atomix-epoch-publisher:50051",
+                                "fast_network_addr": "atomix-epoch-publisher:50052"
                             }
                         ]
                     }

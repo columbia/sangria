@@ -12,25 +12,25 @@ pub struct Cassandra {
 }
 
 static START_TRANSACTION_QUERY: &str = r#"
-  INSERT INTO chardonnay.transactions (transaction_id, status) 
+  INSERT INTO atomix.transactions (transaction_id, status) 
     VALUES (?, 'started') 
     IF NOT EXISTS
 "#;
 
 static COMMIT_TRANSACTION_QUERY: &str = r#"
-  UPDATE chardonnay.transactions SET status = 'committed', epoch = ?
+  UPDATE atomix.transactions SET status = 'committed', epoch = ?
     WHERE transaction_id = ? 
     IF status IN ('started', 'committed')
 "#;
 
 static ABORT_TRANSACTION_QUERY: &str = r#"
-  UPDATE chardonnay.transactions SET status = 'aborted'
+  UPDATE atomix.transactions SET status = 'aborted'
     WHERE transaction_id = ? 
     IF status IN ('started', 'aborted')
 "#;
 
 static GET_COMMIT_EPOCH_QUERY: &str = r#"
-  SELECT epoch from chardonnay.transactions
+  SELECT epoch from atomix.transactions
     WHERE transaction_id = ? 
     AND status = 'committed'
     ALLOW FILTERING

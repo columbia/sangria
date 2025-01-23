@@ -54,7 +54,7 @@ impl StorageTestCase {
                     .build()
                     .await
                     .unwrap();
-                let mut query = Query::new("DELETE FROM chardonnay.epoch WHERE region = ?");
+                let mut query = Query::new("DELETE FROM atomix.epoch WHERE region = ?");
                 query.set_serial_consistency(Some(SerialConsistency::Serial));
                 let _ = session.query(query, (region.clone(),)).await;
             }

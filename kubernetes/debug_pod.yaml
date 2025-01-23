@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: debug-pod
-  namespace: chardonnay
+  namespace: atomix
 spec:
   containers:
   - name: debug-container
@@ -11,9 +11,9 @@ spec:
     args: ["-c", "while true; do sleep 30; done;"]
     volumeMounts:
     - name: config
-      mountPath: /etc/chardonnay
+      mountPath: /etc/atomix
   volumes:
   - name: config
     configMap:
-      name: chardonnay-rangeserver-config
+      name: atomix-rangeserver-config
   restartPolicy: Never

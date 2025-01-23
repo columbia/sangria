@@ -57,30 +57,30 @@ impl CqlRangeLease {
 }
 
 static GET_RANGE_LEASE_QUERY: &str = r#"
-  SELECT * FROM chardonnay.range_leases
+  SELECT * FROM atomix.range_leases
     WHERE range_id = ?;
 "#;
 
 static ACQUIRE_RANGE_LEASE_QUERY: &str = r#"
-  UPDATE chardonnay.range_leases SET leader_sequence_number = ?
+  UPDATE atomix.range_leases SET leader_sequence_number = ?
     WHERE range_id = ? 
     IF leader_sequence_number = ? 
 "#;
 
 static RENEW_EPOCH_LEASE_QUERY: &str = r#"
-  UPDATE chardonnay.range_leases SET epoch_lease = ?
+  UPDATE atomix.range_leases SET epoch_lease = ?
     WHERE range_id = ? 
     IF leader_sequence_number = ? 
 "#;
 
 static UPSERT_QUERY: &str = r#"
-  INSERT INTO chardonnay.records (range_id, key, value, epoch, is_tombstone) 
+  INSERT INTO atomix.records (range_id, key, value, epoch, is_tombstone) 
     VALUES (?, ?, ?, ?, ?) 
     USING TIMESTAMP ?
 "#;
 
 static GET_QUERY: &str = r#"
-  SELECT value, is_tombstone from chardonnay.records
+  SELECT value, is_tombstone from atomix.records
   WHERE range_id = ? AND key = ?
   LIMIT 1
 "#;
@@ -305,14 +305,14 @@ pub mod for_testing {
                 let _ = cassandra
                     .session
                     .query(
-                        "DELETE FROM chardonnay.range_leases WHERE range_id = ?",
+                        "DELETE FROM atomix.range_leases WHERE range_id = ?",
                         (range_id,),
                     )
                     .await;
                 let _ = cassandra
                     .session
                     .query(
-                        "DELETE FROM chardonnay.records WHERE range_id = ?",
+                        "DELETE FROM atomix.records WHERE range_id = ?",
                         (range_id,),
                     )
                     .await;
@@ -340,7 +340,7 @@ pub mod for_testing {
         };
         cassandra
             .session
-            .query("INSERT INTO chardonnay.range_leases (range_id, leader_sequence_number, epoch_lease, safe_snapshot_epochs) VALUES (?, ?, ?, ?) IF NOT EXISTS", (cql_range.range_id, cql_range.leader_sequence_number, cql_range.epoch_lease, cql_range.safe_snapshot_epochs))
+            .query("INSERT INTO atomix.range_leases (range_id, leader_sequence_number, epoch_lease, safe_snapshot_epochs) VALUES (?, ?, ?, ?) IF NOT EXISTS", (cql_range.range_id, cql_range.leader_sequence_number, cql_range.epoch_lease, cql_range.safe_snapshot_epochs))
             .await
             .unwrap();
         TestContext {

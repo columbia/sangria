@@ -1,22 +1,22 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: chardonnay-epoch-publisher
-  namespace: chardonnay
+  name: atomix-epoch-publisher
+  namespace: atomix
 spec:
-  serviceName: "chardonnay-epoch-publisher"
+  serviceName: "atomix-epoch-publisher"
   replicas: 1
   selector:
     matchLabels:
-      app: chardonnay-epoch-publisher
+      app: atomix-epoch-publisher
   template:
     metadata:
       labels:
-        app: chardonnay-epoch-publisher
+        app: atomix-epoch-publisher
     spec:
       containers:
       - name: epoch-publisher
-        image: chardonnay-epoch-publisher:latest
+        image: atomix-epoch-publisher:latest
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 50051
@@ -28,26 +28,26 @@ spec:
         env:
         - name: RUST_LOG
           value: "info"
-        workingDir: /etc/chardonnay
+        workingDir: /etc/atomix
         command: ["/bin/sh", "-c"]
-        args: ["cat /etc/chardonnay/config.json && epoch_publisher"]
+        args: ["cat /etc/atomix/config.json && epoch_publisher"]
         volumeMounts:
         - name: config
-          mountPath: /etc/chardonnay
+          mountPath: /etc/atomix
       volumes:
       - name: config
         configMap:
-          name: chardonnay-epoch-publisher-config
+          name: atomix-epoch-publisher-config
 
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: chardonnay-epoch-publisher
-  namespace: chardonnay
+  name: atomix-epoch-publisher
+  namespace: atomix
 spec:
   selector:
-    app: chardonnay-epoch-publisher
+    app: atomix-epoch-publisher
   clusterIP: None
   ports:
     - name: backend
@@ -63,8 +63,8 @@ spec:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: chardonnay-epoch-publisher-config
-  namespace: chardonnay
+  name: atomix-epoch-publisher-config
+  namespace: atomix
 data:
   config.json: |
     {
@@ -77,17 +77,17 @@ data:
             "fast_network_addr": "0.0.0.0:50055"
         },
         "universe": {
-            "proto_server_addr": "chardonnay-universe:50056"
+            "proto_server_addr": "atomix-universe:50056"
         },
         "epoch": {
-            "proto_server_addr": "chardonnay-epoch:50050"
+            "proto_server_addr": "atomix-epoch:50050"
         },
         "cassandra": {
             "cql_addr": "cassandra:9042"
         },
         "regions": {
             "test-region": {
-                "warden_address": "chardonnay-warden:50053",
+                "warden_address": "atomix-warden:50053",
                 "epoch_publishers": [
                     {
                         "name": "ps1",

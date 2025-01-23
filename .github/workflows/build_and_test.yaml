@@ -34,8 +34,8 @@ jobs:
 
     - name: Create keyspace
       run: |
-        cqlsh -f schema/cassandra/chardonnay/keyspace.cql
-        cqlsh -k chardonnay -f schema/cassandra/chardonnay/schema.cql
+        cqlsh -f schema/cassandra/atomix/keyspace.cql
+        cqlsh -k atomix -f schema/cassandra/atomix/schema.cql
 
     - name: Run tests
       run: cargo test
@@ -46,15 +46,15 @@ jobs:
       matrix:
         include:
           - target: rangeserver
-            tags: chardonnay-rangeserver:latest
+            tags: atomix-rangeserver:latest
           - target: warden
-            tags: chardonnay-warden:latest
+            tags: atomix-warden:latest
           - target: epoch_publisher
-            tags: chardonnay-epoch-publisher:latest
+            tags: atomix-epoch-publisher:latest
           - target: epoch
-            tags: chardonnay-epoch:latest
+            tags: atomix-epoch:latest
           - target: universe
-            tags: chardonnay-universe:latest
+            tags: atomix-universe:latest
 
     steps:
     - uses: actions/checkout@v3
@@ -72,7 +72,7 @@ jobs:
         tags: ${{ matrix.tags }}
         push: false
 
-  # TODO: Add an action to test deploying Chardonnay on a minikube cluster
+  # TODO: Add an action to test deploying Atomix on a minikube cluster
 
   deploy-minikube:
     runs-on: ubuntu-latest
@@ -87,13 +87,13 @@ jobs:
     - name: Build images in minikube
       run: |
         eval $(minikube docker-env)
-        docker build -t chardonnay-rangeserver:latest --target rangeserver .
-        docker build -t chardonnay-warden:latest --target warden .
-        docker build -t chardonnay-epoch-publisher:latest --target epoch_publisher .
-        docker build -t chardonnay-epoch:latest --target epoch .
-        docker build -t chardonnay-universe:latest --target universe .
+        docker build -t atomix-rangeserver:latest --target rangeserver .
+        docker build -t atomix-warden:latest --target warden .
+        docker build -t atomix-epoch-publisher:latest --target epoch_publisher .
+        docker build -t atomix-epoch:latest --target epoch .
+        docker build -t atomix-universe:latest --target universe .
 
-    - name: Deploy and verify Chardonnay
+    - name: Deploy and verify Atomix
       run: |
         cd kubernetes && ./deploy.sh
 

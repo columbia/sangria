@@ -17,7 +17,7 @@ pub struct Cassandra {
 }
 
 static CREATE_KEYSPACE_QUERY: &str = r#"
-    INSERT INTO chardonnay.keyspaces
+    INSERT INTO atomix.keyspaces
     (keyspace_id, name, namespace, primary_zone, base_key_ranges)
     VALUES (?, ?, ?, ?, ?)
     IF NOT EXISTS
@@ -25,7 +25,7 @@ static CREATE_KEYSPACE_QUERY: &str = r#"
 
 static LIST_KEYSPACES_QUERY: &str = r#"
     SELECT keyspace_id, name, namespace, primary_zone, base_key_ranges
-    FROM chardonnay.keyspaces
+    FROM atomix.keyspaces
 "#;
 
 // TODO: Similar to tx_state_store. We should move this to a common location.

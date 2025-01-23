@@ -9,14 +9,14 @@ from subprocess import run, check_output
 log = logging.getLogger(__name__)
 
 
-CHARDONNAY_NAMESPACE = "chardonnay"
-CHARDONNAY_KEYSPACE = "chardonnay"
-CASSANDRA_KEYSPACE_CQL = "../schema/cassandra/chardonnay/keyspace.cql"
-CASSANDRA_SCHEMA_CQL = "../schema/cassandra/chardonnay/schema.cql"
+ATOMIX_NAMESPACE = "atomix"
+ATOMIX_KEYSPACE = "atomix"
+CASSANDRA_KEYSPACE_CQL = "../schema/cassandra/atomix/keyspace.cql"
+CASSANDRA_SCHEMA_CQL = "../schema/cassandra/atomix/schema.cql"
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Deploy chardonnay to K8s")
+    parser = argparse.ArgumentParser(description="Deploy atomix to K8s")
     return parser.parse_args()
 
 
@@ -63,10 +63,10 @@ def preflight_checks():
     except:
         log.fatal("Unable to connect to k8s cluster")
         sys.exit(1)
-    if CHARDONNAY_NAMESPACE in kubectl_list_namespaces():
+    if ATOMIX_NAMESPACE in kubectl_list_namespaces():
         log.fatal(
-            "Chardonnay already deployed, namespace {} already exists".format(
-                CHARDONNAY_NAMESPACE
+            "Atomix already deployed, namespace {} already exists".format(
+                ATOMIX_NAMESPACE
             )
         )
         sys.exit(1)
@@ -141,14 +141,14 @@ def main():
     args = parse_args()
     preflight_checks()
 
-    log.info("Deploying Chardonnay to Kubernetes")
+    log.info("Deploying Atomix to Kubernetes")
 
     log.info("Creating namespace")
     run(["kubectl", "apply", "-f", "namespace.yaml"], check=True)
 
     log.info("Deploying Cassandra")
-    kubectl_apply_and_wait_for_sts("cassandra.yaml", "cassandra", CHARDONNAY_NAMESPACE)
-    wait_until_cassandra_cql_ready("cassandra-0", CHARDONNAY_NAMESPACE)
+    kubectl_apply_and_wait_for_sts("cassandra.yaml", "cassandra", ATOMIX_NAMESPACE)
+    wait_until_cassandra_cql_ready("cassandra-0", ATOMIX_NAMESPACE)
 
     log.info("Creating Cassandra keyspace")
     keyspace_cql = read_file_contents(CASSANDRA_KEYSPACE_CQL).strip()
@@ -157,7 +157,7 @@ def main():
             "kubectl",
             "exec",
             "-n",
-            CHARDONNAY_NAMESPACE,
+            ATOMIX_NAMESPACE,
             "cassandra-0",
             "--",
             "cqlsh",
@@ -173,12 +173,12 @@ def main():
             "kubectl",
             "exec",
             "-n",
-            CHARDONNAY_NAMESPACE,
+            ATOMIX_NAMESPACE,
             "cassandra-0",
             "--",
             "cqlsh",
             "-k",
-            CHARDONNAY_KEYSPACE,
+            ATOMIX_KEYSPACE,
             "-e",
             schema_cql,
         ],
@@ -187,31 +187,31 @@ def main():
 
     log.info("Deploying Universe Manager")
     kubectl_apply_and_wait_for_sts(
-        "universe.yaml", "chardonnay-universe", CHARDONNAY_NAMESPACE
+        "universe.yaml", "atomix-universe", ATOMIX_NAMESPACE
     )
     time.sleep(3)
 
     log.info("Deploying Epoch Service")
     kubectl_apply_and_wait_for_sts(
-        "epoch_service.yaml", "chardonnay-epoch", CHARDONNAY_NAMESPACE
+        "epoch_service.yaml", "atomix-epoch", ATOMIX_NAMESPACE
     )
     time.sleep(3)
 
     log.info("Deploying Epoch Publisher")
     kubectl_apply_and_wait_for_sts(
-        "epoch_publisher.yaml", "chardonnay-epoch-publisher", CHARDONNAY_NAMESPACE
+        "epoch_publisher.yaml", "atomix-epoch-publisher", ATOMIX_NAMESPACE
     )
     time.sleep(3)
 
     log.info("Deploying Warden Service")
     kubectl_apply_and_wait_for_sts(
-        "warden.yaml", "chardonnay-warden", CHARDONNAY_NAMESPACE
+        "warden.yaml", "atomix-warden", ATOMIX_NAMESPACE
     )
     time.sleep(3)
 
     log.info("Deploying RangeServer")
     kubectl_apply_and_wait_for_sts(
-        "rangeserver.yaml", "chardonnay-rangeserver", CHARDONNAY_NAMESPACE
+        "rangeserver.yaml", "atomix-rangeserver", ATOMIX_NAMESPACE
     )
 
 
