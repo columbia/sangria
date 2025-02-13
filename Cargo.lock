@@ -357,10 +357,12 @@ dependencies = [
  "bytes",
  "common",
  "epoch_reader",
+ "proto",
  "rangeclient",
  "strum",
  "tokio",
  "tokio-util",
+ "tonic",
  "tx_state_store",
  "uuid 1.10.0",
 ]
