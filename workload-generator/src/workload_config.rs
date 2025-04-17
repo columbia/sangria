@@ -1,0 +1,13 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct WorkloadConfig {
+    #[serde(rename = "num-queries")]
+    pub num_queries: u64,
+    #[serde(rename = "num-keys")]
+    pub num_keys: u64,
+    #[serde(rename = "zipf-exponent")]
+    pub zipf_exponent: f64,
+    pub namespace: String,
+    pub name: String,
+}

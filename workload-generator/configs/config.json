@@ -1,0 +1,7 @@
+{
+    "num-queries": 1,
+    "num-keys": 1,
+    "zipf-exponent": 0.5,
+    "namespace": "ddd",
+    "name": "test"
+}
