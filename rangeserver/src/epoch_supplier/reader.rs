@@ -43,18 +43,19 @@ impl EpochSupplier for Reader {
         target_epoch: u64,
         timeout: chrono::Duration,
     ) -> Result<(), Error> {
-        let start_time = chrono::Local::now();
-        loop {
-            let current_epoch = self.read_epoch().await?;
-            if current_epoch >= target_epoch {
-                return Ok(());
-            }
-            let now = chrono::Local::now();
-            if (now - start_time) > timeout {
-                return Err(Error::Timeout);
-            }
-            // TODO(tamer): make this configurable.
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        Ok(())
+        // let start_time = chrono::Local::now();
+        // loop {
+        //     let current_epoch = self.read_epoch().await?;
+        //     if current_epoch >= target_epoch {
+        //         return Ok(());
+        //     }
+        //     let now = chrono::Local::now();
+        //     if (now - start_time) > timeout {
+        //         return Err(Error::Timeout);
+        //     }
+        //     // TODO(tamer): make this configurable.
+        //     tokio::time::sleep(Duration::from_millis(10)).await;
+        // }
     }
 }

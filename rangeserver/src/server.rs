@@ -23,8 +23,8 @@ use crate::range_manager::r#impl::RangeManager;
 use crate::range_manager::RangeManager as RangeManagerTrait;
 use crate::warden_handler::WardenHandler;
 use crate::{
-    epoch_supplier::EpochSupplier, error::Error,
-    for_testing::in_memory_wal::InMemoryWal, storage::Storage,
+    epoch_supplier::EpochSupplier, error::Error, for_testing::in_memory_wal::InMemoryWal,
+    storage::Storage,
 };
 use flatbuf::rangeserver_flatbuffers::range_server::TransactionInfo as FlatbufTransactionInfo;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
@@ -798,6 +798,7 @@ pub mod tests {
         let epoch_config = EpochConfig {
             // Not used in these tests.
             proto_server_addr: "127.0.0.1:50052".parse().unwrap(),
+            epoch_duration: time::Duration::from_millis(10),
         };
         let mut config = Config {
             range_server: RangeServerConfig {

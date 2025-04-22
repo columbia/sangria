@@ -21,7 +21,7 @@
     "epoch": {
         "proto_server_addr": "127.0.0.1:50050",
         "epoch_duration": {
-            "secs":0,
+            "secs": 0,
             "nanos": 10000000
         }
     },

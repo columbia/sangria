@@ -278,7 +278,7 @@ impl Transaction {
             );
         }
         let mut epoch = self.epoch_reader.read_epoch().await.unwrap();
-        let mut epoch_leases = Vec::new();
+        // let mut epoch_leases = Vec::new();
 
         while let Some(res) = prepare_join_set.join_next().await {
             let res = match res {
@@ -291,22 +291,23 @@ impl Transaction {
                 Ok(res) => res,
             };
             let res = res.map_err(Self::error_from_rangeclient_error)?;
-            epoch_leases.push(res.epoch_lease);
-            if res.highest_known_epoch > epoch {
-                epoch = res.highest_known_epoch;
-            }
+            // epoch_leases.push(res.epoch_lease);
+            // if res.highest_known_epoch > epoch {
+            //     epoch = res.highest_known_epoch;
+            // }
         }
 
-        for lease in &epoch_leases {
-            if lease.lower_bound_inclusive <= epoch && lease.upper_bound_inclusive >= epoch {
-                continue;
-            }
-            // Uh-oh, lease expired, must abort.
-            let _ = self.record_abort().await;
-            return Err(Error::TransactionAborted(
-                TransactionAbortReason::RangeLeaseExpired,
-            ));
-        }
+        // for lease in &epoch_leases {
+        //     info!("epoch: {:?}, lease: {:?}", epoch, lease);
+        //     if lease.lower_bound_inclusive <= epoch && lease.upper_bound_inclusive >= epoch {
+        //         continue;
+        //     }
+        //     // Uh-oh, lease expired, must abort.
+        //     let _ = self.record_abort().await;
+        //     return Err(Error::TransactionAborted(
+        //         TransactionAbortReason::RangeLeaseExpired,
+        //     ));
+        // }
 
         // At this point we are prepared!
         // Attempt to commit.

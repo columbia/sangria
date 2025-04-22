@@ -1,6 +1,8 @@
 use common::config::Config;
 use common::region::{Region, Zone};
 use std::process::exit;
+use std::time::Duration;
+use std::thread::sleep;
 use coordinator::keyspace::Keyspace;
 use proto::frontend::frontend_client::FrontendClient;
 use proto::frontend::{
@@ -12,6 +14,7 @@ use workload_generator::workload_config::WorkloadConfig;
 
 use rand::distributions::WeightedIndex;
 use rand::prelude::*;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
 use uuid::Uuid;
@@ -131,16 +134,6 @@ async fn main() {
         },
         name: "a".into(),
     };
-    // let base_key_ranges: Vec<KeyRangeRequest> = (0..generator.keyspace_size)
-    //     .map(|i| KeyRangeRequest {
-    //         lower_bound_inclusive: vec![i.try_into().unwrap()],
-    //         upper_bound_exclusive: vec![(i + 1).try_into().unwrap()],
-    //     })
-    //     .collect();
-    // info!("Base key ranges: {:?}", base_key_ranges);
-    // let transaction = generator.generate_transaction();
-    // info!("Generated transaction: {:?}", transaction);
-    // exit(0);
 
     // Create the keyspace for this experiment
     let response = client
@@ -159,6 +152,7 @@ async fn main() {
         .unwrap();
     let keyspace_id = response.get_ref().keyspace_id.clone();
     info!("Created keyspace with ID: {:?}", keyspace_id);
+    sleep(Duration::from_millis(1000));
 
     let mut handles = vec![];
 
@@ -166,62 +160,59 @@ async fn main() {
             let mut client_clone = client.clone();
             let generator_clone = generator.clone();
         
+            let mut results = HashMap::new();
             let handle = tokio::spawn(async move {
-                    // Start a transaction
-                    let response = client_clone
-                        .start_transaction(StartTransactionRequest {})
-                        .await
-                        .unwrap();
-                    let transaction_id = Uuid::parse_str(&response.get_ref().transaction_id).unwrap();
-                    info!("Started transaction with ID: {:?}", transaction_id);
+                // Start a transaction
+                let response = client_clone
+                    .start_transaction(StartTransactionRequest {})
+                    .await
+                    .unwrap();
+                let transaction_id = Uuid::parse_str(&response.get_ref().transaction_id).unwrap();
+                info!("Started transaction with ID: {:?}", transaction_id);
             
                 // Generate a Transaction
                 let transaction = generator_clone.generate_transaction();
                 info!("Generated transaction: {:?}", transaction);
-
-            // Read the keys in parallel
-            let read_handles = transaction.read_keys.iter().map(|key| {
-                let mut client_clone = client_clone.clone();
-                let transaction_id = transaction_id.clone();
-                let key = key.clone();
-                let keyspace = transaction.keyspace.clone();
-                tokio::spawn(async move {
-                    let _response = client_clone
-                        .get(GetRequest {
-                            transaction_id: transaction_id.to_string(),
-                            keyspace: Some(ProtoKeyspace {
-                                namespace: keyspace.namespace.clone(),
-                                name: keyspace.name.clone(),
-                            }),
-                            key: vec![key as u8],
-                        })
-                        .await
-                        .unwrap();
-                    info!("Read key: {:?}", key);
-                })
-            });
-            for handle in read_handles {
-                handle.await.unwrap();
-            }
-
-            // Write the keys
-            if let Some(write_keys) = &transaction.write_keys {
-                for key in write_keys {
-                    let _response = client_clone
-                        .put(PutRequest {
-                            transaction_id: transaction_id.to_string(),
-                            keyspace: Some(ProtoKeyspace {
-                                namespace: transaction.keyspace.namespace.clone(),
-                                name: transaction.keyspace.name.clone(),
-                            }),
-                            key: vec![*key as u8],
-                            value: vec![100],
-                        })
-                        .await
-                        .unwrap();
-                    info!("Wrote key: {:?}", key);
+            
+                for key in transaction.read_keys {
+                    let response = client_clone
+                    .get(GetRequest {
+                        transaction_id: transaction_id.to_string(),
+                    keyspace: Some(ProtoKeyspace {
+                        namespace: transaction.keyspace.namespace.clone(),
+                        name: transaction.keyspace.name.clone(),
+                    }),
+                    key: vec![key as u8],
+                    })
+                    .await
+                    .unwrap();
+                    info!("Read key: {:?}, value: {:?}", key, response.get_ref().value);
+                    let value_int = match response.get_ref().value.as_ref() {
+                        Some(bytes) => String::from_utf8(bytes.clone()).unwrap().parse::<u64>().unwrap(),
+                        None => 0,
+                    };
+                    results.insert(key, value_int);
                 }
-            }
+
+                // Write the keys
+                if let Some(write_keys) = &transaction.write_keys {
+                    for key in write_keys {
+                        let value = results.get(key).unwrap() + 1;
+                        let _response = client_clone
+                            .put(PutRequest {
+                                transaction_id: transaction_id.to_string(),
+                                keyspace: Some(ProtoKeyspace {
+                                    namespace: transaction.keyspace.namespace.clone(),
+                                    name: transaction.keyspace.name.clone(),
+                                }),
+                                key: vec![*key as u8],
+                                value: value.to_string().as_bytes().to_vec(),
+                            })
+                            .await
+                            .unwrap();
+                        info!("Wrote key: {:?}, value: {:?}", key, value);
+                    }
+                }
 
             // Commit the transaction
             client_clone
