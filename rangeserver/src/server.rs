@@ -16,7 +16,7 @@ use flatbuffers::FlatBufferBuilder;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio_util::sync::CancellationToken;
-
+use tracing::info;
 use uuid::Uuid;
 
 use crate::range_manager::r#impl::RangeManager;
@@ -181,11 +181,15 @@ where
         &self,
         id: &FullRangeId,
     ) -> Result<Arc<RangeManager<S, InMemoryWal>>, Error> {
+        info!("Maybe loading and getting range inner: {:?}", id);
         {
             // Fast path when range has already been loaded.
             let range_table = self.loaded_ranges.read().await;
+            info!("Range table");
             if let Some(r) = (*range_table).get(&id.range_id) {
+                info!("Range already loaded: {:?}", id);
                 r.load().await?;
+                info!("Loaded range: {:?}", id);
                 return Ok(r.clone());
             }
         };
@@ -401,8 +405,11 @@ where
             None => return Err(Error::InvalidRequestFormat),
             Some(id) => util::flatbuf::deserialize_uuid(id),
         };
+        info!("Preparing transaction on range server: {:?}", transaction_id);
         let rm = self.maybe_load_and_get_range(&range_id).await?;
+        info!("Loaded range on range server: {:?}", range_id);
         let tx = self.get_transaction_info(transaction_id).await?;
+        info!("Got transaction info on range server: {:?}", transaction_id);
         rm.prepare(tx.clone(), request).await
     }
 
@@ -412,6 +419,7 @@ where
         sender: SocketAddr,
         request: PrepareRequest<'_>,
     ) -> Result<(), DynamicErr> {
+        info!("Preparing transaction on range server: {:?}", request.range_id());
         let mut fbb = FlatBufferBuilder::new();
         let fbb_root = match request.request_id() {
             None => PrepareResponse::create(
@@ -424,10 +432,11 @@ where
                 },
             ),
             Some(req_id) => {
+                info!("Received prepare request on range server: {:?}", request.range_id());
                 let request_id = util::flatbuf::deserialize_uuid(req_id);
-
+                info!("Deserialized request id: {:?}", request_id);
                 let prepare_result = self.prepare_inner(request).await;
-
+                info!("Prepare result");
                 // Construct the response.
                 let (status, epoch_lease, highest_known_epoch) = match prepare_result {
                     Err(e) => (e.to_flatbuf_status(), None, 0),
@@ -662,6 +671,7 @@ where
                     return
                 }
                 maybe_message = network_receiver.recv() => {
+                    info!("Received message from network");
                     match maybe_message {
                         None => {
                             println!("fast network closed unexpectedly!");

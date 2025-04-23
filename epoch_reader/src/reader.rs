@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, sync::atomic::AtomicU64, sync::atomic::Ordering};
+use std::{collections::HashMap, sync::atomic::AtomicU64, sync::atomic::Ordering, sync::Arc};
 
 use common::{
     config::EpochPublisherSet,

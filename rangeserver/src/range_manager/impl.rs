@@ -22,7 +22,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tonic::async_trait;
-
+use tracing::info;
 struct LoadedState {
     range_info: RangeInfo,
     highest_known_epoch: u64,
@@ -60,6 +60,15 @@ where
     W: Wal,
 {
     async fn load(&self) -> Result<(), Error> {
+        // Fast path for already loaded range so that we don't acquire a write lock.
+        {
+            let state = self.state.read().await;
+            match state.deref() {
+                State::Loaded(_) => return Ok(()),
+                _ => {}
+            }
+        }
+
         let sender = {
             let mut state = self.state.write().await;
             match state.deref_mut() {
@@ -142,14 +151,18 @@ where
     }
 
     async fn get(&self, tx: Arc<TransactionInfo>, key: Bytes) -> Result<GetResult, Error> {
-        let s = self.state.write().await;
+        let s = self.state.read().await;
+
         match s.deref() {
             State::NotLoaded | State::Unloaded | State::Loading(_) => Err(Error::RangeIsNotLoaded),
             State::Loaded(state) => {
+                drop(&s);
                 if !state.range_info.key_range.includes(key.clone()) {
                     return Err(Error::KeyIsOutOfRange);
                 };
+                // info!("Acquiring range lock: {:?} for transaction: {:?}", key, tx.id);
                 self.acquire_range_lock(state, tx.clone()).await?;
+                // info!("Acquired range lock: {:?} for transaction: {:?}  ", key, tx.id);
 
                 let mut get_result = GetResult {
                     val: None,
@@ -184,12 +197,15 @@ where
         tx: Arc<TransactionInfo>,
         prepare: PrepareRequest<'_>,
     ) -> Result<PrepareResult, Error> {
-        let s = self.state.write().await;
+        info!("Preparing transaction on range manager: {:?}", tx.id);
+        let s = self.state.read().await;
         match s.deref() {
             State::NotLoaded | State::Unloaded | State::Loading(_) => {
                 return Err(Error::RangeIsNotLoaded)
             }
             State::Loaded(state) => {
+                drop(&s);
+                info!("Preparing transaction: {:?}", tx.id);
                 // Sanity check that the written keys are all within this range.
                 // TODO: check delete and write sets are non-overlapping.
                 for put in prepare.puts().iter() {
@@ -214,25 +230,30 @@ where
                 {
                     let lock_table = state.lock_table.lock().await;
                     if prepare.has_reads() && !lock_table.is_currently_holding(tx.clone()) {
+                        info!("Transaction lock lost: {:?}", tx.id);
                         return Err(Error::TransactionAborted(
                             TransactionAbortReason::TransactionLockLost,
                         ));
                     }
                 };
+                info!("Acquiring range lock: {:?} second time", tx.id);
                 self.acquire_range_lock(state, tx.clone()).await?;
-
+                info!("Acquired range lock: {:?} second time", tx.id);
                 {
                     // TODO: probably don't need holding that latch while writing to the WAL.
                     // but needs careful thinking.
                     let mut pending_prepare_records = state.pending_prepare_records.lock().await;
+                    info!("Appending prepare record for transaction: {:?}", tx.id);
                     self.wal
                         .append_prepare(prepare)
                         .await
                         .map_err(Error::from_wal_error)?;
 
+                    info!("Inserting prepare record for transaction: {:?}", tx.id);
                     pending_prepare_records
                         .insert(tx.id, Bytes::copy_from_slice(prepare._tab.buf()));
                 }
+                info!("Prepared transaction: {:?}", tx.id);
 
                 Ok(PrepareResult {
                     highest_known_epoch: state.highest_known_epoch,
@@ -249,9 +270,12 @@ where
                 return Err(Error::RangeIsNotLoaded)
             }
             State::Loaded(state) => {
-                let mut lock_table = state.lock_table.lock().await;
-                if !lock_table.is_currently_holding(tx.clone()) {
-                    return Ok(());
+                drop(&s);
+                {
+                    let mut lock_table = state.lock_table.lock().await;
+                    if !lock_table.is_currently_holding(tx.clone()) {
+                        return Ok(());
+                    }
                 }
                 {
                     // TODO: We can skip aborting to the log if we never appended a prepare record.
@@ -262,7 +286,10 @@ where
                         .await
                         .map_err(Error::from_wal_error)?;
                 }
-                lock_table.release();
+                {
+                    let mut lock_table = state.lock_table.lock().await;
+                    lock_table.release();
+                }
 
                 let _ = self
                     .prefetching_buffer
@@ -278,17 +305,20 @@ where
         tx: Arc<TransactionInfo>,
         commit: CommitRequest<'_>,
     ) -> Result<(), Error> {
-        let mut s = self.state.write().await;
-        match s.deref_mut() {
+        let mut s = self.state.read().await;
+        match s.deref() {
             State::NotLoaded | State::Unloaded | State::Loading(_) => {
                 return Err(Error::RangeIsNotLoaded)
             }
             State::Loaded(state) => {
-                let mut lock_table = state.lock_table.lock().await;
-                if !lock_table.is_currently_holding(tx.clone()) {
-                    // it must be that we already finished committing, but perhaps the coordinator didn't
-                    // realize that, so we just return success.
-                    return Ok(());
+                info!("Committing transaction: {:?}", tx.id);
+                {
+                    let mut lock_table = state.lock_table.lock().await;
+                    if !lock_table.is_currently_holding(tx.clone()) {
+                        // it must be that we already finished committing, but perhaps the coordinator didn't
+                        // realize that, so we just return success.
+                        return Ok(());
+                    }
                 }
                 state.highest_known_epoch =
                     std::cmp::max(state.highest_known_epoch, commit.epoch());
@@ -328,8 +358,8 @@ where
                             .await
                             .map_err(Error::from_storage_error)?;
 
-                        // Update the prefetch buffer if this key has been requested by a prefetch call
-                        self.prefetching_buffer.upsert(key, val).await;
+                        // // Update the prefetch buffer if this key has been requested by a prefetch call
+                        // self.prefetching_buffer.upsert(key, val).await;
                     }
                 }
                 for del in prepare_record.deletes().iter() {
@@ -342,19 +372,24 @@ where
                             .await
                             .map_err(Error::from_storage_error)?;
 
-                        // Delete the key from the prefetch buffer if this key has been requested by a prefetch call
-                        self.prefetching_buffer.delete(key).await;
+                        // // Delete the key from the prefetch buffer if this key has been requested by a prefetch call
+                        // self.prefetching_buffer.delete(key).await;
                     }
                 }
 
                 // We apply the writes to storage before releasing the lock since we send all
                 // gets to storage directly. We should implement a memtable to allow us to release
                 // the lock sooner.
-                lock_table.release();
-                // Process transaction complete and remove the requests from the logs
-                self.prefetching_buffer
-                    .process_transaction_complete(tx.id)
-                    .await;
+                info!("Releasing range lock: {:?}", tx.id);
+                {
+                    let mut lock_table = state.lock_table.lock().await;
+                    lock_table.release();
+                }
+                info!("Released range lock: {:?}", tx.id);
+                // // Process transaction complete and remove the requests from the logs
+                // self.prefetching_buffer
+                //     .process_transaction_complete(tx.id)
+                //     .await;
                 Ok(())
             }
         }
@@ -520,6 +555,7 @@ where
     ) -> Result<(), Error> {
         let mut lock_table = state.lock_table.lock().await;
         let receiver = lock_table.acquire(tx.clone())?;
+        drop(lock_table);
         // TODO: allow timing out locks when transaction timeouts are implemented.
         receiver.await.unwrap();
         Ok(())

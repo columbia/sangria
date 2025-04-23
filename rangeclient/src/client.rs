@@ -21,7 +21,7 @@ use tokio_util::sync::CancellationToken;
 use tonic::transport::Channel;
 use tonic::Request;
 use uuid::Uuid;
-
+use tracing::info;
 pub type Error = RangeServerError;
 pub struct PrepareOk {
     pub highest_known_epoch: u64,
@@ -256,6 +256,7 @@ impl RangeClient {
             MessageType::Prepare,
             prepare_request_bytes,
         );
+        info!("Sending prepare request to range server: {:?}", range_id);
         self.fast_network
             .send(
                 self.range_server_info.address,

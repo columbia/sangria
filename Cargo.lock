@@ -363,6 +363,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tonic",
+ "tracing",
  "tx_state_store",
  "uuid 1.10.0",
 ]
@@ -1374,6 +1375,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tonic",
+ "tracing",
  "uuid 1.10.0",
 ]
 
