@@ -59,12 +59,11 @@ where
     W: Wal,
 {
     async fn load(&self) -> Result<(), Error> {
-
         //  Fast path not acquiring write lock for when range is already loaded for
         if let State::Loaded(_) = self.state.read().await.deref() {
             return Ok(());
         }
-        
+
         let sender = {
             let mut state = self.state.write().await;
             match state.deref_mut() {
@@ -151,16 +150,29 @@ where
         match s.deref() {
             State::NotLoaded | State::Unloaded | State::Loading(_) => Err(Error::RangeIsNotLoaded),
             State::Loaded(state) => {
-                if !state.range_info.read().await.key_range.includes(key.clone()) {
+                if !state
+                    .range_info
+                    .read()
+                    .await
+                    .key_range
+                    .includes(key.clone())
+                {
                     return Err(Error::KeyIsOutOfRange);
                 };
-                info!("Acquiring range lock: {:?} for transaction: {:?}", key, tx.id);
+                info!(
+                    "Acquiring range lock: {:?} for transaction: {:?}",
+                    key, tx.id
+                );
                 self.acquire_range_lock(state, tx.clone()).await?;
-                info!("Acquired range lock: {:?} for transaction: {:?}  ", key, tx.id);
+                info!(
+                    "Acquired range lock: {:?} for transaction: {:?}  ",
+                    key, tx.id
+                );
 
                 let mut get_result = GetResult {
                     val: None,
-                    leader_sequence_number: state.range_info.read().await.leader_sequence_number as i64,
+                    leader_sequence_number: state.range_info.read().await.leader_sequence_number
+                        as i64,
                 };
 
                 // check prefetch buffer
@@ -434,7 +446,7 @@ where
                     .read_epoch()
                     .await
                     .map_err(Error::from_epoch_supplier_error)?;
-                let mut range_info =  storage
+                let mut range_info = storage
                     .take_ownership_and_load_range(range_id)
                     .await
                     .map_err(Error::from_storage_error)?;

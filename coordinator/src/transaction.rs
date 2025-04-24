@@ -4,6 +4,11 @@ use std::{
     sync::Arc,
 };
 
+use crate::{
+    error::{Error, TransactionAbortReason},
+    keyspace::Keyspace,
+    rangeclient::RangeClient,
+};
 use bytes::Bytes;
 use common::{
     constants, full_range_id::FullRangeId, keyspace_id::KeyspaceId,
@@ -17,15 +22,10 @@ use proto::universe::{
     Keyspace as ProtoKeyspace,
 };
 use tokio::task::JoinSet;
-use uuid::Uuid;
 use tracing::info;
-use crate::{
-    error::{Error, TransactionAbortReason},
-    keyspace::Keyspace,
-    rangeclient::RangeClient,
-};
 use tx_state_store::client::Client as TxStateStoreClient;
 use tx_state_store::client::OpResult;
+use uuid::Uuid;
 
 enum State {
     Running,
@@ -147,7 +147,10 @@ impl Transaction {
             return Ok(None);
         }
         // TODO(tamer): errors.
-        info!("Getting value from range client: {:?}", full_record_key.range_id);
+        info!(
+            "Getting value from range client: {:?}",
+            full_record_key.range_id
+        );
         let get_result = self
             .range_client
             .get(

@@ -405,7 +405,10 @@ where
             None => return Err(Error::InvalidRequestFormat),
             Some(id) => util::flatbuf::deserialize_uuid(id),
         };
-        info!("Preparing transaction on range server: {:?}", transaction_id);
+        info!(
+            "Preparing transaction on range server: {:?}",
+            transaction_id
+        );
         let rm = self.maybe_load_and_get_range(&range_id).await?;
         info!("Loaded range on range server: {:?}", range_id);
         let tx = self.get_transaction_info(transaction_id).await?;
@@ -419,7 +422,10 @@ where
         sender: SocketAddr,
         request: PrepareRequest<'_>,
     ) -> Result<(), DynamicErr> {
-        info!("Preparing transaction on range server: {:?}", request.range_id());
+        info!(
+            "Preparing transaction on range server: {:?}",
+            request.range_id()
+        );
         let mut fbb = FlatBufferBuilder::new();
         let fbb_root = match request.request_id() {
             None => PrepareResponse::create(
@@ -432,7 +438,10 @@ where
                 },
             ),
             Some(req_id) => {
-                info!("Received prepare request on range server: {:?}", request.range_id());
+                info!(
+                    "Received prepare request on range server: {:?}",
+                    request.range_id()
+                );
                 let request_id = util::flatbuf::deserialize_uuid(req_id);
                 info!("Deserialized request id: {:?}", request_id);
                 let prepare_result = self.prepare_inner(request).await;
