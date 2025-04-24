@@ -19,16 +19,15 @@ use std::collections::HashMap;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tonic::async_trait;
 use tracing::info;
 struct LoadedState {
-    range_info: RangeInfo,
-    highest_known_epoch: u64,
-    lock_table: Mutex<lock_table::LockTable>,
+    range_info: RwLock<RangeInfo>,
+    // highest_known_epoch: RwLock<u64>,
+    lock_table: RwLock<lock_table::LockTable>,
     // TODO: need more efficient representation of prepares than raw bytes.
-    pending_prepare_records: Mutex<HashMap<Uuid, Bytes>>,
+    pending_prepare_records: RwLock<HashMap<Uuid, Bytes>>,
 }
 
 enum State {
@@ -60,15 +59,12 @@ where
     W: Wal,
 {
     async fn load(&self) -> Result<(), Error> {
-        // Fast path for already loaded range so that we don't acquire a write lock.
-        {
-            let state = self.state.read().await;
-            match state.deref() {
-                State::Loaded(_) => return Ok(()),
-                _ => {}
-            }
-        }
 
+        //  Fast path not acquiring write lock for when range is already loaded for
+        if let State::Loaded(_) = self.state.read().await.deref() {
+            return Ok(());
+        }
+        
         let sender = {
             let mut state = self.state.write().await;
             match state.deref_mut() {
@@ -152,12 +148,10 @@ where
 
     async fn get(&self, tx: Arc<TransactionInfo>, key: Bytes) -> Result<GetResult, Error> {
         let s = self.state.read().await;
-
         match s.deref() {
             State::NotLoaded | State::Unloaded | State::Loading(_) => Err(Error::RangeIsNotLoaded),
             State::Loaded(state) => {
-                drop(&s);
-                if !state.range_info.key_range.includes(key.clone()) {
+                if !state.range_info.read().await.key_range.includes(key.clone()) {
                     return Err(Error::KeyIsOutOfRange);
                 };
                 // info!("Acquiring range lock: {:?} for transaction: {:?}", key, tx.id);
@@ -166,7 +160,7 @@ where
 
                 let mut get_result = GetResult {
                     val: None,
-                    leader_sequence_number: state.range_info.leader_sequence_number as i64,
+                    leader_sequence_number: state.range_info.read().await.leader_sequence_number as i64,
                 };
 
                 // check prefetch buffer
@@ -197,22 +191,20 @@ where
         tx: Arc<TransactionInfo>,
         prepare: PrepareRequest<'_>,
     ) -> Result<PrepareResult, Error> {
-        info!("Preparing transaction on range manager: {:?}", tx.id);
         let s = self.state.read().await;
         match s.deref() {
             State::NotLoaded | State::Unloaded | State::Loading(_) => {
                 return Err(Error::RangeIsNotLoaded)
             }
             State::Loaded(state) => {
-                drop(&s);
-                info!("Preparing transaction: {:?}", tx.id);
+                let range_info = state.range_info.read().await;
                 // Sanity check that the written keys are all within this range.
                 // TODO: check delete and write sets are non-overlapping.
                 for put in prepare.puts().iter() {
                     for put in put.iter() {
                         // TODO: too much copying :(
                         let key = Bytes::copy_from_slice(put.key().unwrap().k().unwrap().bytes());
-                        if !state.range_info.key_range.includes(key) {
+                        if !range_info.key_range.includes(key) {
                             return Err(Error::KeyIsOutOfRange);
                         }
                     }
@@ -220,7 +212,7 @@ where
                 for del in prepare.deletes().iter() {
                     for del in del.iter() {
                         let key = Bytes::copy_from_slice(del.k().unwrap().bytes());
-                        if !state.range_info.key_range.includes(key) {
+                        if !range_info.key_range.includes(key) {
                             return Err(Error::KeyIsOutOfRange);
                         }
                     }
@@ -228,7 +220,7 @@ where
                 // Validate the transaction lock is not lost, this is essential to ensure 2PL
                 // invariants still hold.
                 {
-                    let lock_table = state.lock_table.lock().await;
+                    let lock_table = state.lock_table.read().await;
                     if prepare.has_reads() && !lock_table.is_currently_holding(tx.clone()) {
                         info!("Transaction lock lost: {:?}", tx.id);
                         return Err(Error::TransactionAborted(
@@ -242,8 +234,8 @@ where
                 {
                     // TODO: probably don't need holding that latch while writing to the WAL.
                     // but needs careful thinking.
-                    let mut pending_prepare_records = state.pending_prepare_records.lock().await;
-                    info!("Appending prepare record for transaction: {:?}", tx.id);
+                    // TODO(kelly): at this point the TX is holding the range lock, so there should be no race condition for the prepare record???!
+                    let mut pending_prepare_records = state.pending_prepare_records.write().await;
                     self.wal
                         .append_prepare(prepare)
                         .await
@@ -253,26 +245,28 @@ where
                     pending_prepare_records
                         .insert(tx.id, Bytes::copy_from_slice(prepare._tab.buf()));
                 }
-                info!("Prepared transaction: {:?}", tx.id);
+                let (highest_known_epoch, epoch_lease) = {
+                    let range_info = state.range_info.read().await;
+                    (range_info.highest_known_epoch, range_info.epoch_lease)
+                };
 
                 Ok(PrepareResult {
-                    highest_known_epoch: state.highest_known_epoch,
-                    epoch_lease: state.range_info.epoch_lease,
+                    highest_known_epoch,
+                    epoch_lease,
                 })
             }
         }
     }
 
     async fn abort(&self, tx: Arc<TransactionInfo>, abort: AbortRequest<'_>) -> Result<(), Error> {
-        let s = self.state.write().await;
+        let s = self.state.read().await;
         match s.deref() {
             State::NotLoaded | State::Unloaded | State::Loading(_) => {
                 return Err(Error::RangeIsNotLoaded)
             }
             State::Loaded(state) => {
-                drop(&s);
                 {
-                    let mut lock_table = state.lock_table.lock().await;
+                    let lock_table = state.lock_table.read().await;
                     if !lock_table.is_currently_holding(tx.clone()) {
                         return Ok(());
                     }
@@ -287,7 +281,7 @@ where
                         .map_err(Error::from_wal_error)?;
                 }
                 {
-                    let mut lock_table = state.lock_table.lock().await;
+                    let mut lock_table = state.lock_table.write().await;
                     lock_table.release();
                 }
 
@@ -313,22 +307,25 @@ where
             State::Loaded(state) => {
                 info!("Committing transaction: {:?}", tx.id);
                 {
-                    let mut lock_table = state.lock_table.lock().await;
+                    let lock_table = state.lock_table.read().await;
                     if !lock_table.is_currently_holding(tx.clone()) {
                         // it must be that we already finished committing, but perhaps the coordinator didn't
                         // realize that, so we just return success.
                         return Ok(());
                     }
                 }
-                state.highest_known_epoch =
-                    std::cmp::max(state.highest_known_epoch, commit.epoch());
+                {
+                    let mut range_info = state.range_info.write().await;
+                    range_info.highest_known_epoch =
+                        std::cmp::max(range_info.highest_known_epoch, commit.epoch());
+                }
                 // TODO: handle potential duplicates here.
                 self.wal
                     .append_commit(commit)
                     .await
                     .map_err(Error::from_wal_error)?;
                 let prepare_record_bytes = {
-                    let mut pending_prepare_records = state.pending_prepare_records.lock().await;
+                    let mut pending_prepare_records = state.pending_prepare_records.write().await;
                     // TODO: handle prior removals.
                     pending_prepare_records.remove(&tx.id).unwrap().clone()
                 };
@@ -382,14 +379,14 @@ where
                 // the lock sooner.
                 info!("Releasing range lock: {:?}", tx.id);
                 {
-                    let mut lock_table = state.lock_table.lock().await;
+                    let mut lock_table = state.lock_table.write().await;
                     lock_table.release();
                 }
                 info!("Released range lock: {:?}", tx.id);
-                // // Process transaction complete and remove the requests from the logs
-                // self.prefetching_buffer
-                //     .process_transaction_complete(tx.id)
-                //     .await;
+                // Process transaction complete and remove the requests from the logs
+                self.prefetching_buffer
+                    .process_transaction_complete(tx.id)
+                    .await;
                 Ok(())
             }
         }
@@ -437,7 +434,7 @@ where
                     .read_epoch()
                     .await
                     .map_err(Error::from_epoch_supplier_error)?;
-                let mut range_info = storage
+                let mut range_info =  storage
                     .take_ownership_and_load_range(range_id)
                     .await
                     .map_err(Error::from_storage_error)?;
@@ -462,6 +459,7 @@ where
                     .await
                     .map_err(Error::from_storage_error)?;
                 range_info.epoch_lease = (new_epoch_lease_lower_bound, new_epoch_lease_upper_bound);
+                range_info.highest_known_epoch = highest_known_epoch;
                 wal.sync().await.map_err(Error::from_wal_error)?;
                 // // Create a recurrent task to renew.
                 // bg_runtime.spawn(async move {
@@ -476,10 +474,9 @@ where
                 // });
                 // TODO: apply WAL here!
                 Ok(LoadedState {
-                    range_info,
-                    highest_known_epoch,
-                    lock_table: Mutex::new(lock_table::LockTable::new()),
-                    pending_prepare_records: Mutex::new(HashMap::new()),
+                    range_info: RwLock::new(range_info),
+                    lock_table: RwLock::new(lock_table::LockTable::new()),
+                    pending_prepare_records: RwLock::new(HashMap::new()),
                 })
             })
             .await
@@ -502,8 +499,9 @@ where
                 .map_err(Error::from_epoch_supplier_error)?;
             let highest_known_epoch = epoch + 1;
             if let State::Loaded(state) = state.read().await.deref() {
-                old_lease = state.range_info.epoch_lease;
-                leader_sequence_number = state.range_info.leader_sequence_number;
+                let range_info = state.range_info.read().await;
+                old_lease = range_info.epoch_lease;
+                leader_sequence_number = range_info.leader_sequence_number;
             } else {
                 tokio::time::sleep(lease_renewal_interval).await;
                 continue;
@@ -531,15 +529,16 @@ where
             if (new_epoch_lease_lower_bound - old_lease.1) == 1 {
                 new_lease = (old_lease.0, new_epoch_lease_upper_bound);
             }
-            if let State::Loaded(state) = state.write().await.deref_mut() {
+            if let State::Loaded(state) = state.read().await.deref() {
+                let mut range_info = state.range_info.write().await;
                 // This should never happen as only this task changes the epoch lease.
                 assert_eq!(
-                    state.range_info.epoch_lease, old_lease,
+                    range_info.epoch_lease, old_lease,
                     "Epoch lease changed by someone else, but only this task should be changing it!"
                 );
-                state.range_info.epoch_lease = new_lease;
-                state.highest_known_epoch =
-                    std::cmp::max(state.highest_known_epoch, highest_known_epoch);
+                range_info.epoch_lease = new_lease;
+                range_info.highest_known_epoch =
+                    std::cmp::max(range_info.highest_known_epoch, highest_known_epoch);
             } else {
                 return Err(Error::RangeIsNotLoaded);
             }
@@ -553,7 +552,7 @@ where
         state: &LoadedState,
         tx: Arc<TransactionInfo>,
     ) -> Result<(), Error> {
-        let mut lock_table = state.lock_table.lock().await;
+        let mut lock_table = state.lock_table.write().await;
         let receiver = lock_table.acquire(tx.clone())?;
         drop(lock_table);
         // TODO: allow timing out locks when transaction timeouts are implemented.
