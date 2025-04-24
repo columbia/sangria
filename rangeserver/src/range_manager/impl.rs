@@ -154,9 +154,9 @@ where
                 if !state.range_info.read().await.key_range.includes(key.clone()) {
                     return Err(Error::KeyIsOutOfRange);
                 };
-                // info!("Acquiring range lock: {:?} for transaction: {:?}", key, tx.id);
+                info!("Acquiring range lock: {:?} for transaction: {:?}", key, tx.id);
                 self.acquire_range_lock(state, tx.clone()).await?;
-                // info!("Acquired range lock: {:?} for transaction: {:?}  ", key, tx.id);
+                info!("Acquired range lock: {:?} for transaction: {:?}  ", key, tx.id);
 
                 let mut get_result = GetResult {
                     val: None,
