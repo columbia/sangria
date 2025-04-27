@@ -10,4 +10,6 @@ pub struct WorkloadConfig {
     pub zipf_exponent: f64,
     pub namespace: String,
     pub name: String,
+    #[serde(rename = "max-concurrency")]
+    pub max_concurrency: u64,
 }

@@ -1,237 +1,44 @@
 use common::config::Config;
-use common::region::{Region, Zone};
-use coordinator::keyspace::Keyspace;
 use proto::frontend::frontend_client::FrontendClient;
-use proto::frontend::{
-    CommitRequest, GetRequest, Keyspace as ProtoKeyspace, PutRequest, StartTransactionRequest,
-};
-use proto::universe::{CreateKeyspaceRequest, KeyRangeRequest, Zone as ProtoZone};
-use std::process::exit;
-use std::thread::sleep;
-use std::time::Duration;
-
-use workload_generator::workload_config::WorkloadConfig;
-
-use rand::distributions::WeightedIndex;
-use rand::prelude::*;
-use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::runtime::{Builder, Handle};
 use tracing::info;
-use uuid::Uuid;
+use workload_generator::{workload_config::WorkloadConfig, workload_generator::WorkloadGenerator};
 
-#[derive(Debug)]
-pub struct Transaction {
-    keyspace: Keyspace,
-    read_keys: Vec<usize>,
-    write_keys: Option<Vec<usize>>,
-}
-
-pub struct WorkloadGenerator {
-    keyspace_size: u64,
-    zipf_exponent: f64,
-    namespace: String,
-    name: String,
-    num_queries: u64,
-}
-
-impl WorkloadGenerator {
-    pub fn new(
-        keyspace_size: u64,
-        zipf_exponent: f64,
-        namespace: String,
-        name: String,
-        num_queries: u64,
-    ) -> Self {
-        Self {
-            keyspace_size,
-            zipf_exponent,
-            namespace,
-            name,
-            num_queries,
-        }
-    }
-
-    fn zipf_sample_without_replacement(&self, sample_count: usize) -> Vec<usize> {
-        // Step 1: Build weights using Zipf formula: weight ∝ 1 / rank^s
-        let mut weights: Vec<f64> = (1..=self.keyspace_size)
-            .map(|rank| 1.0 / (rank as f64).powf(self.zipf_exponent))
-            .collect();
-
-        // Step 2: Normalize weights
-        let total_weight: f64 = weights.iter().sum();
-        for w in weights.iter_mut() {
-            *w /= total_weight;
-        }
-
-        // Step 3: Sample without replacement
-        let mut chosen_keys = Vec::with_capacity(sample_count);
-        let mut available_keys: Vec<usize> = (0..self.keyspace_size as usize).collect();
-
-        for _ in 0..sample_count {
-            if available_keys.is_empty() || weights.is_empty() {
-                break;
-            }
-            let dist = WeightedIndex::new(&weights).unwrap();
-            let idx = dist.sample(&mut thread_rng());
-            chosen_keys.push(available_keys[idx]);
-
-            // Remove selected item and its weight
-            available_keys.remove(idx);
-            weights.remove(idx);
-        }
-
-        chosen_keys
-    }
-
-    pub fn generate_transaction(&self) -> Transaction {
-        //  sample num_keys uniformly from {1, 2}
-        let num_keys = thread_rng().gen_range(1..3);
-        let keys = self.zipf_sample_without_replacement(num_keys);
-        Transaction {
-            keyspace: Keyspace {
-                namespace: self.namespace.clone(),
-                name: self.name.clone(),
-            },
-            read_keys: keys.clone(),
-            write_keys: if thread_rng().gen_bool(1.0) {
-                Some(keys)
-            } else {
-                None
-            },
-        }
-    }
-}
-
-#[tokio::main]
-async fn main() {
-    tracing_subscriber::fmt::init();
+async fn run_workload(runtime_handle: Handle) {
     let config: Config =
         serde_json::from_str(&std::fs::read_to_string("config.json").unwrap()).unwrap();
-
     let workload_config: WorkloadConfig = serde_json::from_str(
         &std::fs::read_to_string("workload-generator/configs/config.json").unwrap(),
     )
     .unwrap();
     info!("Workload config: {:?}", workload_config);
-
-    let generator = Arc::new(WorkloadGenerator::new(
-        workload_config.num_keys,
-        workload_config.zipf_exponent,
-        workload_config.namespace.clone(),
-        workload_config.name.clone(),
-        workload_config.num_queries,
-    ));
-
     let frontend_addr = config.frontend.proto_server_addr.to_string();
     let mut client = FrontendClient::connect(format!("http://{}", frontend_addr))
         .await
         .unwrap();
 
-    let zone = Zone {
-        region: Region {
-            cloud: None,
-            name: "test-region".into(),
-        },
-        name: "a".into(),
-    };
+    let workload_generator = Arc::new(WorkloadGenerator::new(workload_config, client));
+    // generator.create_keyspace(&mut client).await;
 
-    // // Create the keyspace for this experiment
-    // let response = client
-    //     .create_keyspace(CreateKeyspaceRequest {
-    //         namespace: generator.namespace.clone(),
-    //         name: generator.name.clone(),
-    //         primary_zone: Some(ProtoZone::from(zone)),
-    //         base_key_ranges: (0..generator.keyspace_size)
-    //             .map(|i| KeyRangeRequest {
-    //                 lower_bound_inclusive: vec![i.try_into().unwrap()],
-    //                 upper_bound_exclusive: vec![(i + 1).try_into().unwrap()],
-    //             })
-    //             .collect(),
-    //     })
-    //     .await
-    //     .unwrap();
-    // let keyspace_id = response.get_ref().keyspace_id.clone();
-    // info!("Created keyspace with ID: {:?}", keyspace_id);
-    // sleep(Duration::from_millis(1000));
+    let workload_generator_clone = workload_generator.clone();
+    let runtime_handle_clone = runtime_handle.clone();
+    let workload_handle = runtime_handle.spawn(async move {
+        workload_generator_clone.run(runtime_handle_clone).await;
+    });
+    workload_handle.await.unwrap();
+    info!("Workload generator finished");
+}
 
-    let mut handles = vec![];
+fn main() {
+    tracing_subscriber::fmt::init();
 
-    for _ in 0..generator.num_queries {
-        let mut client_clone = client.clone();
-        let generator_clone = generator.clone();
-
-        let mut results = HashMap::new();
-        let handle = tokio::spawn(async move {
-            // Start a transaction
-            let response = client_clone
-                .start_transaction(StartTransactionRequest {})
-                .await
-                .unwrap();
-            let transaction_id = Uuid::parse_str(&response.get_ref().transaction_id).unwrap();
-            info!("Started transaction with ID: {:?}", transaction_id);
-
-            // Generate a Transaction
-            let transaction = generator_clone.generate_transaction();
-            info!("Generated transaction: {:?}", transaction);
-
-            for key in transaction.read_keys {
-                let response = client_clone
-                    .get(GetRequest {
-                        transaction_id: transaction_id.to_string(),
-                        keyspace: Some(ProtoKeyspace {
-                            namespace: transaction.keyspace.namespace.clone(),
-                            name: transaction.keyspace.name.clone(),
-                        }),
-                        key: vec![key as u8],
-                    })
-                    .await
-                    .unwrap();
-                info!("Read key: {:?}, value: {:?}", key, response.get_ref().value);
-                let value_int = match response.get_ref().value.as_ref() {
-                    Some(bytes) => String::from_utf8(bytes.clone())
-                        .unwrap()
-                        .parse::<u64>()
-                        .unwrap(),
-                    None => 0,
-                };
-                results.insert(key, value_int);
-            }
-
-            // Write the keys
-            if let Some(write_keys) = &transaction.write_keys {
-                for key in write_keys {
-                    let value = results.get(key).unwrap() + 1;
-                    let _response = client_clone
-                        .put(PutRequest {
-                            transaction_id: transaction_id.to_string(),
-                            keyspace: Some(ProtoKeyspace {
-                                namespace: transaction.keyspace.namespace.clone(),
-                                name: transaction.keyspace.name.clone(),
-                            }),
-                            key: vec![*key as u8],
-                            value: value.to_string().as_bytes().to_vec(),
-                        })
-                        .await
-                        .unwrap();
-                    info!("Wrote key: {:?}, value: {:?}", key, value);
-                }
-            }
-
-            // Commit the transaction
-            client_clone
-                .commit(CommitRequest {
-                    transaction_id: transaction_id.to_string(),
-                })
-                .await
-                .unwrap();
-            info!("Committed transaction");
-        });
-
-        handles.push(handle);
-    }
-
-    // Wait for all tasks to complete
-    for handle in handles {
-        handle.await.unwrap();
-    }
+    let num_threads = num_cpus::get();
+    let runtime = Builder::new_multi_thread()
+        .worker_threads(num_threads)
+        .enable_all()
+        .build()
+        .unwrap();
+    let runtime_handle = runtime.handle().clone();
+    runtime.block_on(async move { run_workload(runtime_handle).await });
 }

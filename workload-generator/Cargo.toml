@@ -7,6 +7,7 @@ edition = "2021"
 common = {path = "../common"}
 proto = {path = "../proto"}
 coordinator = { version = "0.1.0", path = "../coordinator"}
+frontend = { version = "0.1.0", path = "../frontend"}
 universe = { version = "0.1.0", path = "../universe"}
 rand = "0.8"
 tokio = { version = "1", features = ["full"] }
@@ -18,3 +19,7 @@ tracing-subscriber = "0.3.18"
 tracing = "0.1.40"
 bytes = "1.7.2"
 uuid = "1.10.0"
+tonic = "0.11.0"
+num_cpus = "1.16"
+futures = "0.3"
+
