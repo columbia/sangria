@@ -9,7 +9,7 @@ use common::{
 use rangeclient::client::{Error, GetResult, PrepareOk, RangeClient as Client};
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+
 /// RangeClient abstracts away the individual rangeservers and allows users
 /// to reach any range just by using the range id.
 pub struct RangeClient {
@@ -59,7 +59,6 @@ impl RangeClient {
         deletes: &[Bytes],
     ) -> Result<PrepareOk, Error> {
         let client = self.get_range_client(range_id).await?;
-        info!("Preparing transaction on range client: {:?}", range_id);
         client
             .prepare_transaction(tx, range_id, has_reads, writes, deletes)
             .await

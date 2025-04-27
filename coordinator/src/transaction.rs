@@ -147,10 +147,6 @@ impl Transaction {
             return Ok(None);
         }
         // TODO(tamer): errors.
-        info!(
-            "Getting value from range client: {:?}",
-            full_record_key.range_id
-        );
         let get_result = self
             .range_client
             .get(
@@ -268,7 +264,6 @@ impl Transaction {
             let deletes: Vec<Bytes> = info.deleteset.iter().cloned().collect();
             prepare_join_set.spawn_on(
                 async move {
-                    info!("Preparing transaction: {:?}", range_id);
                     range_client
                         .prepare_transaction(
                             transaction_info,
@@ -285,7 +280,6 @@ impl Transaction {
         let mut epoch = self.epoch_reader.read_epoch().await.unwrap();
         // let mut epoch_leases = Vec::new();
 
-        info!("Waiting for prepare to finish");
         while let Some(res) = prepare_join_set.join_next().await {
             let res = match res {
                 Err(_) => {
@@ -317,7 +311,6 @@ impl Transaction {
 
         // At this point we are prepared!
         // Attempt to commit.
-        info!("Attempting to commit transaction");
         match self
             .tx_state_store
             .try_commit_transaction(self.id, epoch)

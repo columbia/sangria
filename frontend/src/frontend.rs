@@ -27,7 +27,7 @@ use proto::universe::{CreateKeyspaceRequest, CreateKeyspaceResponse};
 
 use crate::range_assignment_oracle::RangeAssignmentOracle;
 use chrono::Utc;
-use tracing::info;
+
 #[derive(Clone)]
 struct ProtoServer {
     parent_server: Arc<Server>,
@@ -144,7 +144,6 @@ impl Frontend for ProtoServer {
         let key = bytes::Bytes::copy_from_slice(&req.key);
 
         // Get the transaction
-        info!("Getting transaction: {:?}", transaction_id);
         let transaction = {
             let tx_table = self.parent_server.transaction_table.read().await;
             tx_table
@@ -154,13 +153,12 @@ impl Frontend for ProtoServer {
         };
 
         let result = {
-            info!("Getting value from transaction: {:?}", transaction_id);
             let mut tx = transaction.lock().await;
             tx.get(&keyspace, key)
                 .await
                 .map_err(|e| TStatus::internal(format!("Get operation failed: {:?}", e)))?
         };
-        info!("Got value from transaction: {:?}", result);
+
         Ok(Response::new(GetResponse {
             status: "Get request processed successfully".to_string(),
             value: result.map(|v| v.to_vec()),

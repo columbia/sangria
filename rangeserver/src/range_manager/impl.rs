@@ -22,7 +22,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tonic::async_trait;
-use tracing::info;
+
 struct LoadedState {
     range_info: RangeInfo,
     highest_known_epoch: HighestKnownEpoch,
@@ -173,15 +173,7 @@ where
                 if !state.range_info.key_range.includes(key.clone()) {
                     return Err(Error::KeyIsOutOfRange);
                 };
-                info!(
-                    "Acquiring range lock: {:?} for transaction: {:?}",
-                    key, tx.id
-                );
                 self.acquire_range_lock(state, tx.clone()).await?;
-                info!(
-                    "Acquired range lock: {:?} for transaction: {:?}  ",
-                    key, tx.id
-                );
 
                 let mut get_result = GetResult {
                     val: None,
@@ -260,7 +252,6 @@ where
                         .await
                         .map_err(Error::from_wal_error)?;
 
-                    info!("Inserting prepare record for transaction: {:?}", tx.id);
                     pending_prepare_records
                         .insert(tx.id, Bytes::copy_from_slice(prepare._tab.buf()));
                 }
