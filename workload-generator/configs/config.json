@@ -1,6 +1,6 @@
 {
-    "max-concurrency": 10,
-    "num-queries": 10,
+    "max-concurrency": 2,
+    "num-queries": 2,
     "num-keys": 1,
     "zipf-exponent": 0.5,
     "namespace": "test",
