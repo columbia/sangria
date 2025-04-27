@@ -4,11 +4,6 @@ use std::{
     sync::Arc,
 };
 
-use crate::{
-    error::{Error, TransactionAbortReason},
-    keyspace::Keyspace,
-    rangeclient::RangeClient,
-};
 use bytes::Bytes;
 use common::{
     constants, full_range_id::FullRangeId, keyspace_id::KeyspaceId,
@@ -22,10 +17,15 @@ use proto::universe::{
     Keyspace as ProtoKeyspace,
 };
 use tokio::task::JoinSet;
-use tracing::info;
+use uuid::Uuid;
+
+use crate::{
+    error::{Error, TransactionAbortReason},
+    keyspace::Keyspace,
+    rangeclient::RangeClient,
+};
 use tx_state_store::client::Client as TxStateStoreClient;
 use tx_state_store::client::OpResult;
-use uuid::Uuid;
 
 enum State {
     Running,
