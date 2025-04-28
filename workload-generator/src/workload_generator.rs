@@ -6,18 +6,42 @@ use proto::{
     universe::{CreateKeyspaceRequest, KeyRangeRequest, Zone as ProtoZone},
 };
 use rand::{distributions::WeightedIndex, prelude::*};
-use std::{cmp::min, sync::Arc};
+use std::{
+    cmp::min,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::{
     runtime::Handle,
-    sync::Semaphore,
+    sync::{Mutex, Semaphore},
     task::JoinSet,
-    time::{sleep, Duration},
 };
 use tracing::{error, info};
+
+// Add a struct to hold our metrics
+#[derive(Default, Debug)]
+pub struct Metrics {
+    pub total_duration: Duration,
+    pub total_transactions: usize,
+    pub avg_latency: Duration,
+    pub p50_latency: Duration,
+    pub p95_latency: Duration,
+    pub p99_latency: Duration,
+    pub throughput: f64,
+}
+
+// Add a struct to hold our metrics
+#[derive(Default)]
+struct InternalMetrics {
+    latencies: Vec<Duration>,
+    start_time: Option<Instant>,
+    completed_transactions: usize,
+}
 
 pub struct WorkloadGenerator {
     workload_config: WorkloadConfig,
     client: FrontendClient<tonic::transport::Channel>,
+    metrics: Arc<Mutex<InternalMetrics>>,
 }
 
 impl WorkloadGenerator {
@@ -28,6 +52,7 @@ impl WorkloadGenerator {
         Self {
             workload_config,
             client,
+            metrics: Arc::new(Mutex::new(InternalMetrics::default())),
         }
     }
 
@@ -81,7 +106,7 @@ impl WorkloadGenerator {
         )
     }
 
-    pub async fn create_keyspace(&self, client: &mut FrontendClient<tonic::transport::Channel>) {
+    pub async fn create_keyspace(&self) {
         let zone = Zone {
             region: Region {
                 cloud: None,
@@ -91,7 +116,8 @@ impl WorkloadGenerator {
         };
 
         // Create the keyspace for this experiment
-        let response = client
+        let mut client_clone = self.client.clone();
+        let response = client_clone
             .create_keyspace(CreateKeyspaceRequest {
                 namespace: self.workload_config.namespace.clone(),
                 name: self.workload_config.name.clone(),
@@ -107,16 +133,21 @@ impl WorkloadGenerator {
             .unwrap();
         let keyspace_id = response.get_ref().keyspace_id.clone();
         info!("Created keyspace with ID: {:?}", keyspace_id);
-        sleep(Duration::from_millis(1000));
     }
 
-    pub async fn run(&self, runtime_handle: Handle) {
+    pub async fn run(&self, runtime_handle: Handle) -> Metrics {
         info!("Starting workload");
         let max_concurrency = min(
             self.workload_config.max_concurrency,
             self.workload_config.num_queries,
         );
         let semaphore = Arc::new(Semaphore::new(max_concurrency as usize));
+
+        // Initialize start time
+        {
+            let mut metrics = self.metrics.lock().await;
+            metrics.start_time = Some(Instant::now());
+        }
 
         let mut task_counter = 0;
         let mut join_set = JoinSet::new();
@@ -130,10 +161,21 @@ impl WorkloadGenerator {
                     }
                     let next_task = self.generate_transaction();
                     let mut client_clone = self.client.clone();
+                    let metrics = self.metrics.clone();
+
                     let join_handle = runtime_handle.spawn(async move {
-                        info!("Executing task");
-                        let _ = next_task.execute(&mut client_clone).await;
+                        let start_time = Instant::now();
+                        let result = next_task.execute(&mut client_clone).await;
+                        let latency = start_time.elapsed();
+
+                        // Record metrics
+                        let mut metrics = metrics.lock().await;
+                        metrics.latencies.push(latency);
+                        metrics.completed_transactions += 1;
+
+                        info!("Task completed with latency: {:?}", latency);
                         drop(permit);
+                        result
                     });
 
                     join_set.spawn(async move {
@@ -148,11 +190,47 @@ impl WorkloadGenerator {
                 else => break,
             }
         }
+
         while let Some(res) = join_set.join_next().await {
             if let Err(e) = res {
                 error!("Task panicked: {:?}", e);
             }
         }
-        info!("All transactions processed and completed");
+
+        // Calculate and return metrics
+        let metrics = self.metrics.lock().await;
+        let total_duration = metrics.start_time.unwrap().elapsed();
+        let total_transactions = metrics.completed_transactions;
+
+        // Calculate statistics
+        let avg_latency: Duration =
+            metrics.latencies.iter().sum::<Duration>() / metrics.latencies.len() as u32;
+        let throughput = total_transactions as f64 / total_duration.as_secs_f64();
+
+        // Sort latencies for percentile calculation
+        let mut sorted_latencies = metrics.latencies.clone();
+        sorted_latencies.sort();
+        let p99_latency = sorted_latencies[(sorted_latencies.len() as f64 * 0.99) as usize];
+        let p95_latency = sorted_latencies[(sorted_latencies.len() as f64 * 0.95) as usize];
+        let p50_latency = sorted_latencies[(sorted_latencies.len() as f64 * 0.50) as usize];
+
+        info!("Workload Complete - Performance Metrics:");
+        info!("Total Duration: {:?}", total_duration);
+        info!("Total Transactions: {}", total_transactions);
+        info!("Average Latency: {:?}", avg_latency);
+        info!("P50 Latency: {:?}", p50_latency);
+        info!("P95 Latency: {:?}", p95_latency);
+        info!("P99 Latency: {:?}", p99_latency);
+        info!("Throughput: {:.2} transactions/second", throughput);
+
+        Metrics {
+            total_duration,
+            total_transactions,
+            avg_latency,
+            p50_latency,
+            p95_latency,
+            p99_latency,
+            throughput,
+        }
     }
 }

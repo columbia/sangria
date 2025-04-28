@@ -1,37 +1,57 @@
 use common::config::Config;
 use proto::frontend::frontend_client::FrontendClient;
+use serde_json;
 use std::sync::Arc;
 use tokio::runtime::{Builder, Handle};
+use tokio::time::{sleep, Duration};
 use tracing::info;
-use workload_generator::{workload_config::WorkloadConfig, workload_generator::WorkloadGenerator};
+use workload_generator::{
+    workload_config::WorkloadConfig,
+    workload_generator::{Metrics, WorkloadGenerator},
+};
+use clap::Parser;
+use std::fs;
 
-async fn run_workload(runtime_handle: Handle) {
-    let config: Config =
-        serde_json::from_str(&std::fs::read_to_string("config.json").unwrap()).unwrap();
-    let workload_config: WorkloadConfig = serde_json::from_str(
-        &std::fs::read_to_string("workload-generator/configs/config.json").unwrap(),
-    )
-    .unwrap();
-    info!("Workload config: {:?}", workload_config);
+#[derive(Parser, Debug)]
+#[command(name = "workload-generator")]
+#[command(about = "Generates workloads based on config files", long_about = None)]
+struct Args {
+    #[arg(long, default_value = "config.json")]
+    config: String,
+
+    #[arg(long, default_value = "workload-generator/configs/config.json")]
+    workload_config: String,
+
+    #[arg(long, default_value = "false")]
+    create_keyspace: bool,
+}
+
+
+async fn run_workload(runtime_handle: Handle, config: Config, workload_config: WorkloadConfig, create_keyspace: bool) -> Metrics {
     let frontend_addr = config.frontend.proto_server_addr.to_string();
     let mut client = FrontendClient::connect(format!("http://{}", frontend_addr))
         .await
         .unwrap();
 
     let workload_generator = Arc::new(WorkloadGenerator::new(workload_config, client));
-    // generator.create_keyspace(&mut client).await;
-
+    if create_keyspace {
+        workload_generator.create_keyspace().await;
+        sleep(Duration::from_millis(2000)).await;
+    }
     let workload_generator_clone = workload_generator.clone();
     let runtime_handle_clone = runtime_handle.clone();
-    let workload_handle = runtime_handle.spawn(async move {
-        workload_generator_clone.run(runtime_handle_clone).await;
-    });
-    workload_handle.await.unwrap();
+    let workload_handle = runtime_handle
+        .spawn(async move { workload_generator_clone.run(runtime_handle_clone).await });
+    let metrics = workload_handle.await.unwrap();
     info!("Workload generator finished");
+    metrics
 }
 
 fn main() {
     tracing_subscriber::fmt::init();
+    let args = Args::parse();
+    let config: Config = serde_json::from_str(&fs::read_to_string(&args.config).unwrap()).unwrap();
+    let workload_config: WorkloadConfig = serde_json::from_str(&fs::read_to_string(&args.workload_config).unwrap()).unwrap();
 
     let num_threads = num_cpus::get();
     let runtime = Builder::new_multi_thread()
@@ -40,5 +60,25 @@ fn main() {
         .build()
         .unwrap();
     let runtime_handle = runtime.handle().clone();
-    runtime.block_on(async move { run_workload(runtime_handle).await });
+    let metrics = runtime.block_on(async move { run_workload(runtime_handle, config, workload_config, args.create_keyspace).await });
+
+    // Return metrics in a format that the Python script can parse
+    println!(
+        "METRICS_START\n\
+        Total Duration: {:?}\n\
+        Total Transactions: {}\n\
+        Average Latency: {:?}\n\
+        P50 Latency: {:?}\n\
+        P95 Latency: {:?}\n\
+        P99 Latency: {:?}\n\
+        Throughput: {:.2} transactions/second\n\
+        METRICS_END",
+        metrics.total_duration,
+        metrics.total_transactions,
+        metrics.avg_latency,
+        metrics.p50_latency,
+        metrics.p95_latency,
+        metrics.p99_latency,
+        metrics.throughput
+    )
 }
