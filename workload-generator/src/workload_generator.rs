@@ -85,6 +85,8 @@ impl WorkloadGenerator {
             weights.remove(idx);
         }
 
+        chosen_keys.sort();
+        println!("chosen_keys: {:?}", chosen_keys);
         chosen_keys
     }
 
@@ -172,8 +174,6 @@ impl WorkloadGenerator {
                         let mut metrics = metrics.lock().await;
                         metrics.latencies.push(latency);
                         metrics.completed_transactions += 1;
-
-                        info!("Task completed with latency: {:?}", latency);
                         drop(permit);
                         result
                     });

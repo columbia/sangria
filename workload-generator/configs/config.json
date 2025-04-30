@@ -1,8 +1,1 @@
-{
-    "max-concurrency": 2,
-    "num-queries": 2,
-    "num-keys": 1,
-    "zipf-exponent": 0.5,
-    "namespace": "test",
-    "name": "test"
-}
+{"num-keys": 10, "max-concurrency": 5, "num-queries": 1000, "zipf-exponent": 0, "namespace": "passionate", "name": "ibex_92e8923b"}

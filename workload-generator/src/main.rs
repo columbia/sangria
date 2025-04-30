@@ -1,6 +1,8 @@
+use clap::Parser;
 use common::config::Config;
 use proto::frontend::frontend_client::FrontendClient;
 use serde_json;
+use std::fs;
 use std::sync::Arc;
 use tokio::runtime::{Builder, Handle};
 use tokio::time::{sleep, Duration};
@@ -9,8 +11,6 @@ use workload_generator::{
     workload_config::WorkloadConfig,
     workload_generator::{Metrics, WorkloadGenerator},
 };
-use clap::Parser;
-use std::fs;
 
 #[derive(Parser, Debug)]
 #[command(name = "workload-generator")]
@@ -26,8 +26,12 @@ struct Args {
     create_keyspace: bool,
 }
 
-
-async fn run_workload(runtime_handle: Handle, config: Config, workload_config: WorkloadConfig, create_keyspace: bool) -> Metrics {
+async fn run_workload(
+    runtime_handle: Handle,
+    config: Config,
+    workload_config: WorkloadConfig,
+    create_keyspace: bool,
+) -> Metrics {
     let frontend_addr = config.frontend.proto_server_addr.to_string();
     let mut client = FrontendClient::connect(format!("http://{}", frontend_addr))
         .await
@@ -51,7 +55,8 @@ fn main() {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
     let config: Config = serde_json::from_str(&fs::read_to_string(&args.config).unwrap()).unwrap();
-    let workload_config: WorkloadConfig = serde_json::from_str(&fs::read_to_string(&args.workload_config).unwrap()).unwrap();
+    let workload_config: WorkloadConfig =
+        serde_json::from_str(&fs::read_to_string(&args.workload_config).unwrap()).unwrap();
 
     let num_threads = num_cpus::get();
     let runtime = Builder::new_multi_thread()
@@ -60,7 +65,15 @@ fn main() {
         .build()
         .unwrap();
     let runtime_handle = runtime.handle().clone();
-    let metrics = runtime.block_on(async move { run_workload(runtime_handle, config, workload_config, args.create_keyspace).await });
+    let metrics = runtime.block_on(async move {
+        run_workload(
+            runtime_handle,
+            config,
+            workload_config,
+            args.create_keyspace,
+        )
+        .await
+    });
 
     // Return metrics in a format that the Python script can parse
     println!(

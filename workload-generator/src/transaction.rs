@@ -35,7 +35,8 @@ impl Transaction {
             .await
             .unwrap();
         let transaction_id = Uuid::parse_str(&response.get_ref().transaction_id).unwrap();
-        info!("Started transaction with ID: {:?}", transaction_id);
+        let transaction_id_int = transaction_id.as_u128() as u64;
+        info!("Started transaction with ID: {:?}", transaction_id_int);
 
         for key in &self.readset {
             let response = client
@@ -49,7 +50,19 @@ impl Transaction {
                 })
                 .await
                 .unwrap();
-            info!("Read key: {:?}, value: {:?}", key, response.get_ref().value);
+            let value_bytes = response.get_ref().value.as_ref();
+            let value_display = value_bytes
+                .map(|bytes| {
+                    String::from_utf8(bytes.clone())
+                        .unwrap_or_else(|_| format!("<invalid utf8: {:?}>", bytes))
+                        .parse::<u64>()
+                        .unwrap_or(0)
+                })
+                .unwrap_or(0);
+            info!(
+                "Read key: {:?}, value: {:?} tx id: {:?}",
+                key, value_display, transaction_id_int
+            );
             let value_int = match response.get_ref().value.as_ref() {
                 Some(bytes) => String::from_utf8(bytes.clone())
                     .unwrap()
@@ -62,9 +75,12 @@ impl Transaction {
 
         // Write the keys
         if let Some(writeset) = &self.writeset {
+            info!(
+                "Writing keys: {:?} tx id: {:?}",
+                writeset, transaction_id_int
+            );
             for key in writeset {
                 let value = results.get(key).unwrap() + 1;
-                info!("Writing key: {:?}, value: {:?}", key, value);
                 let _response = client
                     .put(PutRequest {
                         transaction_id: transaction_id.to_string(),
@@ -77,7 +93,6 @@ impl Transaction {
                     })
                     .await
                     .unwrap();
-                info!("Wrote key: {:?}, value: {:?}", key, value);
             }
         }
 
@@ -88,7 +103,10 @@ impl Transaction {
             })
             .await
             .unwrap();
-        info!("Committed transaction");
+        info!(
+            "Committed transaction with keys: {:?} tx id: {:?}",
+            self.writeset, transaction_id_int
+        );
 
         Ok(())
     }

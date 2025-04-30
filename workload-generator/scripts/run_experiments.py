@@ -7,7 +7,9 @@ from pathlib import Path
 import psutil
 import re
 import uuid
+import signal
 from coolname import generate_slug
+from functools import partial
 
 RAY_LOGS_DIR = Path(__file__).parent.parent / "experiments" / "ray_logs"
 
@@ -49,7 +51,7 @@ def parse_metrics(output):
                     metrics[metric] = float(value.replace("s", ""))
             else:
                 metrics[metric] = float(value)
-    print(metrics)
+    # print(metrics)
     return metrics
 
 
@@ -67,9 +69,9 @@ def run_workload(config):
     with open(workload_config_path, "w") as f:
         json.dump(config, f)
 
-    # Run the workload generator
+    # Run the workload generator with timeout
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             [
                 "cargo",
                 "run",
@@ -83,16 +85,23 @@ def run_workload(config):
                 "--create-keyspace",
             ],
             cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
         )
-        # Parse the output to get metrics
-        metrics = parse_metrics(result.stdout)
-        if not metrics:
-            print("Warning: No metrics found in output")
-            return {"throughput": 0.0}
 
-        return metrics
+        try:
+            stdout, stderr = process.communicate(timeout=60 * 10)  # 10 minutes timeout
+            metrics = parse_metrics(stdout)
+            if not metrics:
+                print("Warning: No metrics found in output")
+                return {"throughput": 0.0}
+            return metrics
+
+        except subprocess.TimeoutExpired:
+            process.kill()
+            print(f"Timeout exceeded for config: {config}")
+            return {"throughput": 0.0}
 
     except Exception as e:
         print(f"Error running workload: {e}")
@@ -110,10 +119,10 @@ def main():
 
     # Define the search space
     config = {
-        "max-concurrency": tune.grid_search([1, 5]),
-        "num-queries": tune.grid_search([1,]),
-        "num-keys": tune.grid_search([1]),
-        "zipf-exponent": tune.grid_search([0.5]),
+        "num-keys": tune.grid_search([1, 10, 100]),
+        "max-concurrency": tune.grid_search([1, 5, 10]),
+        "num-queries": tune.grid_search([1000]),
+        "zipf-exponent": tune.grid_search([0, 0.5, 1.2]),
         "namespace": namespace,
         "name": name,
     }
@@ -124,7 +133,7 @@ def main():
     analysis = tune.run(
         run_workload,
         config=config,
-        num_samples=1,  # Number of times to sample from the grid
+        num_samples=5,
         resources_per_trial={"cpu": psutil.cpu_count()},
         storage_path=ray_logs_dir,
         name=experiment_name,

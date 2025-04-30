@@ -1,0 +1,8 @@
+{
+    "max-concurrency": 5, 
+    "num-queries": 1000, 
+    "num-keys": 10, 
+    "zipf-exponent": 0.5, 
+    "namespace": "test", 
+    "name": "test"
+}
