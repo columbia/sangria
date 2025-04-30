@@ -86,7 +86,6 @@ impl WorkloadGenerator {
         }
 
         chosen_keys.sort();
-        println!("chosen_keys: {:?}", chosen_keys);
         chosen_keys
     }
 

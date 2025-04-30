@@ -1,1 +1,1 @@
-{"num-keys": 10, "max-concurrency": 5, "num-queries": 1000, "zipf-exponent": 0, "namespace": "passionate", "name": "ibex_92e8923b"}
+{"num-keys": 100, "max-concurrency": 10, "num-queries": 1000, "zipf-exponent": 1.2, "namespace": "piquant", "name": "ostrich_feef5c0e"}

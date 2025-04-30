@@ -23,6 +23,7 @@ def make_plots(
     column_widths=None,
     showlegend=True,
     legend_title=None,
+    title=None,
 ) -> go.Figure:
     """Make plots from the given figures"""
 
@@ -69,6 +70,7 @@ def make_plots(
         height=height,
         width=width,
         barmode="group",
+        title=title,
         # boxmode="group",
         # margin=dict(t=0, b=0),
     )

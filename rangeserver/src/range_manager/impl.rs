@@ -217,7 +217,7 @@ where
             State::Loaded(state) => {
                 // Sanity check that the written keys are all within this range.
                 // TODO: check delete and write sets are non-overlapping.
-                info!("Preparing transaction with ID: {:?}", tx.id);
+                // info!("Preparing transaction with ID: {:?}", tx.id);
                 for put in prepare.puts().iter() {
                     for put in put.iter() {
                         // TODO: too much copying :(
@@ -337,7 +337,7 @@ where
                     // realize that, so we just return success.
                     return Ok(());
                 }
-                info!("Committing transaction with ID: {:?}", tx.id);
+                // info!("Committing transaction with ID: {:?}", tx.id);
                 state.highest_known_epoch.maybe_update(commit.epoch()).await;
 
                 // TODO: handle potential duplicates here.
