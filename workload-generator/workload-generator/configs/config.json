@@ -1,7 +1,7 @@
 {
-    "max-concurrency": 5, 
+    "max-concurrency": 1,
     "num-queries": 1000, 
-    "num-keys": 10, 
+    "num-keys": 1, 
     "zipf-exponent": 0.5, 
     "namespace": "test", 
     "name": "test"

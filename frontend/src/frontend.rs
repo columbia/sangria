@@ -1,19 +1,20 @@
 use std::sync::Arc;
 
 use common::{
-    config::Config, network::fast_network::FastNetwork, region::Zone,
+    config::Config, keyspace::Keyspace, network::fast_network::FastNetwork, region::Zone,
     transaction_info::TransactionInfo,
 };
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use coordinator::{coordinator::Coordinator, keyspace::Keyspace, transaction::Transaction};
+use coordinator::{coordinator::Coordinator, transaction::Transaction};
 use tonic::{transport::Server as TServer, Request, Response, Status as TStatus};
 
 use std::net::ToSocketAddrs;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
+use tracing::info;
 use tracing::instrument;
 
 use proto::frontend::frontend_server::{Frontend, FrontendServer};
@@ -49,10 +50,10 @@ impl Frontend for ProtoServer {
         &self,
         request: Request<CreateKeyspaceRequest>,
     ) -> Result<Response<CreateKeyspaceResponse>, TStatus> {
-        println!("Got a request: {:?}", request);
+        info!("Got a request: {:?}", request);
 
         let proto_server_addr = &self.parent_server.config.universe.proto_server_addr;
-        println!("Connecting to proto server at: {}", proto_server_addr);
+        info!("Connecting to proto server at: {}", proto_server_addr);
         let mut client = UniverseClient::connect(format!("http://{}", proto_server_addr))
             .await
             .map_err(|e| TStatus::internal(format!("Failed to connect to universe: {:?}", e)))?;
@@ -82,7 +83,7 @@ impl Frontend for ProtoServer {
         &self,
         request: Request<StartTransactionRequest>,
     ) -> Result<Response<StartTransactionResponse>, TStatus> {
-        println!("Got a request: {:?}", request);
+        info!("Got a request: {:?}", request);
 
         // Generate a new transaction id
         let transaction_id = Uuid::from_u128(
@@ -111,7 +112,7 @@ impl Frontend for ProtoServer {
             .await
             .insert(transaction_id, Arc::new(Mutex::new(transaction)));
 
-        println!("Transaction started: {:?}", transaction_id);
+        info!("Transaction started: {:?}", transaction_id);
 
         Ok(Response::new(StartTransactionResponse {
             status: "Start transaction request processed successfully".to_string(),

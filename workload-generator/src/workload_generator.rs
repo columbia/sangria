@@ -1,6 +1,8 @@
 use crate::{transaction::Transaction, workload_config::WorkloadConfig};
-use common::region::{Region, Zone};
-use coordinator::keyspace::Keyspace;
+use common::{
+    keyspace::Keyspace,
+    region::{Region, Zone},
+};
 use proto::{
     frontend::frontend_client::FrontendClient,
     universe::{CreateKeyspaceRequest, KeyRangeRequest, Zone as ProtoZone},

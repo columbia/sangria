@@ -1,4 +1,4 @@
-use coordinator::keyspace::Keyspace;
+use common::keyspace::Keyspace;
 use frontend::error::Error as FrontendError;
 use proto::frontend::frontend_client::FrontendClient;
 use proto::frontend::Keyspace as ProtoKeyspace;

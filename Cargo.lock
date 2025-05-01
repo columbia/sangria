@@ -2464,7 +2464,6 @@ dependencies = [
  "bytes",
  "clap",
  "common",
- "coordinator",
  "frontend",
  "futures",
  "num_cpus",

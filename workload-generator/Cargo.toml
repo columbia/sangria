@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 common = {path = "../common"}
 proto = {path = "../proto"}
-coordinator = { version = "0.1.0", path = "../coordinator"}
 frontend = { version = "0.1.0", path = "../frontend"}
 universe = { version = "0.1.0", path = "../universe"}
 rand = "0.8"
