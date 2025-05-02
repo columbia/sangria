@@ -3,9 +3,9 @@ use common::config::{
     CassandraConfig, Config, EpochConfig, EpochPublisher, EpochPublisherSet, FrontendConfig,
     RangeServerConfig, RegionConfig, UniverseConfig,
 };
+use common::keyspace::Keyspace;
 use common::network::for_testing::udp_fast_network::UdpFastNetwork;
 use common::region::{Region, Zone};
-use common::keyspace::Keyspace;
 use std::time;
 use uuid::Uuid;
 
