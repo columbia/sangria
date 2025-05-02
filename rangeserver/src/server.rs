@@ -297,8 +297,7 @@ where
         // TODO: consider providing a batch API on the RM.
         for key in request.keys().iter() {
             for key in key.iter() {
-                // TODO: too much copying :(
-                let key = Bytes::copy_from_slice(key.k().unwrap().bytes());
+                let key = Bytes::from(key.k().unwrap().bytes().to_vec());
                 let get_result = rm.get(tx.clone(), key.clone()).await?;
                 match get_result.val {
                     None => {
@@ -701,22 +700,22 @@ where
             println!("Warden update loop exited!")
         });
 
-        let prefetch = ProtoServer {
-            parent_server: server.clone(),
-        };
+        // let prefetch = ProtoServer {
+        //     parent_server: server.clone(),
+        // };
 
-        // Spawn the gRPC server as a separate task
-        server.bg_runtime.spawn(async move {
-            if let Err(e) = TServer::builder()
-                .add_service(RangeServerServer::new(prefetch))
-                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(
-                    proto_server_listener,
-                ))
-                .await
-            {
-                println!("Server error: {}", e);
-            }
-        });
+        // // Spawn the gRPC server as a separate task
+        // server.bg_runtime.spawn(async move {
+        //     if let Err(e) = TServer::builder()
+        //         .add_service(RangeServerServer::new(prefetch))
+        //         .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(
+        //             proto_server_listener,
+        //         ))
+        //         .await
+        //     {
+        //         println!("Server error: {}", e);
+        //     }
+        // });
 
         let server_ref = server.clone();
         let res = server

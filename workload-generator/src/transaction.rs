@@ -35,7 +35,7 @@ impl Transaction {
             .await
             .unwrap();
         let transaction_id = Uuid::parse_str(&response.get_ref().transaction_id).unwrap();
-        let transaction_id_int = transaction_id.as_u128() as u64;
+        // let transaction_id_int = transaction_id.as_u128() as u64;
         // info!("Started transaction with ID: {:?}", transaction_id_int);
 
         for key in &self.readset {

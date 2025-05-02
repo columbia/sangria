@@ -5,7 +5,8 @@
             "nanos": 0
         },
         "proto_server_addr": "127.0.0.1:50054",
-        "fast_network_addr": "127.0.0.1:50055"
+        "fast_network_addr": "127.0.0.1:50055",
+        "polling_core_id": 38
     },
     "universe": {
         "proto_server_addr": "127.0.0.1:50056"
@@ -13,6 +14,7 @@
     "frontend": {
         "proto_server_addr": "127.0.0.1:50057",
         "fast_network_addr": "127.0.0.1:50058",
+        "polling_core_id": 39,
         "transaction_overall_timeout": {
             "secs": 10,
             "nanos": 0

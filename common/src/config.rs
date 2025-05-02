@@ -113,6 +113,7 @@ pub struct RangeServerConfig {
     pub range_maintenance_duration: time::Duration,
     pub proto_server_addr: HostPort,
     pub fast_network_addr: HostPort,
+    pub polling_core_id: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -131,6 +132,7 @@ pub struct FrontendConfig {
     pub proto_server_addr: HostPort,
     pub fast_network_addr: HostPort,
     pub transaction_overall_timeout: std::time::Duration,
+    pub polling_core_id: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

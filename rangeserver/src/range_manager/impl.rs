@@ -377,8 +377,8 @@ where
                             .await
                             .map_err(Error::from_storage_error)?;
 
-                        // // Update the prefetch buffer if this key has been requested by a prefetch call
-                        // self.prefetching_buffer.upsert(key, val).await;
+                        // Update the prefetch buffer if this key has been requested by a prefetch call
+                        self.prefetching_buffer.upsert(key, val).await;
                     }
                 }
                 for del in prepare_record.deletes().iter() {
@@ -391,8 +391,8 @@ where
                             .await
                             .map_err(Error::from_storage_error)?;
 
-                        // // Delete the key from the prefetch buffer if this key has been requested by a prefetch call
-                        // self.prefetching_buffer.delete(key).await;
+                        // Delete the key from the prefetch buffer if this key has been requested by a prefetch call
+                        self.prefetching_buffer.delete(key).await;
                     }
                 }
 

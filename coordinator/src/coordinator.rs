@@ -60,7 +60,6 @@ impl Coordinator {
     }
 
     pub async fn start_transaction(&self, transaction_info: Arc<TransactionInfo>) -> Transaction {
-        //TODO(tamer): start transaction at the tx_state_store.
         self.tx_state_store
             .start_transaction(transaction_info.id)
             .await

@@ -11,6 +11,8 @@ use workload_generator::{
     workload_config::WorkloadConfig,
     workload_generator::{Metrics, WorkloadGenerator},
 };
+use core_affinity;
+use parking_lot;
 
 #[derive(Parser, Debug)]
 #[command(name = "workload-generator")]
@@ -58,9 +60,25 @@ fn main() {
     let workload_config: WorkloadConfig =
         serde_json::from_str(&fs::read_to_string(&args.workload_config).unwrap()).unwrap();
 
-    let num_threads = num_cpus::get();
+    let all_cores = core_affinity::get_core_ids().unwrap();
+    let allowed_cores = all_cores
+        .into_iter()
+        .filter(|c| c.id != 38 && c.id != 39)
+        .collect::<Vec<_>>();
+
+    let num_cores = allowed_cores.clone().len();
+    let core_pool = std::sync::Arc::new(parking_lot::Mutex::new(allowed_cores.into_iter()));
+
     let runtime = Builder::new_multi_thread()
-        .worker_threads(num_threads)
+        .worker_threads(num_cores)
+        .on_thread_start({
+            let core_pool = core_pool.clone();
+            move || {
+                if let Some(core) = core_pool.lock().next() {
+                    core_affinity::set_for_current(core);
+                }
+            }
+        })
         .enable_all()
         .build()
         .unwrap();

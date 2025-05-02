@@ -18,6 +18,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "512761e0bb2578dd7380c6baaa0f4ce03e84f95e960231d1dec8bf4d7d6e2627"
 
 [[package]]
+name = "affinity"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "763e484feceb7dd021b21c5c6f81aee06b1594a743455ec7efbf72e6355e447b"
+dependencies = [
+ "cfg-if",
+ "errno",
+ "libc",
+ "num_cpus",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -377,6 +389,7 @@ checksum = "d3fd119d74b830634cea2a0f58bbd0d54540518a14397557951e79340abc28c0"
 name = "common"
 version = "0.1.0"
 dependencies = [
+ "affinity",
  "async-trait",
  "bytes",
  "chrono",
@@ -412,6 +425,17 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
+
+[[package]]
+name = "core_affinity"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "479fdfb5e75b80b678a34a8231b4415481b06b706e486bf5b3ba72378710caaf"
+dependencies = [
+ "libc",
+ "num_cpus",
+ "winapi",
+]
 
 [[package]]
 name = "darling"
@@ -636,10 +660,13 @@ dependencies = [
  "chrono",
  "common",
  "coordinator",
+ "core_affinity",
  "epoch_reader",
  "flatbuf",
  "flatbuffers",
+ "num_cpus",
  "once_cell",
+ "parking_lot",
  "portpicker",
  "prost",
  "proto",
@@ -1435,11 +1462,14 @@ dependencies = [
  "bytes",
  "chrono",
  "common",
+ "core_affinity",
  "epoch_publisher",
  "epoch_reader",
  "flatbuf",
  "flatbuffers",
  "machnet",
+ "num_cpus",
+ "parking_lot",
  "prost",
  "proto",
  "rand",
@@ -2464,9 +2494,11 @@ dependencies = [
  "bytes",
  "clap",
  "common",
+ "core_affinity",
  "frontend",
  "futures",
  "num_cpus",
+ "parking_lot",
  "proto",
  "rand",
  "serde",
