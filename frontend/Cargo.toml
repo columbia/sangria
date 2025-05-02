@@ -33,3 +33,4 @@ flatbuffers = "24.3.25"
 num_cpus = "1.16.0"
 core_affinity = "0.7.0"
 parking_lot = "0.12"
+clap = { version = "4.5", features = ["derive"] }

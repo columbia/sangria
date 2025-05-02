@@ -1,3 +1,4 @@
+use clap::Parser;
 use common::{
     config::Config,
     network::{
@@ -8,6 +9,7 @@ use common::{
 use frontend::frontend::Server;
 use std::sync::atomic::AtomicU64;
 use std::{
+    fs::read_to_string,
     net::{ToSocketAddrs, UdpSocket},
     sync::Arc,
 };
@@ -18,20 +20,32 @@ use core_affinity;
 use frontend::range_assignment_oracle::RangeAssignmentOracle;
 use proto::universe::universe_client::UniverseClient;
 
+#[derive(Parser, Debug)]
+#[command(name = "frontend")]
+#[command(about = "Frontend", long_about = None)]
+struct Args {
+    #[arg(long, default_value = "configs/config.json")]
+    config: String,
+
+    #[arg(long, default_value = "test-region")]
+    region: String,
+
+    #[arg(long, default_value = "a")]
+    zone: String,
+}
+
 fn main() {
     tracing_subscriber::fmt::init();
 
-    // TODO(kelly): take the config path as an argument.
-    let config: Config =
-        serde_json::from_str(&std::fs::read_to_string("config.json").unwrap()).unwrap();
+    let args = Args::parse();
+    let config: Config = serde_json::from_str(&read_to_string(&args.config).unwrap()).unwrap();
 
-    //TODO(kelly): the name, zone etc should be passed in as an argument or environment.
     let zone = Zone {
         region: Region {
             cloud: None,
-            name: "test-region".into(),
+            name: args.region.into(),
         },
-        name: "a".into(),
+        name: args.zone.into(),
     };
 
     let runtime = Builder::new_current_thread().enable_all().build().unwrap();
