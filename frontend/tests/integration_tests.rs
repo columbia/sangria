@@ -5,10 +5,10 @@ use common::config::{
 };
 use common::network::for_testing::udp_fast_network::UdpFastNetwork;
 use common::region::{Region, Zone};
+use common::keyspace::Keyspace;
 use std::time;
 use uuid::Uuid;
 
-use coordinator::keyspace::Keyspace;
 use once_cell::sync::Lazy;
 use std::collections::HashSet;
 use std::net::UdpSocket;
