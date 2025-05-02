@@ -97,6 +97,7 @@ pub struct EpochPublisher {
     pub name: String,
     pub backend_addr: HostPort,
     pub fast_network_addr: HostPort,
+    pub fast_network_polling_core_id: u32,
 }
 
 #[derive(Derivative, Serialize, Deserialize)]
@@ -113,6 +114,7 @@ pub struct RangeServerConfig {
     pub range_maintenance_duration: time::Duration,
     pub proto_server_addr: HostPort,
     pub fast_network_addr: HostPort,
+    pub fast_network_polling_core_id: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -130,6 +132,7 @@ pub struct UniverseConfig {
 pub struct FrontendConfig {
     pub proto_server_addr: HostPort,
     pub fast_network_addr: HostPort,
+    pub fast_network_polling_core_id: u32,
     pub transaction_overall_timeout: std::time::Duration,
 }
 

@@ -1,7 +1,9 @@
 use clap::Parser;
 use common::{
     config::Config,
-    network::{fast_network::FastNetwork, for_testing::udp_fast_network::UdpFastNetwork},
+    network::{
+        fast_network::spawn_tokio_polling_thread, for_testing::udp_fast_network::UdpFastNetwork,
+    },
     region::{Region, Zone},
 };
 use std::{
@@ -10,13 +12,13 @@ use std::{
     sync::Arc,
 };
 
+use core_affinity;
 use frontend::frontend::Server;
+use frontend::range_assignment_oracle::RangeAssignmentOracle;
+use proto::universe::universe_client::UniverseClient;
 use tokio::runtime::Builder;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
-
-use frontend::range_assignment_oracle::RangeAssignmentOracle;
-use proto::universe::universe_client::UniverseClient;
 
 #[derive(Parser, Debug)]
 #[command(name = "frontend")]
@@ -58,18 +60,44 @@ fn main() {
         UdpSocket::bind(fast_network_addr).unwrap(),
     ));
     let fast_network_clone = fast_network.clone();
-
     runtime.spawn(async move {
-        loop {
-            fast_network_clone.poll();
-            tokio::task::yield_now().await
-        }
+        spawn_tokio_polling_thread(
+            "fast-network-poller-frontend",
+            fast_network_clone,
+            config.frontend.fast_network_polling_core_id as usize,
+        )
+        .await;
     });
 
     let cancellation_token = CancellationToken::new();
     let runtime_handle = runtime.handle().clone();
     let ct_clone = cancellation_token.clone();
-    let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
+
+    let all_cores = core_affinity::get_core_ids().unwrap();
+    let fast_network_polling_cores = vec![
+        config.range_server.fast_network_polling_core_id as usize,
+        config.frontend.fast_network_polling_core_id as usize,
+    ];
+    let allowed_cores = all_cores
+        .into_iter()
+        .filter(|c| !fast_network_polling_cores.contains(&c.id))
+        .collect::<Vec<_>>();
+    let num_cores = allowed_cores.clone().len();
+    let core_pool = std::sync::Arc::new(parking_lot::Mutex::new(allowed_cores.into_iter()));
+
+    let bg_runtime = Builder::new_multi_thread()
+        .worker_threads(num_cores)
+        .on_thread_start({
+            let core_pool = core_pool.clone();
+            move || {
+                if let Some(core) = core_pool.lock().next() {
+                    core_affinity::set_for_current(core);
+                }
+            }
+        })
+        .enable_all()
+        .build()
+        .unwrap();
     let bg_runtime_clone = bg_runtime.handle().clone();
 
     runtime.spawn(async move {
