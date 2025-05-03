@@ -27,7 +27,7 @@ spec:
         - containerPort: 50053
         workingDir: /etc/atomix
         command: ["/bin/sh", "-c"]
-        args: ["cat /etc/atomix/config.json && warden"]
+        args: ["cat /etc/atomix/config.json && warden --config /etc/atomix/config.json"]
         volumeMounts:
         - name: config
           mountPath: /etc/atomix
@@ -51,3 +51,61 @@ spec:
     - protocol: TCP
       port: 50053
       targetPort: 50053
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: atomix-warden-config
+  namespace: atomix
+data:
+  config.json: |
+    {
+        "range_server": {
+            "range_maintenance_duration": {
+                "secs": 1,
+                "nanos": 0
+            },
+            "proto_server_addr": "0.0.0.0:50054",
+            "fast_network_addr": "0.0.0.0:50055"
+        },
+        "universe": {
+            "proto_server_addr": "atomix-universe:50056"
+        },
+        "frontend": {
+            "proto_server_addr": "0.0.0.0:50057",
+            "fast_network_addr": "0.0.0.0:50058",
+            "transaction_overall_timeout": {
+                "secs": 10,
+                "nanos": 0
+            }
+        },
+        "epoch": {
+            "proto_server_addr": "atomix-epoch:50050",
+            "epoch_duration": {
+                "secs": 0,
+                "nanos": 1000000000
+            }
+        },
+        "cassandra": {
+            "cql_addr": "cassandra:9042"
+        },
+        "regions": {
+            "test-region": {
+                "warden_address": "0.0.0.0:50053",
+                "epoch_publishers": [
+                    {
+                        "name": "ps1",
+                        "zone": "test-region/a",
+                        "publishers": [
+                            {
+                                "name": "ep1",
+                                "backend_addr": "atomix-epoch-publisher:50051",
+                                "fast_network_addr": "atomix-epoch-publisher:50052"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    }

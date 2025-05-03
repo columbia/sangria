@@ -34,6 +34,20 @@ struct Args {
     zone: String,
 }
 
+#[derive(Parser, Debug)]
+#[command(name = "frontend")]
+#[command(about = "Frontend", long_about = None)]
+struct Args {
+    #[arg(long, default_value = "configs/config.json")]
+    config: String,
+
+    #[arg(long, default_value = "test-region")]
+    region: String,
+
+    #[arg(long, default_value = "a")]
+    zone: String,
+}
+
 fn main() {
     tracing_subscriber::fmt::init();
 
