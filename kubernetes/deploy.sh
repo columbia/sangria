@@ -157,6 +157,7 @@ def main():
 
     log.info("Deploying Cassandra")
     kubectl_apply_and_wait_for_sts("cassandra.yaml", "cassandra", ATOMIX_NAMESPACE)
+    # run(["kubectl", "wait", "--for=condition=Ready", "pod/cassandra-0", "-n", ATOMIX_NAMESPACE, "--timeout=180s"], check=True)
     #  Some messages for debugging
     run(["kubectl", "get", "pods", "-n", ATOMIX_NAMESPACE, "-l", "app=cassandra"])
     run(["kubectl", "describe", "pod", "cassandra-0", "-n", ATOMIX_NAMESPACE])
