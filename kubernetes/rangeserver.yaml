@@ -39,7 +39,7 @@ spec:
       volumes:
       - name: config
         configMap:
-          name: atomix-config
+          name: atomix-rangeserver-config
 ---
 apiVersion: v1
 kind: Service
@@ -75,7 +75,8 @@ data:
                 "nanos": 0
             },
             "proto_server_addr": "0.0.0.0:50054",
-            "fast_network_addr": "0.0.0.0:50055"
+            "fast_network_addr": "0.0.0.0:50055",
+            "fast_network_polling_core_id": 0
         },
         "universe": {
             "proto_server_addr": "atomix-universe:50056"
@@ -90,6 +91,7 @@ data:
         "frontend": {
             "proto_server_addr": "0.0.0.0:50057",
             "fast_network_addr": "0.0.0.0:50058",
+            "fast_network_polling_core_id": 0,
             "transaction_overall_timeout": {
                 "secs": 10,
                 "nanos": 0
@@ -109,7 +111,8 @@ data:
                             {
                                 "name": "ep1",
                                 "backend_addr": "atomix-epoch-publisher:50051",
-                                "fast_network_addr": "atomix-epoch-publisher:50052"
+                                "fast_network_addr": "atomix-epoch-publisher:50052",
+                                "fast_network_polling_core_id": 0
                             }
                         ]
                     }
