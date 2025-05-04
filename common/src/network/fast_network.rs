@@ -39,7 +39,6 @@ pub async fn spawn_tokio_polling_thread(
             // Run the polling loop inside the runtime
             rt.block_on(async move {
                 loop {
-                    // println!("Polling network on core: {}", core_id);
                     fast_network.poll(); // sync/blocking call
                     tokio::task::yield_now().await; // yield to Tokio scheduler
                 }

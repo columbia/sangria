@@ -100,10 +100,19 @@ fn main() {
         let storage = Arc::new(Cassandra::new(config.cassandra.cql_addr.to_string()).await);
 
         let all_cores = core_affinity::get_core_ids().unwrap();
-        let fast_network_polling_cores = vec![
+        let mut fast_network_polling_cores = vec![
             config.range_server.fast_network_polling_core_id as usize,
             config.frontend.fast_network_polling_core_id as usize,
         ];
+        for epoch_publisher in config
+            .regions
+            .values()
+            .flat_map(|r| r.epoch_publishers.iter())
+        {
+            for publisher in epoch_publisher.publishers.iter() {
+                fast_network_polling_cores.push(publisher.fast_network_polling_core_id as usize);
+            }
+        }
         let allowed_cores = all_cores
             .into_iter()
             .filter(|c| !fast_network_polling_cores.contains(&c.id))
@@ -111,6 +120,7 @@ fn main() {
         let num_cores = allowed_cores.clone().len();
         let core_pool = std::sync::Arc::new(parking_lot::Mutex::new(allowed_cores.into_iter()));
 
+        //  Pin threads to allowed cores
         let bg_runtime = Builder::new_multi_thread()
             .worker_threads(num_cores)
             .on_thread_start({
