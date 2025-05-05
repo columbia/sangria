@@ -15,7 +15,6 @@ use common::{
     util::core_affinity::restrict_to_cores,
 };
 use core_affinity;
-use core_affinity;
 use rangeserver::{cache::memtabledb::MemTableDB, server::Server, storage::cassandra::Cassandra};
 use tokio::net::TcpListener;
 use tokio::runtime::Builder;
@@ -46,8 +45,6 @@ fn main() {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
     let config: Config = serde_json::from_str(&read_to_string(&args.config).unwrap()).unwrap();
-    let args = Args::parse();
-    let config: Config = serde_json::from_str(&read_to_string(&args.config).unwrap()).unwrap();
 
     let mut background_runtime_cores = config.range_server.background_runtime_core_ids.clone();
     if background_runtime_cores.is_empty() {
@@ -73,12 +70,6 @@ fn main() {
     ));
     let fast_network_clone = fast_network.clone();
     runtime.spawn(async move {
-        spawn_tokio_polling_thread(
-            "fast-network-poller-rangeserver",
-            fast_network_clone,
-            config.range_server.polling_core_id,
-        )
-        .await;
         spawn_tokio_polling_thread(
             "fast-network-poller-rangeserver",
             fast_network_clone,
@@ -118,28 +109,6 @@ fn main() {
         let proto_server_listener = TcpListener::bind(proto_server_addr).await.unwrap();
         info!("Connecting to Cassandra at {}", config.cassandra.cql_addr);
         let storage = Arc::new(Cassandra::new(config.cassandra.cql_addr.to_string()).await);
-        // TODO: set number of threads and pin to cores.
-        let all_cores = core_affinity::get_core_ids().unwrap();
-        let allowed_cores = all_cores
-            .into_iter()
-            .filter(|c| c.id != 38 && c.id != 39)
-            .collect::<Vec<_>>();
-        let num_cores = allowed_cores.clone().len();
-        let core_pool = std::sync::Arc::new(parking_lot::Mutex::new(allowed_cores.into_iter()));
-
-        let bg_runtime = Builder::new_multi_thread()
-            .worker_threads(num_cores)
-            .on_thread_start({
-                let core_pool = core_pool.clone();
-                move || {
-                    if let Some(core) = core_pool.lock().next() {
-                        core_affinity::set_for_current(core);
-                    }
-                }
-            })
-            .enable_all()
-            .build()
-            .unwrap();
 
         let bg_runtime = Builder::new_multi_thread()
             .worker_threads(background_runtime_cores.len())

@@ -4,12 +4,10 @@ use std::{fs::read_to_string, net::ToSocketAddrs, sync::Arc};
 
 use common::{
     config::Config,
-    config::Config,
     network::{
         fast_network::spawn_tokio_polling_thread, fast_network::FastNetwork,
         for_testing::udp_fast_network::UdpFastNetwork,
     },
-    network::{fast_network::FastNetwork, for_testing::udp_fast_network::UdpFastNetwork},
     region::{Region, Zone},
 };
 use epoch_publisher::server;

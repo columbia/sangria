@@ -136,7 +136,6 @@ pub struct FrontendConfig {
     pub fast_network_polling_core_id: u32,
     pub background_runtime_core_ids: Vec<u32>,
     pub transaction_overall_timeout: std::time::Duration,
-    pub polling_core_id: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

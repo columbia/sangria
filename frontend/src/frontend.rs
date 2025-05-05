@@ -11,10 +11,9 @@ use coordinator::{coordinator::Coordinator, transaction::Transaction};
 use tonic::{transport::Server as TServer, Request, Response, Status as TStatus};
 
 use std::net::ToSocketAddrs;
-use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+
 use tracing::instrument;
 
 use proto::frontend::frontend_server::{Frontend, FrontendServer};
@@ -86,11 +85,7 @@ impl Frontend for ProtoServer {
         info!("Got a request: {:?}", request);
 
         // Generate a new transaction id
-        let transaction_id = Uuid::from_u128(
-            self.parent_server
-                .transaction_counter
-                .fetch_add(1, Ordering::SeqCst) as u128,
-        );
+        let transaction_id = Uuid::new_v4();
         let transaction_info = Arc::new(TransactionInfo {
             id: transaction_id,
             started: Utc::now(),
@@ -370,7 +365,6 @@ pub struct Server {
     //  Keeping track of transactions that haven't committed yet
     transaction_table: RwLock<HashMap<Uuid, Arc<Mutex<Transaction>>>>,
     bg_runtime: tokio::runtime::Handle,
-    transaction_counter: AtomicU64,
 }
 // TODO: add a trait for Frontend?
 impl Server {
@@ -382,7 +376,6 @@ impl Server {
         runtime: tokio::runtime::Handle,
         bg_runtime: tokio::runtime::Handle,
         cancellation_token: CancellationToken,
-        transaction_counter: AtomicU64,
     ) -> Arc<Self> {
         let coordinator = Coordinator::new(
             &config,
@@ -400,7 +393,6 @@ impl Server {
             coordinator,
             transaction_table: RwLock::new(HashMap::new()),
             bg_runtime,
-            transaction_counter,
         })
     }
 

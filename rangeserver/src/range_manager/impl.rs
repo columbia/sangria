@@ -267,6 +267,7 @@ where
                         TransactionAbortReason::TransactionLockLost,
                     ));
                 }
+
                 self.acquire_range_lock(state, tx.clone()).await?;
                 {
                     // TODO: probably don't need holding that latch while writing to the WAL.
@@ -337,7 +338,6 @@ where
                     // realize that, so we just return success.
                     return Ok(());
                 }
-                // info!("Committing transaction with ID: {:?}", tx.id);
                 state.highest_known_epoch.maybe_update(commit.epoch()).await;
 
                 // TODO: handle potential duplicates here.

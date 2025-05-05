@@ -7,8 +7,6 @@ use common::{
     region::{Region, Zone},
     util::core_affinity::restrict_to_cores,
 };
-use frontend::frontend::Server;
-use std::sync::atomic::AtomicU64;
 use std::{
     fs::read_to_string,
     net::{ToSocketAddrs, UdpSocket},
@@ -16,29 +14,12 @@ use std::{
 };
 
 use core_affinity;
-use core_affinity;
 use frontend::frontend::Server;
 use frontend::range_assignment_oracle::RangeAssignmentOracle;
-use frontend::range_assignment_oracle::RangeAssignmentOracle;
-use proto::universe::universe_client::UniverseClient;
 use proto::universe::universe_client::UniverseClient;
 use tokio::runtime::Builder;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
-
-#[derive(Parser, Debug)]
-#[command(name = "frontend")]
-#[command(about = "Frontend", long_about = None)]
-struct Args {
-    #[arg(long, default_value = "configs/config.json")]
-    config: String,
-
-    #[arg(long, default_value = "test-region")]
-    region: String,
-
-    #[arg(long, default_value = "a")]
-    zone: String,
-}
 #[derive(Parser, Debug)]
 #[command(name = "frontend")]
 #[command(about = "Frontend", long_about = None)]
@@ -77,7 +58,6 @@ fn main() {
     restrict_to_cores(&background_runtime_cores);
 
     let runtime = Builder::new_current_thread().enable_all().build().unwrap();
-
     let fast_network_addr = config
         .frontend
         .fast_network_addr
@@ -93,12 +73,6 @@ fn main() {
         spawn_tokio_polling_thread(
             "fast-network-poller-frontend",
             fast_network_clone,
-            config.frontend.polling_core_id,
-        )
-        .await;
-        spawn_tokio_polling_thread(
-            "fast-network-poller-frontend",
-            fast_network_clone,
             config.frontend.fast_network_polling_core_id as usize,
         )
         .await;
@@ -107,30 +81,6 @@ fn main() {
     let cancellation_token = CancellationToken::new();
     let runtime_handle = runtime.handle().clone();
     let ct_clone = cancellation_token.clone();
-
-    let all_cores = core_affinity::get_core_ids().unwrap();
-    let allowed_cores = all_cores
-        .into_iter()
-        .filter(|c| c.id != 38 && c.id != 39)
-        .collect::<Vec<_>>();
-
-    let num_cores = allowed_cores.clone().len();
-
-    let core_pool = std::sync::Arc::new(parking_lot::Mutex::new(allowed_cores.into_iter()));
-
-    let bg_runtime = Builder::new_multi_thread()
-        .worker_threads(num_cores)
-        .on_thread_start({
-            let core_pool = core_pool.clone();
-            move || {
-                if let Some(core) = core_pool.lock().next() {
-                    core_affinity::set_for_current(core);
-                }
-            }
-        })
-        .enable_all()
-        .build()
-        .unwrap();
 
     let bg_runtime = Builder::new_multi_thread()
         .worker_threads(background_runtime_cores.len())
@@ -153,7 +103,6 @@ fn main() {
             runtime_handle,
             bg_runtime_clone,
             ct_clone,
-            AtomicU64::new(0),
         )
         .await;
 
