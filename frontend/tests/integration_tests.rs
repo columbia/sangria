@@ -68,6 +68,7 @@ async fn init_config() -> Config {
             proto_server_addr: "127.0.0.1:50054".parse().unwrap(),
             fast_network_addr: "127.0.0.1:50055".parse().unwrap(),
             fast_network_polling_core_id: 1,
+            background_runtime_core_ids: vec![1],
         },
         universe: UniverseConfig {
             proto_server_addr: "127.0.0.1:50056".parse().unwrap(),
@@ -76,6 +77,7 @@ async fn init_config() -> Config {
             proto_server_addr: "127.0.0.1:50057".parse().unwrap(),
             fast_network_addr: "127.0.0.1:50058".parse().unwrap(),
             fast_network_polling_core_id: 1,
+            background_runtime_core_ids: vec![1],
             transaction_overall_timeout: time::Duration::from_secs(10),
         },
         cassandra: CassandraConfig {

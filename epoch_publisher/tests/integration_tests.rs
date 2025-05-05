@@ -52,6 +52,7 @@ fn get_config(epoch_address: SocketAddr) -> Config {
             proto_server_addr: HostPort::from_str("127.0.0.1:50054").unwrap(),
             fast_network_addr: HostPort::from_str("127.0.0.1:50055").unwrap(),
             fast_network_polling_core_id: 1,
+            background_runtime_core_ids: vec![1],
         },
         universe: UniverseConfig {
             proto_server_addr: "127.0.0.1:123".parse().unwrap(),
@@ -60,6 +61,7 @@ fn get_config(epoch_address: SocketAddr) -> Config {
             proto_server_addr: HostPort::from_str("127.0.0.1:50057").unwrap(),
             fast_network_addr: HostPort::from_str("127.0.0.1:50058").unwrap(),
             fast_network_polling_core_id: 1,
+            background_runtime_core_ids: vec![1],
             transaction_overall_timeout: time::Duration::from_secs(10),
         },
         cassandra: CassandraConfig {

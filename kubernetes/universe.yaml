@@ -66,7 +66,8 @@ data:
           },
           "proto_server_addr": "0.0.0.0:50054",
           "fast_network_addr": "0.0.0.0:50055",
-          "fast_network_polling_core_id": 0
+          "fast_network_polling_core_id": 0,
+          "background_runtime_core_ids": [0]
         },
         "universe": {
             "proto_server_addr": "0.0.0.0:50056"
@@ -75,6 +76,7 @@ data:
             "proto_server_addr": "0.0.0.0:50057",
             "fast_network_addr": "0.0.0.0:50058",
             "fast_network_polling_core_id": 0,
+            "background_runtime_core_ids": [0],
             "transaction_overall_timeout": {
                 "secs": 10,
                 "nanos": 0

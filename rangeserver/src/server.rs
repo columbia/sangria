@@ -806,6 +806,7 @@ pub mod tests {
                 proto_server_addr: HostPort::from_str("127.0.0.1:50054").unwrap(),
                 fast_network_addr: HostPort::from_str("127.0.0.1:50055").unwrap(),
                 fast_network_polling_core_id: 1,
+                background_runtime_core_ids: vec![1],
                 // proto_server_addr: proto_server_listener.local_addr().unwrap(),
             },
             universe: UniverseConfig {
@@ -815,6 +816,7 @@ pub mod tests {
                 proto_server_addr: HostPort::from_str("127.0.0.1:50056").unwrap(),
                 fast_network_addr: HostPort::from_str("127.0.0.1:50057").unwrap(),
                 fast_network_polling_core_id: 1,
+                background_runtime_core_ids: vec![1],
                 transaction_overall_timeout: time::Duration::from_secs(10),
             },
             cassandra: CassandraConfig {

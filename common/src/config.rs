@@ -115,6 +115,7 @@ pub struct RangeServerConfig {
     pub proto_server_addr: HostPort,
     pub fast_network_addr: HostPort,
     pub fast_network_polling_core_id: u32,
+    pub background_runtime_core_ids: Vec<u32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -133,6 +134,7 @@ pub struct FrontendConfig {
     pub proto_server_addr: HostPort,
     pub fast_network_addr: HostPort,
     pub fast_network_polling_core_id: u32,
+    pub background_runtime_core_ids: Vec<u32>,
     pub transaction_overall_timeout: std::time::Duration,
 }
 
