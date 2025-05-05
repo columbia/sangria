@@ -6,7 +6,6 @@ use std::{
 use bytes::Bytes;
 use common::{
     constants, full_range_id::FullRangeId, keyspace::Keyspace, keyspace_id::KeyspaceId,
-    constants, full_range_id::FullRangeId, keyspace::Keyspace,
     membership::range_assignment_oracle::RangeAssignmentOracle, record::Record,
     transaction_info::TransactionInfo,
 };
