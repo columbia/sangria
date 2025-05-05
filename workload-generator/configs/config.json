@@ -1,1 +1,7 @@
-{"num-keys": 1, "max-concurrency": 1, "num-queries": 1000, "zipf-exponent": 1.0, "namespace": "piquant", "name": "ostrich_feef5c0e"}
+{
+    "num-keys": 1, 
+    "max-concurrency": 1,
+    "num-queries": 1000,
+    "zipf-exponent": 1.0, 
+    "namespace": "piquant", 
+    "name": "ostrich_feef5c0e"}

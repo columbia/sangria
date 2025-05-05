@@ -22,8 +22,7 @@ use tokio::sync::RwLock;
 
 pub struct RangeAssignmentOracle {
     universe_client: UniverseClient<tonic::transport::Channel>,
-    // Cache for mapping keyspace_id and key to range_id
-    // Using RwLock for concurrent access with multiple readers
+    // Using a couple of caches to avoid making too many requests to the universe client
     key_to_full_range_id: RwLock<HashMap<String, FullRangeId>>,
     keyspace_to_keyspace_info: RwLock<HashMap<String, KeyspaceInfo>>,
 }
