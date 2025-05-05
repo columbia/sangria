@@ -27,7 +27,7 @@ use proto::universe::{CreateKeyspaceRequest, CreateKeyspaceResponse};
 
 use crate::range_assignment_oracle::RangeAssignmentOracle;
 use chrono::Utc;
-
+use tracing::info;
 #[derive(Clone)]
 struct ProtoServer {
     parent_server: Arc<Server>,
