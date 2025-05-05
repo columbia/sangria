@@ -12,12 +12,14 @@ use common::{
         fast_network::spawn_tokio_polling_thread, for_testing::udp_fast_network::UdpFastNetwork,
     },
     region::{Region, Zone},
+    util::core_affinity::restrict_to_cores,
 };
+use core_affinity;
+use core_affinity;
 use rangeserver::{cache::memtabledb::MemTableDB, server::Server, storage::cassandra::Cassandra};
 use tokio::net::TcpListener;
 use tokio::runtime::Builder;
 use tokio_util::sync::CancellationToken;
-use core_affinity;
 use tracing::info;
 
 #[derive(Parser, Debug)]
@@ -44,6 +46,18 @@ fn main() {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
     let config: Config = serde_json::from_str(&read_to_string(&args.config).unwrap()).unwrap();
+    let args = Args::parse();
+    let config: Config = serde_json::from_str(&read_to_string(&args.config).unwrap()).unwrap();
+
+    let mut background_runtime_cores = config.range_server.background_runtime_core_ids.clone();
+    if background_runtime_cores.is_empty() {
+        background_runtime_cores = core_affinity::get_core_ids()
+            .unwrap()
+            .iter()
+            .map(|id| id.id as u32)
+            .collect();
+    }
+    restrict_to_cores(&background_runtime_cores);
 
     let runtime = Builder::new_current_thread().enable_all().build().unwrap();
     let runtime_handle = runtime.handle().clone();
@@ -63,6 +77,12 @@ fn main() {
             "fast-network-poller-rangeserver",
             fast_network_clone,
             config.range_server.polling_core_id,
+        )
+        .await;
+        spawn_tokio_polling_thread(
+            "fast-network-poller-rangeserver",
+            fast_network_clone,
+            config.range_server.fast_network_polling_core_id as usize,
         )
         .await;
     });
@@ -106,7 +126,7 @@ fn main() {
             .collect::<Vec<_>>();
         let num_cores = allowed_cores.clone().len();
         let core_pool = std::sync::Arc::new(parking_lot::Mutex::new(allowed_cores.into_iter()));
-    
+
         let bg_runtime = Builder::new_multi_thread()
             .worker_threads(num_cores)
             .on_thread_start({
@@ -117,6 +137,12 @@ fn main() {
                     }
                 }
             })
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let bg_runtime = Builder::new_multi_thread()
+            .worker_threads(background_runtime_cores.len())
             .enable_all()
             .build()
             .unwrap();

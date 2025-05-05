@@ -1,5 +1,7 @@
 use clap::Parser;
 use common::config::Config;
+use core_affinity;
+use parking_lot;
 use proto::frontend::frontend_client::FrontendClient;
 use serde_json;
 use std::fs;
@@ -11,8 +13,6 @@ use workload_generator::{
     workload_config::WorkloadConfig,
     workload_generator::{Metrics, WorkloadGenerator},
 };
-use core_affinity;
-use parking_lot;
 
 #[derive(Parser, Debug)]
 #[command(name = "workload-generator")]
