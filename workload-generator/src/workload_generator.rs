@@ -125,6 +125,10 @@ impl WorkloadGenerator {
                 namespace: self.workload_config.namespace.clone(),
                 name: self.workload_config.name.clone(),
                 primary_zone: Some(ProtoZone::from(zone)),
+                // base_key_ranges: vec![KeyRangeRequest {
+                //     lower_bound_inclusive: vec![],
+                //     upper_bound_exclusive: vec![],
+                // }],
                 base_key_ranges: (0..self.workload_config.num_keys)
                     .map(|i| KeyRangeRequest {
                         lower_bound_inclusive: vec![i.try_into().unwrap()],
