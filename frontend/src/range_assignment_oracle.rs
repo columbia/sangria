@@ -203,10 +203,12 @@ mod tests {
             let keyspace_info_search_field =
                 _request.into_inner().keyspace_info_search_field.unwrap();
             match keyspace_info_search_field {
-                KeyspaceInfoSearchField::KeyspaceId(keyspace_id) => {
+                KeyspaceInfoSearchField::Keyspace(keyspace) => {
                     //  search keyspaces until we find the one with the same keyspace_id
                     for keyspace_info in self.keyspaces_info.lock().unwrap().iter() {
-                        if keyspace_info.keyspace_id == keyspace_id {
+                        if keyspace_info.name == keyspace.name
+                            && keyspace_info.namespace == keyspace.namespace
+                        {
                             return Ok(Response::new(GetKeyspaceInfoResponse {
                                 keyspace_info: Some(keyspace_info.clone()),
                             }));
@@ -300,7 +302,10 @@ mod tests {
         let key = Bytes::from_static(&[5]);
         let full_range_id = range_assignment_oracle
             .full_range_id_of_key(
-                KeyspaceId::new(Uuid::parse_str(&keyspace_info.keyspace_id).unwrap()),
+                &Keyspace {
+                    name: "test_keyspace".to_string(),
+                    namespace: "test_namespace".to_string(),
+                },
                 key,
             )
             .await
