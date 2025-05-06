@@ -3,7 +3,7 @@
     "max-concurrency": 1,
     "num-queries": 1000,
     "zipf-exponent": 1.0, 
-    "namespace": "piquant", 
-    "name": "ostrich_feef5c0e",
-    "background-runtime-core-ids": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+    "namespace": "mr", 
+    "name": "bubbles",
+    "background-runtime-core-ids": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
 }
