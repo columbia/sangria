@@ -12,4 +12,6 @@ pub struct WorkloadConfig {
     pub name: String,
     #[serde(rename = "max-concurrency")]
     pub max_concurrency: u64,
+    #[serde(rename = "background-runtime-core-ids")]
+    pub background_runtime_core_ids: Vec<u32>,
 }

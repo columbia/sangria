@@ -1,7 +1,7 @@
 use clap::Parser;
 use common::config::Config;
+use common::util::core_affinity::restrict_to_cores;
 use core_affinity;
-use parking_lot;
 use proto::frontend::frontend_client::FrontendClient;
 use serde_json;
 use std::fs;
@@ -60,25 +60,17 @@ fn main() {
     let workload_config: WorkloadConfig =
         serde_json::from_str(&fs::read_to_string(&args.workload_config).unwrap()).unwrap();
 
-    let all_cores = core_affinity::get_core_ids().unwrap();
-    let allowed_cores = all_cores
-        .into_iter()
-        .filter(|c| c.id != 38 && c.id != 39)
-        .collect::<Vec<_>>();
-
-    let num_cores = allowed_cores.clone().len();
-    let core_pool = std::sync::Arc::new(parking_lot::Mutex::new(allowed_cores.into_iter()));
-
+    let mut background_runtime_cores = workload_config.background_runtime_core_ids.clone();
+    if background_runtime_cores.is_empty() {
+        background_runtime_cores = core_affinity::get_core_ids()
+            .unwrap()
+            .iter()
+            .map(|id| id.id as u32)
+            .collect();
+    }
+    restrict_to_cores(&background_runtime_cores);
     let runtime = Builder::new_multi_thread()
-        .worker_threads(num_cores)
-        .on_thread_start({
-            let core_pool = core_pool.clone();
-            move || {
-                if let Some(core) = core_pool.lock().next() {
-                    core_affinity::set_for_current(core);
-                }
-            }
-        })
+        .worker_threads(background_runtime_cores.len())
         .enable_all()
         .build()
         .unwrap();

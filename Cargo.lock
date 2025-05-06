@@ -2514,7 +2514,6 @@ dependencies = [
  "frontend",
  "futures",
  "num_cpus",
- "parking_lot",
  "proto",
  "rand",
  "serde",
