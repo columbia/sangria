@@ -12,9 +12,7 @@ use common::{
 };
 
 use proto::universe::universe_client::UniverseClient;
-use proto::universe::{
-    get_keyspace_info_request::KeyspaceInfoSearchField, GetKeyspaceInfoRequest,
-};
+use proto::universe::{get_keyspace_info_request::KeyspaceInfoSearchField, GetKeyspaceInfoRequest};
 // TODO: Dumb little Oracle -- redesign it
 
 pub struct RangeAssignmentOracle {
