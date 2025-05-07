@@ -63,8 +63,8 @@ def run_workload(config):
 
     # Create a temporary config file with the current parameters
     root_dir = Path(__file__).parent.parent.parent
-    config_path = root_dir / "config.json"
-    workload_config_path = root_dir / "workload-generator" / "configs" / "config.json"
+    config_path = root_dir / "configs" / "config.json"
+    workload_config_path = root_dir / "workload-generator" / "configs" / f"config-ray.json"
     os.makedirs(os.path.dirname(workload_config_path), exist_ok=True)
     with open(workload_config_path, "w") as f:
         json.dump(config, f)
@@ -75,6 +75,7 @@ def run_workload(config):
             [
                 "cargo",
                 "run",
+                "--release",
                 "--bin",
                 "workload-generator",
                 "--",
@@ -125,6 +126,7 @@ def main():
         "zipf-exponent": tune.grid_search([0, 0.5, 1.2]),
         "namespace": namespace,
         "name": name,
+        "background-runtime-core-ids": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
     }
 
     experiment_name = f"{namespace}_{name}_{uuid.uuid4().hex[:8]}"

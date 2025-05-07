@@ -40,7 +40,7 @@ class Plotter:
                 "x": x,
                 "y": metric,
                 "key": z,
-                "y_range": [0, self.latency_max + 0.1] if metric.endswith("latency") else None,
+                "y_range": [0, self.latency_max + 0.01] if metric.endswith("latency") else None,
                 "color_map": color_map,
                 "marker_map": marker_map,
                 "showlegend": True if i == 0 else False,
@@ -78,7 +78,7 @@ class Plotter:
         )
 
 if __name__ == "__main__":
-    experiment_name = "piquant_ostrich_4f0d497c"
+    experiment_name = "muscular_okapi_3140884c"
     plotter = Plotter(experiment_name)
     plotter.plot_metrics_vs_x_vs_z(
         METRICS,
