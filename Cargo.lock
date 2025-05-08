@@ -2254,6 +2254,7 @@ dependencies = [
  "pin-project",
  "portpicker",
  "proto",
+ "rangeserver",
  "scylla 0.13.2",
  "serde_json",
  "strum",
