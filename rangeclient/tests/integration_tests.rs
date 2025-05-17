@@ -163,7 +163,7 @@ async fn setup_client(
     let client = RangeClient::new(
         fast_network,
         get_server_host_info(server_address),
-        Some(proto_server_address),
+        None,
     )
     .await;
     RangeClient::start(
