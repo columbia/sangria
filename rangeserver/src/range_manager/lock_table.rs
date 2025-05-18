@@ -20,11 +20,9 @@ pub struct LockRequest {
 }
 
 struct State {
-    open: bool, // Lock is open either when there is no holder or when the current-holder has marked the lock as violatable.
     current_holder: Option<CurrentLockHolder>,
-    previous_holder: Option<CurrentLockHolder>, // We keep the previous-holder around to track dependencies.
+    waiting_for_release: VecDeque<LockRequest>,
     waiting_to_acquire: VecDeque<LockRequest>,
-    // waiting_for_release: VecDeque<LockRequest>,
 }
 
 // Implements transaction lock table for the range.
@@ -39,36 +37,80 @@ impl LockTable {
     pub fn new() -> LockTable {
         LockTable {
             state: RwLock::new(State {
-                open: true,
                 current_holder: None,
-                previous_holder: None,
+                waiting_for_release: VecDeque::new(),
                 waiting_to_acquire: VecDeque::new(),
-                // waiting_for_release: VecDeque::new(),
             }),
         }
     }
-    // pub async fn maybe_wait_for_current_holder(
-    //     &self,
-    //     tx: Arc<TransactionInfo>,
-    // ) -> oneshot::Receiver<()> {
-    //     let (s, r) = oneshot::channel();
-    //     let mut state = self.state.write().await;
-    //     match &state.current_holder {
-    //         None => s.send(()).unwrap(),
-    //         Some(_) => {
-    //             let req = LockRequest {
-    //                 transaction: tx.clone(),
-    //                 sender: s,
-    //                 when_requested: chrono::Utc::now(),
-    //             };
-    //             state.waiting_for_release.push_back(req);
-    //         }
-    //     };
-    //     r
-    // }
+    pub async fn maybe_wait_for_current_holder(
+        &self,
+        tx: Arc<TransactionInfo>,
+    ) -> oneshot::Receiver<()> {
+        let (s, r) = oneshot::channel();
+        let mut state = self.state.write().await;
+        match &state.current_holder {
+            None => s.send(()).unwrap(),
+            Some(_) => {
+                let req = LockRequest {
+                    transaction: tx.clone(),
+                    sender: s,
+                    when_requested: chrono::Utc::now(),
+                };
+                state.waiting_for_release.push_back(req);
+            }
+        };
+        r
+    }
 
-    fn grant_lock_to_next_waiter(&self, state: &mut State) {
-        assert!(state.open);
+    pub async fn acquire(&self, tx: Arc<TransactionInfo>) -> Result<oneshot::Receiver<()>, Error> {
+        let when_requested = chrono::Utc::now();
+        let (s, r) = oneshot::channel();
+        let mut state = self.state.write().await;
+        match &state.current_holder {
+            None => {
+                let holder = CurrentLockHolder {
+                    transaction: tx.clone(),
+                    when_requested,
+                    when_acquired: when_requested,
+                };
+                state.current_holder = Some(holder);
+                s.send(()).unwrap();
+                Ok(r)
+            }
+            Some(current_holder) => {
+                if current_holder.transaction.id == tx.id {
+                    s.send(()).unwrap();
+                    Ok(r)
+                } else {
+                    // let highest_waiter = state
+                    //     .waiting_to_acquire
+                    //     .back()
+                    //     .map_or(current_holder.transaction.id, |r| r.transaction.id);
+                    // if highest_waiter > tx.id {
+                    //     // TODO: allow for skipping these checks if locks are ordered!
+                    //     Err(Error::TransactionAborted(TransactionAbortReason::WaitDie))
+                    // } else {
+                    let req = LockRequest {
+                        transaction: tx.clone(),
+                        sender: s,
+                        when_requested: chrono::Utc::now(),
+                    };
+                    state.waiting_to_acquire.push_back(req);
+                    Ok(r)
+                    // }
+                }
+            }
+        }
+    }
+
+    pub async fn release(&self) {
+        let mut state = self.state.write().await;
+        state.current_holder = None;
+        while !state.waiting_for_release.is_empty() {
+            let req = state.waiting_for_release.pop_front().unwrap();
+            req.sender.send(()).unwrap();
+        }
         match state.waiting_to_acquire.pop_front() {
             None => (),
             Some(req) => {
@@ -78,64 +120,9 @@ impl LockTable {
                     when_requested: req.when_requested,
                     when_acquired,
                 };
-                state.previous_holder = state.current_holder.take();
                 state.current_holder = Some(new_holder);
-                state.open = false;
                 req.sender.send(()).unwrap();
             }
-        }
-    }
-
-    pub async fn mark_as_violatable(&self) {
-        let mut state = self.state.write().await;
-        state.open = true;
-        self.grant_lock_to_next_waiter(&mut state);
-    }
-
-    pub async fn acquire(&self, tx: Arc<TransactionInfo>) -> Result<oneshot::Receiver<()>, Error> {
-        let when_requested = chrono::Utc::now();
-        let (s, r) = oneshot::channel();
-        let mut state = self.state.write().await;
-
-        // If the same transaction is trying to acquire the lock again, ignore.
-        if let Some(current_holder) = &state.current_holder {
-            if current_holder.transaction.id == tx.id {
-                s.send(()).unwrap();
-                return Ok(r);
-            }
-        }
-
-        // Add the new request to the waiting list.
-        let req = LockRequest {
-            transaction: tx.clone(),
-            sender: s,
-            when_requested: chrono::Utc::now(),
-        };
-        state.waiting_to_acquire.push_back(req);
-
-        //  If the lock is open, give the opportunity for the new transaction to acquire it.
-        if state.open {
-            self.grant_lock_to_next_waiter(&mut state);
-        }
-        Ok(r)
-    }
-
-    pub async fn release(&self, tx: Arc<TransactionInfo>) {
-        let mut state = self.state.write().await;
-        if let Some(current_holder) = &state.current_holder {
-            if current_holder.transaction.id == tx.id {
-                //  If the current-holder is the one releasing the lock, we must mark the lock as open and grant the lock to the next possible waiter.
-                state.open = true;
-                state.current_holder = None;
-                state.previous_holder = None;
-                self.grant_lock_to_next_waiter(&mut state);
-            } else if let Some(previous_holder) = &state.previous_holder {
-                if previous_holder.transaction.id == tx.id {
-                    //  If the previous-holder is the one releasing the lock, we just remove it so it's not listed as a dependency.
-                    state.previous_holder = None;
-                }
-            }
-            // If the transaction was holding the lock further in the past, its release has no effect.
         }
     }
 

@@ -251,7 +251,7 @@ where
                                 TransactionAbortReason::TransactionLockLost,
                             ));
                         }
-                        state.lock_table.release(tx.clone()).await;
+                        state.lock_table.release().await;
                     }
 
                     // Return early for read-only transactions
@@ -311,7 +311,7 @@ where
                         .await
                         .map_err(Error::from_wal_error)?;
                 }
-                state.lock_table.release(tx.clone()).await;
+                state.lock_table.release().await;
 
                 let _ = self
                     .prefetching_buffer
@@ -399,7 +399,7 @@ where
                 // We apply the writes to storage before releasing the lock since we send all
                 // gets to storage directly. We should implement a memtable to allow us to release
                 // the lock sooner.
-                state.lock_table.release(tx.clone()).await;
+                state.lock_table.release().await;
                 // Process transaction complete and remove the requests from the logs
                 self.prefetching_buffer
                     .process_transaction_complete(tx.id)
