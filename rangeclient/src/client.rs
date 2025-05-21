@@ -26,12 +26,14 @@ pub type Error = RangeServerError;
 pub struct PrepareOk {
     pub highest_known_epoch: u64,
     pub epoch_lease: EpochLease,
+    pub dependencies: Vec<Uuid>,
 }
 
 #[derive(Debug)]
 pub struct GetResult {
     pub vals: Vec<Option<Bytes>>,
     pub leader_sequence_number: i64,
+    pub dependencies: Vec<Uuid>,
 }
 
 struct StartedState {
@@ -174,6 +176,7 @@ impl RangeClient {
                     flatbuffers::root::<GetResponse>(envelope.bytes().unwrap().bytes()).unwrap();
                 let () = rangeserver::error::Error::from_flatbuf_status(response_msg.status())?;
                 let leader_sequence_number = response_msg.leader_sequence_number();
+                let dependencies = response_msg.dependencies().to_vec();
                 let mut result = Vec::new();
                 for record in response_msg.records().iter() {
                     for rec in record.iter() {
@@ -187,6 +190,7 @@ impl RangeClient {
                 return Ok(GetResult {
                     vals: result,
                     leader_sequence_number,
+                    dependencies,
                 });
             }
             _ => return Err(RangeServerError::InvalidRequestFormat),
@@ -278,6 +282,7 @@ impl RangeClient {
                         lower_bound_inclusive: epoch_lease.lower_bound_inclusive(),
                         upper_bound_inclusive: epoch_lease.upper_bound_inclusive(),
                     },
+                    dependencies: response_msg.dependencies().to_vec(),
                 });
             }
             _ => return Err(RangeServerError::InvalidRequestFormat),

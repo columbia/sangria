@@ -94,6 +94,7 @@ impl Frontend for ProtoServer {
                 .config
                 .frontend
                 .transaction_overall_timeout,
+            dependencies: Vec::new(),
         });
 
         let transaction = self

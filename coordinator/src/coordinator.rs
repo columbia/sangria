@@ -5,6 +5,7 @@ use common::{
     network::fast_network::FastNetwork, region::Zone, transaction_info::TransactionInfo,
 };
 use epoch_reader::reader::EpochReader;
+use resolver::Resolver;
 use tokio_util::sync::CancellationToken;
 use tx_state_store::client::Client as TxStateStoreClient;
 
@@ -16,6 +17,7 @@ pub struct Coordinator {
     range_client: Arc<crate::rangeclient::RangeClient>,
     epoch_reader: Arc<EpochReader>,
     tx_state_store: Arc<TxStateStoreClient>,
+    resolver: Arc<Resolver>,
 }
 
 impl Coordinator {
@@ -49,13 +51,14 @@ impl Coordinator {
             publisher_set.clone(),
             cancellation_token.clone(),
         ));
-
+        let resolver = Arc::new(Resolver::new());
         Coordinator {
             range_assignment_oracle,
             runtime,
             range_client,
-            tx_state_store,
             epoch_reader,
+            tx_state_store,
+            resolver,
         }
     }
 
@@ -72,6 +75,7 @@ impl Coordinator {
             self.epoch_reader.clone(),
             self.tx_state_store.clone(),
             self.runtime.clone(),
+            self.resolver.clone(),
         )
     }
 }

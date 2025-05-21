@@ -12,11 +12,13 @@ use uuid::Uuid;
 pub struct GetResult {
     pub val: Option<Bytes>,
     pub leader_sequence_number: i64,
+    pub dependencies: Vec<Uuid>,
 }
 
 pub struct PrepareResult {
     pub highest_known_epoch: u64,
     pub epoch_lease: (u64, u64),
+    pub dependencies: Vec<Uuid>,
 }
 
 #[async_trait]

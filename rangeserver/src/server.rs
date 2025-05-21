@@ -295,6 +295,7 @@ where
 
         // Execute the reads
         // TODO: consider providing a batch API on the RM.
+        let mut dependencies = HashSet::new();
         for key in request.keys().iter() {
             for key in key.iter() {
                 let key = Bytes::from(key.k().unwrap().bytes().to_vec());
@@ -316,9 +317,11 @@ where
                     // TODO(tamer): we can also abort the transaction here and not wait.
                     leader_sequence_number = constants::INVALID_LEADER_SEQUENCE_NUMBER;
                 }
+                dependencies.extend(get_result.dependencies);
             }
         }
-        Ok((leader_sequence_number, reads))
+        let dependencies = dependencies.into_iter().collect::<Vec<_>>();
+        Ok((leader_sequence_number, reads, dependencies))
     }
 
     async fn get(
@@ -336,6 +339,7 @@ where
                     status: Status::InvalidRequestFormat,
                     leader_sequence_number: 0,
                     records: None,
+                    dependencies: None,
                 },
             ),
             Some(req_id) => {
@@ -344,9 +348,9 @@ where
 
                 // Construct the response
                 let mut records_vector = Vec::new();
-                let (status, leader_sequence_number) = match read_result {
-                    Err(e) => (e.to_flatbuf_status(), -1),
-                    Ok((leader_sequence_number, reads)) => {
+                let (status, leader_sequence_number, dependencies) = match read_result {
+                    Err(e) => (e.to_flatbuf_status(), -1, Vec::new()),
+                    Ok((leader_sequence_number, reads, dependencies)) => {
                         for (k, v) in reads {
                             let k = Some(fbb.create_vector(k.to_vec().as_slice()));
                             let key = Key::create(&mut fbb, &KeyArgs { k });
@@ -359,14 +363,16 @@ where
                                 },
                             ));
                         }
-                        (Status::Ok, leader_sequence_number)
+                        (Status::Ok, leader_sequence_number, dependencies)
                     }
                 };
                 let records = Some(fbb.create_vector(&records_vector));
+                let dependencies = Some(fbb.create_vector(&dependencies));
                 let request_id = Some(Uuidu128::create(
                     &mut fbb,
                     &util::flatbuf::serialize_uuid(request_id),
                 ));
+
                 GetResponse::create(
                     &mut fbb,
                     &GetResponseArgs {
@@ -374,6 +380,7 @@ where
                         status,
                         leader_sequence_number,
                         records,
+                        dependencies,
                     },
                 )
             }
@@ -420,6 +427,7 @@ where
                     status: Status::InvalidRequestFormat,
                     epoch_lease: None,
                     highest_known_epoch: 0,
+                    dependencies: None,
                 },
             ),
             Some(req_id) => {
@@ -428,8 +436,9 @@ where
                 let prepare_result = self.prepare_inner(request).await;
 
                 // Construct the response.
-                let (status, epoch_lease, highest_known_epoch) = match prepare_result {
-                    Err(e) => (e.to_flatbuf_status(), None, 0),
+                let (status, epoch_lease, highest_known_epoch, dependencies) = match prepare_result
+                {
+                    Err(e) => (e.to_flatbuf_status(), None, 0, Vec::new()),
                     Ok(prepare_result) => {
                         let epoch_lease = Some(EpochLease::create(
                             &mut fbb,
@@ -438,9 +447,15 @@ where
                                 upper_bound_inclusive: prepare_result.epoch_lease.1,
                             },
                         ));
-                        (Status::Ok, epoch_lease, prepare_result.highest_known_epoch)
+                        (
+                            Status::Ok,
+                            epoch_lease,
+                            prepare_result.highest_known_epoch,
+                            prepare_result.dependencies,
+                        )
                     }
                 };
+                let dependencies = Some(fbb.create_vector(&dependencies));
                 let request_id = Some(Uuidu128::create(
                     &mut fbb,
                     &util::flatbuf::serialize_uuid(request_id),
@@ -452,6 +467,7 @@ where
                         status,
                         epoch_lease,
                         highest_known_epoch,
+                        dependencies,
                     },
                 )
             }

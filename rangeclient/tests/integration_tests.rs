@@ -160,12 +160,7 @@ async fn setup_client(
             tokio::task::yield_now().await
         }
     });
-    let client = RangeClient::new(
-        fast_network,
-        get_server_host_info(server_address),
-        None,
-    )
-    .await;
+    let client = RangeClient::new(fast_network, get_server_host_info(server_address), None).await;
     RangeClient::start(
         client.clone(),
         runtime.handle().clone(),

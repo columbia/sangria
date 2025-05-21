@@ -24,12 +24,18 @@ use tokio::sync::RwLock;
 use tonic::async_trait;
 use tracing::info;
 
+struct PrepareRecord {
+    writes: HashMap<Bytes, Bytes>, // key to write -> new value
+    deletes: HashSet<Bytes>,       // key to delete
+}
+
 struct LoadedState {
     range_info: RangeInfo,
     highest_known_epoch: HighestKnownEpoch,
     lock_table: lock_table::LockTable,
-    // TODO: need more efficient representation of prepares than raw bytes.
-    pending_prepare_records: Mutex<HashMap<Uuid, Bytes>>,
+    pending_prepare_records: Mutex<HashMap<Uuid, PrepareRecord>>,
+    // key -> id of the last transaction that has updated this key
+    pending_commit_table: RwLock<HashMap<Bytes, Uuid>>,
 }
 
 enum State {
@@ -70,6 +76,7 @@ where
     storage: Arc<S>,
     epoch_supplier: Arc<dyn EpochSupplier>,
     wal: Arc<W>,
+    resolver: Arc<Resolver<S, W>>,
     state: Arc<RwLock<State>>,
     prefetching_buffer: Arc<PrefetchingBuffer>,
     bg_runtime: tokio::runtime::Handle,
@@ -179,9 +186,28 @@ where
                 let mut get_result = GetResult {
                     val: None,
                     leader_sequence_number: state.range_info.leader_sequence_number as i64,
+                    dependencies: None,
                 };
 
-                // check prefetch buffer
+                // First, check if tx has any dependencies with other transactions
+                if let Some(dependency) = state.pending_commit_table.read().await.get(&key) {
+                    get_result.dependencies = vec![dependency.clone()]; // Collect the dependency
+                                                                        // Read the value from the pending_prepare_record of the dependee transaction
+                    let mut pending_prepare_records = state.pending_prepare_records.lock().await;
+                    let prepare_record = pending_prepare_records.get(&dependency).unwrap();
+                    if prepare_record.writes.contains_key(&key) {
+                        // Check the writes set
+                        get_result.val = Some(prepare_record.writes.get(&key).unwrap().clone());
+                        return Ok(get_result);
+                    } else if prepare_record.deletes.contains(&key) {
+                        // Check the deletes set
+                        return Ok(get_result);
+                    } else {
+                        panic!("Key not found in pending_prepare_records but dependency found");
+                    }
+                }
+
+                // Check prefetch buffer
                 let value = self
                     .prefetching_buffer
                     .get_from_buffer(key.clone())
@@ -215,34 +241,11 @@ where
                 return Err(Error::RangeIsNotLoaded)
             }
             State::Loaded(state) => {
-                // Sanity check that the written keys are all within this range.
-                // TODO: check delete and write sets are non-overlapping.
-                // info!("Preparing transaction with ID: {:?}", tx.id);
-                for put in prepare.puts().iter() {
-                    for put in put.iter() {
-                        // TODO: too much copying :(
-                        let key = Bytes::copy_from_slice(put.key().unwrap().k().unwrap().bytes());
-                        if !state.range_info.key_range.includes(key) {
-                            return Err(Error::KeyIsOutOfRange);
-                        }
-                    }
-                }
-                for del in prepare.deletes().iter() {
-                    for del in del.iter() {
-                        let key = Bytes::copy_from_slice(del.k().unwrap().bytes());
-                        if !state.range_info.key_range.includes(key) {
-                            return Err(Error::KeyIsOutOfRange);
-                        }
-                    }
-                }
-                // Validate the transaction lock is not lost, this is essential to ensure 2PL
-                // invariants still hold.
-
                 // Check if transaction has no writes
                 let has_writes = !(prepare.puts().unwrap_or_default().is_empty()
                     && prepare.deletes().unwrap_or_default().is_empty());
 
-                // For read-only transactions
+                // --- For read-only transactions ---
                 if !has_writes {
                     // If transaction has reads, verify lock and release it
                     if prepare.has_reads() {
@@ -251,6 +254,10 @@ where
                                 TransactionAbortReason::TransactionLockLost,
                             ));
                         }
+                        // TODO: Should I leave an entry in the PendingCommitTable for this transaction here?
+                        // Probably not, since this is a read-only transaction and future reads or writes should not depend on its success.
+                        // state.pending_commit_table.write().await.insert(key, tx.id);
+                        // TODO: Make sure somehow we don't call the commit method for read-only transactions.
                         state.lock_table.release().await;
                     }
 
@@ -258,35 +265,93 @@ where
                     return Ok(PrepareResult {
                         highest_known_epoch: state.highest_known_epoch.read().await,
                         epoch_lease: state.range_info.epoch_lease,
+                        dependencies: vec![],
                     });
                 }
 
-                // For transactions with writes, verify read lock if needed
+                // --- For transactions with writes ---
+                // 1) Validation Checks
+                // Sanity check that the written keys are all within this range. Build the prepare record while you are at it.
+                // TODO: check delete and write sets are non-overlapping.
+                let prepare_record = {
+                    let mut prepare_record = PrepareRecord {
+                        writes: HashMap::new(),
+                        deletes: HashSet::new(),
+                    };
+                    for put in prepare.puts().iter() {
+                        for put in put.iter() {
+                            // TODO: too much copying :(
+                            let key =
+                                Bytes::copy_from_slice(put.key().unwrap().k().unwrap().bytes());
+                            if !state.range_info.key_range.includes(key) {
+                                return Err(Error::KeyIsOutOfRange);
+                            }
+                            let value =
+                                Bytes::copy_from_slice(put.value().unwrap().v().unwrap().bytes());
+                            prepare_record.writes.insert(key, value);
+                        }
+                    }
+                    for del in prepare.deletes().iter() {
+                        for del in del.iter() {
+                            let key = Bytes::copy_from_slice(del.k().unwrap().bytes());
+                            if !state.range_info.key_range.includes(key) {
+                                return Err(Error::KeyIsOutOfRange);
+                            }
+                            prepare_record.deletes.insert(key);
+                        }
+                    }
+                    prepare_record
+                };
+                // Validate the transaction lock is not lost, this is essential to ensure 2PL
+                // invariants still hold.
                 if prepare.has_reads() && !state.lock_table.is_currently_holding(tx.clone()).await {
                     return Err(Error::TransactionAborted(
                         TransactionAbortReason::TransactionLockLost,
                     ));
                 }
 
+                // 2) Acquire the range lock
                 self.acquire_range_lock(state, tx.clone()).await?;
-                {
-                    // TODO: probably don't need holding that latch while writing to the WAL.
-                    // but needs careful thinking.
-                    let mut pending_prepare_records = state.pending_prepare_records.lock().await;
-                    self.wal
-                        .append_prepare(prepare)
-                        .await
-                        .map_err(Error::from_wal_error)?;
 
-                    pending_prepare_records
-                        .insert(tx.id, Bytes::copy_from_slice(prepare._tab.buf()));
+                // 3) Save the prepare record to the pending_prepare_records
+                {
+                    let mut pending_prepare_records = state.pending_prepare_records.lock().await;
+                    pending_prepare_records.insert(tx.id, prepare_record);
+                }
+                // 4) Get any Write-Write dependencies for the transaction and update the pending_commit_table
+                let mut dependencies = HashSet::new();
+                {
+                    let mut pending_commit_table = state.pending_commit_table.write().await;
+                    for key in prepare_record.writes.keys() {
+                        //  Check the writes set
+                        if pending_commit_table.contains_key(key) {
+                            dependencies.insert(pending_commit_table.get(key).unwrap().clone());
+                        }
+                        pending_commit_table.insert(key.clone(), tx.id);
+                    }
+                    for key in prepare_record.deletes.iter() {
+                        //  Check the deletes set
+                        if pending_commit_table.contains_key(key) {
+                            dependencies.insert(pending_commit_table.get(key).unwrap().clone());
+                        }
+                        pending_commit_table.insert(key.clone(), tx.id);
+                    }
                 }
 
-                let highest_known_epoch = state.highest_known_epoch.read().await;
+                // 5) Release the range lock
+                state.lock_table.release().await;
 
+                // 6) Log prepare record to WAL
+                self.wal
+                    .append_prepare(prepare)
+                    .await
+                    .map_err(Error::from_wal_error)?;
+
+                let highest_known_epoch = state.highest_known_epoch.read().await;
                 Ok(PrepareResult {
                     highest_known_epoch,
                     epoch_lease: state.range_info.epoch_lease,
+                    dependencies: dependencies.into_iter().collect(),
                 })
             }
         }
@@ -494,6 +559,7 @@ where
                     highest_known_epoch: HighestKnownEpoch::new(highest_known_epoch),
                     lock_table: lock_table::LockTable::new(),
                     pending_prepare_records: Mutex::new(HashMap::new()),
+                    pending_commit_table: RwLock::new(HashMap::new()),
                 })
             })
             .await

@@ -10,6 +10,7 @@ use common::{
     transaction_info::TransactionInfo,
 };
 use epoch_reader::reader::EpochReader;
+use resolver::Resolver;
 use tokio::task::JoinSet;
 use uuid::Uuid;
 
@@ -43,6 +44,7 @@ pub struct Transaction {
     range_assignment_oracle: Arc<dyn RangeAssignmentOracle>,
     epoch_reader: Arc<EpochReader>,
     tx_state_store: Arc<TxStateStoreClient>,
+    resolver: Arc<Resolver>,
     runtime: tokio::runtime::Handle,
 }
 
@@ -114,6 +116,10 @@ impl Transaction {
             )
             .await
             .unwrap();
+
+        //  Update the transaction info with any new dependencies.
+        self.transaction_info.dependencies.extend(get_result.dependencies);
+
         let participant_range = self.get_participant_range(full_record_key.range_id);
         let current_range_leader_seq_num = get_result.leader_sequence_number;
         if current_range_leader_seq_num != constants::INVALID_LEADER_SEQUENCE_NUMBER
@@ -204,6 +210,8 @@ impl Transaction {
 
     pub async fn commit(&mut self) -> Result<(), Error> {
         self.check_still_running()?;
+
+        // 1. --- PREPARE PHASE ---
         self.state = State::Preparing;
         let mut prepare_join_set = JoinSet::new();
         for (range_id, info) in &self.participant_ranges {
@@ -237,7 +245,7 @@ impl Transaction {
         }
         // let mut epoch = self.epoch_reader.read_epoch().await.unwrap();
         // let mut epoch_leases = Vec::new();
-        let epoch = 0;
+        // let epoch = 0;
 
         while let Some(res) = prepare_join_set.join_next().await {
             let res = match res {
@@ -269,39 +277,14 @@ impl Transaction {
         // }
 
         // At this point we are prepared!
-        // Attempt to commit.
-        match self
-            .tx_state_store
-            .try_commit_transaction(self.id, epoch)
-            .await
-            .unwrap()
-        {
-            OpResult::TransactionIsAborted => {
-                // Somebody must have aborted the transaction (maybe due to timeout)
-                // so unfortunately the commit was not successful.
-                return Err(Error::TransactionAborted(TransactionAbortReason::Other));
-            }
-            OpResult::TransactionIsCommitted(i) => assert!(i.epoch == epoch),
-        };
+        
+        // 2. --- COMMIT PHASE ---
+        // Delegate commit to the resolver.
+        let _ = self.resolver.commit(self.id).await;
 
-        // Transaction Committed!
-        self.state = State::Committed;
-        // notify participants so they can quickly release locks.
-        let mut commit_join_set = JoinSet::new();
-        for range_id in self.participant_ranges.keys() {
-            let range_id = *range_id;
-            let range_client = self.range_client.clone();
-            let transaction_info = self.transaction_info.clone();
-            commit_join_set.spawn_on(
-                async move {
-                    range_client
-                        .commit_transaction(transaction_info, &range_id, epoch)
-                        .await
-                },
-                &self.runtime,
-            );
-        }
-        while commit_join_set.join_next().await.is_some() {}
+        // 3. --- NOTIFICATION PHASE ---
+        //  Notify all the other coordinators that the transaction is committed.
+        // notify_other_coordinators(self.id).await;
         Ok(())
     }
 
