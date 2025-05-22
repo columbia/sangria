@@ -1,0 +1,148 @@
+use crate::full_range_id::FullRangeId;
+use crate::rangeclient::RangeClient;
+use crate::tx_state_store::TxStateStoreClient;
+use bytes::Bytes;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::sync::Arc;
+use tokio::sync::oneshot;
+use tokio::sync::RwLock;
+use uuid::Uuid;
+use crate::group_commit::GroupCommit;
+
+
+struct TransactionInfo {
+    id: Uuid,
+    num_dependencies: u32,
+    dependents: HashSet<Uuid>,
+    participant_ranges: HashSet<FullRangeId>,
+}
+
+struct State {
+    info_per_transaction: HashMap<Uuid, TransactionInfo>,
+    resolved_transactions: HashSet<Uuid>,
+    waiting_transactions: HashMap<Uuid, oneshot::Sender<()>>,
+}
+
+pub struct Resolver {
+    state: RwLock<State>,
+    group_commit: RwLock<GroupCommit>,
+    range_client: Arc<RangeClient>,
+    tx_state_store: Arc<TxStateStoreClient>,
+}
+
+impl Resolver {
+    pub fn new(range_client: Arc<RangeClient>, tx_state_store: Arc<TxStateStoreClient>) -> Self {
+        Resolver {
+            state: RwLock::new(State {
+                info_per_transaction: HashMap::new(),
+                resolved_transactions: HashSet::new(),
+                waiting_transactions: HashMap::new(),
+            }),
+            group_commit: GroupCommit::new(),
+            range_client,
+            tx_state_store,
+        }
+    }
+
+
+    pub async fn commit(
+        self,
+        transaction_id: Uuid,
+        dependencies: HashSet<Uuid>,
+        participant_ranges: HashSet<FullRangeId>,
+    ) -> Result<(), Error> {
+        let (s, r) = oneshot::channel();
+
+        let mut num_pending_dependencies = 0;
+
+        // Acquire the state write lock and update it with new dependencies
+        let transaction_info = {
+            let mut state = self.state.write().await;
+            for dependency in dependencies {
+                if !state.resolved_transactions.contains(&dependency) {
+                    // Dependency is not yet resolved, so we need to wait for it
+                    num_pending_dependencies += 1;
+                    // Add the transaction as a dependent of the dependency
+                    state
+                        .info_per_transaction
+                        .entry(dependency)
+                        .or_insert(TransactionInfo::default())
+                        .dependents
+                        .insert(transaction_id);
+                }
+            }
+
+            let transaction_info = state
+                .info_per_transaction
+                .entry(transaction_id)
+                .or_insert(TransactionInfo::default());
+
+            transaction_info.num_dependencies = num_pending_dependencies;
+            transaction_info.participant_ranges = participant_ranges;
+
+            state.waiting_transactions.insert(transaction_id, s);
+            transaction_info
+        };
+
+        if num_pending_dependencies == 0 {
+            // If there are no pending dependencies, we can commit the transaction
+            self.group_commit.add_transactions(vec![&transaction_info]);
+            // Trigger a commit, no need to wait for it here
+            self.group_commit.commit();
+        }
+
+        // Block until the transaction is actually committed
+        // Wait to read as many messages as there are participant ranges
+        for _ in transaction_info.participant_ranges {
+            r.await.unwrap();
+        }
+        Ok(())
+    }
+
+    pub async fn register_committed_transactions(self, transaction_ids: Vec<Uuid>) -> Result<(), Error> {
+        
+        let new_ready_to_commit = Vec::new();
+        {
+            let mut new_resolved_dependencies = Vec::new();
+
+            let mut state = self.state.write().await;
+            // TODO: When is it ok to remove transactions from resolved_transactions?
+            for transaction_id in transaction_ids {
+                state.resolved_transactions.insert(transaction_id);
+                new_resolved_dependencies.push(transaction_id);
+            }
+
+            //  Find iteratively all transactions that are now ready to commit until the new_resolved_dependencies vector is empty
+            while !new_resolved_dependencies.is_empty() {
+                let transaction_id = new_resolved_dependencies.pop().unwrap();
+
+                if !state.info_per_transaction.contains_key(&transaction_id) {
+                    continue;
+                }
+
+                let transaction_info = &state.info_per_transaction.get(&transaction_id).unwrap();
+
+                // Check if any dependencies are now resolved and if any new transactions are ready to commit
+                if !transaction_info.dependents.is_empty() {
+                    for dependent in transaction_info.dependents.iter() {
+                        let dependent_transaction_info = &state.info_per_transaction.get(&dependent).unwrap();
+                        assert!(dependent_transaction_info.num_dependencies > 0, "Dependent transaction {} has no pending dependencies", dependent);
+                        dependent_transaction_info.num_dependencies -= 1;
+                        if dependent_transaction_info.num_dependencies == 0 {
+                            // Transaction is now unblocked and ready to commit
+                            new_ready_to_commit.push(dependent_transaction_info);
+                            new_resolved_dependencies.push(dependent);
+                            state.resolved_transactions.insert(dependent);
+                        }
+                    }
+                }
+            }
+        }
+
+        self.group_commit.add_transactions(new_ready_to_commit);
+        self.group_commit.commit();
+
+        Ok(())
+    }
+}

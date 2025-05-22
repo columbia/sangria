@@ -51,7 +51,10 @@ impl Coordinator {
             publisher_set.clone(),
             cancellation_token.clone(),
         ));
-        let resolver = Arc::new(Resolver::new());
+        let resolver = Arc::new(Resolver::new(
+            self.range_client.clone(),
+            self.tx_state_store.clone(),
+        ));
         Coordinator {
             range_assignment_oracle,
             runtime,

@@ -40,6 +40,7 @@ pub struct Transaction {
     transaction_info: Arc<TransactionInfo>,
     state: State,
     participant_ranges: HashMap<FullRangeId, ParticipantRange>,
+    dependencies: HashSet<Uuid>,
     range_client: Arc<RangeClient>,
     range_assignment_oracle: Arc<dyn RangeAssignmentOracle>,
     epoch_reader: Arc<EpochReader>,
@@ -117,8 +118,8 @@ impl Transaction {
             .await
             .unwrap();
 
-        //  Update the transaction info with any new dependencies.
-        self.transaction_info.dependencies.extend(get_result.dependencies);
+        //  Update the transaction's dependencies with those returned by the Get in the range.
+        self.dependencies.extend(get_result.dependencies);
 
         let participant_range = self.get_participant_range(full_record_key.range_id);
         let current_range_leader_seq_num = get_result.leader_sequence_number;
@@ -258,6 +259,8 @@ impl Transaction {
                 Ok(res) => res,
             };
             let res = res.map_err(Self::error_from_rangeclient_error)?;
+            // Update transaction's dependencies with those returned by the Prepare in each range.
+            self.dependencies.extend(res.dependencies);
             // epoch_leases.push(res.epoch_lease);
             // if res.highest_known_epoch > epoch {
             //     epoch = res.highest_known_epoch;
@@ -277,10 +280,17 @@ impl Transaction {
         // }
 
         // At this point we are prepared!
-        
+
         // 2. --- COMMIT PHASE ---
         // Delegate commit to the resolver.
-        let _ = self.resolver.commit(self.id).await;
+        let _ = self
+            .resolver
+            .commit(
+                self.id,
+                self.dependencies,
+                self.participant_ranges.keys().collect(),
+            )
+            .await;
 
         // 3. --- NOTIFICATION PHASE ---
         //  Notify all the other coordinators that the transaction is committed.
