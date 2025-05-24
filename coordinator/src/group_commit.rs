@@ -134,4 +134,5 @@ impl GroupCommit {
         }
 
         while commit_join_set.join_next().await.is_some() {}
+    }
 }

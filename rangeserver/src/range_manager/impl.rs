@@ -458,7 +458,7 @@ where
                 }
 
                 // Update the pending_commit_table
-                {                
+                {
                     let mut pending_commit_table = state.pending_commit_table.write().await;
                     for tx in &transactions {
                         pending_commit_table.remove(&tx.id);
