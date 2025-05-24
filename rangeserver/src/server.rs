@@ -161,9 +161,11 @@ where
         }
     }
 
-    async fn remove_transaction(&self, id: Uuid) {
+    async fn remove_transactions(&self, ids: Vec<Uuid>) {
         let mut tx_table = self.transaction_table.write().await;
-        (*tx_table).remove(&id);
+        for id in ids {
+            (*tx_table).remove(&id);
+        }
     }
 
     async fn maybe_unload_range(&self, id: &FullRangeId) {
@@ -487,14 +489,20 @@ where
             None => return Err(Error::InvalidRequestFormat),
             Some(id) => id,
         };
-        let transaction_id = match request.transaction_id() {
+        let transaction_ids = match request.transaction_ids() {
             None => return Err(Error::InvalidRequestFormat),
-            Some(id) => util::flatbuf::deserialize_uuid(id),
+            Some(ids) => ids
+                .iter()
+                .map(|id| util::flatbuf::deserialize_uuid(id))
+                .collect::<Vec<_>>(),
         };
         let rm = self.maybe_load_and_get_range(&range_id).await?;
-        let tx = self.get_transaction_info(transaction_id).await?;
-        rm.commit(tx.clone(), request).await?;
-        self.remove_transaction(transaction_id).await;
+        let txs = transaction_ids
+            .iter()
+            .map(|id| self.get_transaction_info(id).await)
+            .collect::<Vec<_>>();
+        rm.commit(txs, request).await?;
+        self.remove_transactions(transaction_ids).await;
         Ok(())
     }
 

@@ -1,4 +1,5 @@
 use crate::full_range_id::FullRangeId;
+use crate::group_commit::GroupCommit;
 use crate::rangeclient::RangeClient;
 use crate::tx_state_store::TxStateStoreClient;
 use bytes::Bytes;
@@ -8,14 +9,17 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use crate::group_commit::GroupCommit;
 
+struct ParticipantRangeInfo {
+    participant_range: FullRangeId,
+    has_writes: bool,
+}
 
 struct TransactionInfo {
     id: Uuid,
     num_dependencies: u32,
     dependents: HashSet<Uuid>,
-    participant_ranges: HashSet<FullRangeId>,
+    participant_ranges_info: Vec<ParticipantRangeInfo>,
 }
 
 struct State {
@@ -26,37 +30,37 @@ struct State {
 
 pub struct Resolver {
     state: RwLock<State>,
-    group_commit: RwLock<GroupCommit>,
-    range_client: Arc<RangeClient>,
-    tx_state_store: Arc<TxStateStoreClient>,
+    group_commit: GroupCommit,
 }
 
 impl Resolver {
-    pub fn new(range_client: Arc<RangeClient>, tx_state_store: Arc<TxStateStoreClient>) -> Self {
+    pub fn new(group_commit: GroupCommit) -> Self {
         Resolver {
             state: RwLock::new(State {
                 info_per_transaction: HashMap::new(),
                 resolved_transactions: HashSet::new(),
                 waiting_transactions: HashMap::new(),
             }),
-            group_commit: GroupCommit::new(),
-            range_client,
-            tx_state_store,
+            group_commit,
         }
     }
-
 
     pub async fn commit(
         self,
         transaction_id: Uuid,
         dependencies: HashSet<Uuid>,
-        participant_ranges: HashSet<FullRangeId>,
+        participant_ranges_info: Vec<ParticipantRangeInfo>,
     ) -> Result<(), Error> {
         let (s, r) = oneshot::channel();
 
+        // A transaction that is read-only across all participant ranges will not have a commit phase and so we also ignore any dependencies it may have
+        if participant_ranges_info.iter().all(|info| !info.has_writes) {
+            return Ok(());
+        }
+
         let mut num_pending_dependencies = 0;
 
-        // Acquire the state write lock and update it with new dependencies
+        // Acquire the write lock and update the state with new dependencies
         let transaction_info = {
             let mut state = self.state.write().await;
             for dependency in dependencies {
@@ -79,7 +83,7 @@ impl Resolver {
                 .or_insert(TransactionInfo::default());
 
             transaction_info.num_dependencies = num_pending_dependencies;
-            transaction_info.participant_ranges = participant_ranges;
+            transaction_info.participant_ranges_info = participant_ranges_info;
 
             state.waiting_transactions.insert(transaction_id, s);
             transaction_info
@@ -93,15 +97,19 @@ impl Resolver {
         }
 
         // Block until the transaction is actually committed
-        // Wait to read as many messages as there are participant ranges
-        for _ in transaction_info.participant_ranges {
-            r.await.unwrap();
+        // Wait to read as many messages as there are participant ranges with non empty writesets
+        for participant_range_info in transaction_info.participant_ranges_info {
+            if participant_range_info.has_writes {
+                r.await.unwrap();
+            }
         }
         Ok(())
     }
 
-    pub async fn register_committed_transactions(self, transaction_ids: Vec<Uuid>) -> Result<(), Error> {
-        
+    pub async fn register_committed_transactions(
+        self,
+        transaction_ids: Vec<Uuid>,
+    ) -> Result<(), Error> {
         let new_ready_to_commit = Vec::new();
         {
             let mut new_resolved_dependencies = Vec::new();
@@ -126,8 +134,13 @@ impl Resolver {
                 // Check if any dependencies are now resolved and if any new transactions are ready to commit
                 if !transaction_info.dependents.is_empty() {
                     for dependent in transaction_info.dependents.iter() {
-                        let dependent_transaction_info = &state.info_per_transaction.get(&dependent).unwrap();
-                        assert!(dependent_transaction_info.num_dependencies > 0, "Dependent transaction {} has no pending dependencies", dependent);
+                        let dependent_transaction_info =
+                            &state.info_per_transaction.get(&dependent).unwrap();
+                        assert!(
+                            dependent_transaction_info.num_dependencies > 0,
+                            "Dependent transaction {} has no pending dependencies",
+                            dependent
+                        );
                         dependent_transaction_info.num_dependencies -= 1;
                         if dependent_transaction_info.num_dependencies == 0 {
                             // Transaction is now unblocked and ready to commit

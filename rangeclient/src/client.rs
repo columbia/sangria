@@ -343,9 +343,9 @@ impl RangeClient {
         }
     }
 
-    pub async fn commit_transaction(
+    pub async fn commit_transactions(
         &self,
-        tx: Arc<TransactionInfo>,
+        transactions: Vec<&TransactionInfo>,
         range_id: &FullRangeId,
         epoch: u64,
     ) -> Result<(), RangeServerError> {
@@ -353,10 +353,16 @@ impl RangeClient {
         // TODO: too much copying :(
         let req_id = Uuid::new_v4();
         let mut fbb = FlatBufferBuilder::new();
-        let transaction_id = Some(Uuidu128::create(
-            &mut fbb,
-            &util::flatbuf::serialize_uuid(tx.id),
-        ));
+
+        let transaction_ids = Some(
+            fbb.create_vector(
+                transactions
+                    .iter()
+                    .map(|t| util::flatbuf::serialize_uuid(t.id))
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+            ),
+        );
         let range_id = Some(util::flatbuf::serialize_range_id(&mut fbb, &range_id));
         let request_id = Some(Uuidu128::create(
             &mut fbb,
@@ -366,7 +372,7 @@ impl RangeClient {
             &mut fbb,
             &CommitRequestArgs {
                 request_id,
-                transaction_id,
+                transaction_ids,
                 range_id,
                 epoch,
                 vid: 0,

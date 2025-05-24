@@ -1,4 +1,5 @@
 use super::*;
+use scylla::batch::{Batch, BatchType};
 use scylla::query::Query;
 use scylla::statement::SerialConsistency;
 use scylla::transport::errors::DbError;
@@ -6,7 +7,6 @@ use scylla::transport::errors::QueryError;
 use scylla::transport::PagingState;
 use scylla::Session;
 use scylla::SessionBuilder;
-
 pub struct Cassandra {
     session: Session,
 }
@@ -134,6 +134,24 @@ impl Storage for Cassandra {
             }
         };
         res
+    }
+
+    async fn batch_commit_transactions(
+        &self,
+        transaction_ids: Vec<Uuid>,
+        epoch: u64,
+    ) -> Result<OpResult, Error> {
+        let mut batch: Batch = Batch::new(BatchType::Unlogged);
+        for transaction_id in transaction_ids {
+            batch.append_statement(COMMIT_TRANSACTION_QUERY);
+            batch.append_statement_values((epoch as i64, transaction_id));
+        }
+        let _ = self
+            .session
+            .batch(batch)
+            .await
+            .map_err(scylla_query_error_to_storage_error)?;
+        Ok(())
     }
 
     async fn abort_transaction(&self, transaction_id: Uuid) -> Result<OpResult, Error> {

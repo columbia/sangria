@@ -55,6 +55,12 @@ pub trait Storage: Send + Sync + 'static {
         key: Bytes,
         version: KeyVersion,
     ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
+    fn batch_upsert(
+        &self,
+        range_id: FullRangeId,
+        changes: HashMap<Bytes, Option<Bytes>>,
+        version: KeyVersion,
+    ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
     fn get(
         &self,
         range_id: FullRangeId,

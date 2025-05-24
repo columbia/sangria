@@ -10,6 +10,7 @@ use common::{
     transaction_info::TransactionInfo,
 };
 use epoch_reader::reader::EpochReader;
+use resolver::ParticipantRangeInfo;
 use resolver::Resolver;
 use tokio::task::JoinSet;
 use uuid::Uuid;
@@ -282,14 +283,19 @@ impl Transaction {
         // At this point we are prepared!
 
         // 2. --- COMMIT PHASE ---
+        let participants_info = self
+            .participant_ranges
+            .iter()
+            .map(|(range_id, info)| ParticipantRangeInfo {
+                participant_range: *range_id,
+                has_writes: !info.writeset.is_empty(),
+            })
+            .collect();
+
         // Delegate commit to the resolver.
         let _ = self
             .resolver
-            .commit(
-                self.id,
-                self.dependencies,
-                self.participant_ranges.keys().collect(),
-            )
+            .commit(self.id, self.dependencies, participants_info)
             .await;
 
         // 3. --- NOTIFICATION PHASE ---

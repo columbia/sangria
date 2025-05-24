@@ -189,10 +189,10 @@ where
                     dependencies: None,
                 };
 
-                // First, check if tx has any dependencies with other transactions
+                // First, check if operation has any dependencies with another transaction
                 if let Some(dependency) = state.pending_commit_table.read().await.get(&key) {
-                    get_result.dependencies = vec![dependency.clone()]; // Collect the dependency
-                                                                        // Read the value from the pending_prepare_record of the dependee transaction
+                    get_result.dependencies = vec![dependency.clone()];
+                    // Read the value from the pending_prepare_record of the dependee transaction
                     let mut pending_prepare_records = state.pending_prepare_records.lock().await;
                     let prepare_record = pending_prepare_records.get(&dependency).unwrap();
                     if prepare_record.writes.contains_key(&key) {
@@ -389,7 +389,7 @@ where
 
     async fn commit(
         &self,
-        tx: Arc<TransactionInfo>,
+        transactions: Vec<&TransactionInfo>,
         commit: CommitRequest<'_>,
     ) -> Result<(), Error> {
         let s = self.state.read().await;
@@ -398,77 +398,80 @@ where
                 return Err(Error::RangeIsNotLoaded)
             }
             State::Loaded(state) => {
-                if !state.lock_table.is_currently_holding(tx.clone()).await {
-                    // it must be that we already finished committing, but perhaps the coordinator didn't
-                    // realize that, so we just return success.
-                    return Ok(());
-                }
                 state.highest_known_epoch.maybe_update(commit.epoch()).await;
 
-                // TODO: handle potential duplicates here.
+                // Write commit record to WAL
                 self.wal
                     .append_commit(commit)
                     .await
                     .map_err(Error::from_wal_error)?;
-                let prepare_record_bytes = {
-                    let mut pending_prepare_records = state.pending_prepare_records.lock().await;
-                    // TODO: handle prior removals.
-                    pending_prepare_records.remove(&tx.id).unwrap().clone()
-                };
 
-                let prepare_record =
-                    flatbuffers::root::<PrepareRequest>(&prepare_record_bytes).unwrap();
+                // Collect all pending prepare records for the transactions
+                let mut pending_prepare_record_per_tx = HashMap::new();
+                {
+                    let mut pending_prepare_records = state.pending_prepare_records.lock().await;
+                    for tx in &transactions {
+                        match pending_prepare_records.remove(&tx.id) {
+                            Some(prepare_record) => {
+                                pending_prepare_record_per_tx.insert(tx.id, prepare_record)
+                            }
+                            None => panic!("Prepare record not found for transaction {:?}", tx.id),
+                            // TODO: Panic for now, but maybe it's just that the TX had already been committed?
+                        }
+                    }
+                }
+
+                let mut all_changes = HashMap::new();
+                for tx in &transactions {
+                    // Apply the changes to the keys in the correct order to respect the commit dependencies.
+                    // TODO: overlaps should have been handled in the prepare phase.
+                    let prepare_record = pending_prepare_record_per_tx.get(tx.id).unwrap();
+                    for (key, val) in prepare_record.writes.iter() {
+                        all_changes.insert(key, val);
+                    }
+                    for key in prepare_record.deletes.iter() {
+                        all_changes.insert(key, None);
+                    }
+                }
+
                 let version = KeyVersion {
                     epoch: commit.epoch(),
                     // TODO: version counter should be an internal counter per range.
                     // Remove from the commit message.
                     version_counter: commit.vid() as u64,
                 };
-                // TODO: we shouldn't be doing a storage operation per individual key put or delete.
-                // Instead we should write them in batches, and whenever we do multiple operations they
-                // should go in parallel not sequentially.
-                // We should also add retries in case of intermittent failures. Note that all our
-                // storage operations here are idempotent and safe to retry any number of times.
-                // We also don't need to be holding the state latch for that long.
-                for put in prepare_record.puts().iter() {
-                    for put in put.iter() {
-                        // TODO: too much copying :(
-                        let key = Bytes::copy_from_slice(put.key().unwrap().k().unwrap().bytes());
-                        let val = Bytes::copy_from_slice(put.value().unwrap().bytes());
 
-                        // TODO: we should do the storage writes lazily in the background
-                        self.storage
-                            .upsert(self.range_id, key.clone(), val.clone(), version)
-                            .await
-                            .map_err(Error::from_storage_error)?;
-
-                        // Update the prefetch buffer if this key has been requested by a prefetch call
-                        self.prefetching_buffer.upsert(key, val).await;
-                    }
-                }
-                for del in prepare_record.deletes().iter() {
-                    for del in del.iter() {
-                        let key = Bytes::copy_from_slice(del.k().unwrap().bytes());
-
-                        // TODO: we should do the storage writes lazily in the background
-                        self.storage
-                            .delete(self.range_id, key.clone(), version)
-                            .await
-                            .map_err(Error::from_storage_error)?;
-
-                        // Delete the key from the prefetch buffer if this key has been requested by a prefetch call
-                        self.prefetching_buffer.delete(key).await;
+                // Batch upsert for all puts and deletes
+                if !all_changes.is_empty() {
+                    self.storage
+                        .batch_upsert(self.range_id, all_changes.clone(), version)
+                        .await
+                        .map_err(Error::from_storage_error)?;
+                    // Update the prefetch buffer for all puts and deletes
+                    for (key, val) in all_changes.iter() {
+                        if let Some(val) = val {
+                            self.prefetching_buffer.upsert(key, val).await;
+                        } else {
+                            self.prefetching_buffer.delete(key).await;
+                        }
                     }
                 }
 
-                // We apply the writes to storage before releasing the lock since we send all
-                // gets to storage directly. We should implement a memtable to allow us to release
-                // the lock sooner.
-                state.lock_table.release().await;
-                // Process transaction complete and remove the requests from the logs
-                self.prefetching_buffer
-                    .process_transaction_complete(tx.id)
-                    .await;
+                // Update the pending_commit_table
+                {                
+                    let mut pending_commit_table = state.pending_commit_table.write().await;
+                    for tx in &transactions {
+                        pending_commit_table.remove(&tx.id);
+                    }
+                }
+
+                // TODO(kelly): Update tx complete
+                // // Process transaction complete and remove the requests from the logs for all transactions
+                // for tx_id in all_tx_ids {
+                //     self.prefetching_buffer
+                //         .process_transaction_complete(tx_id)
+                //         .await;
+                // }
                 Ok(())
             }
         }

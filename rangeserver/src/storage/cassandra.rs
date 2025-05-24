@@ -2,6 +2,9 @@ use super::*;
 use bytes::Bytes;
 use common::full_range_id::FullRangeId;
 
+use scylla::batch::{Batch, BatchType};
+use scylla::statement::Consistency;
+
 use scylla::frame::value::Unset;
 use scylla::macros::FromUserType;
 use scylla::macros::IntoUserType;
@@ -250,6 +253,43 @@ impl Storage for Cassandra {
             )
             .await
             .map_err(scylla_query_error_to_persistence_error)?;
+        Ok(())
+    }
+
+    async fn batch_upsert(
+        &self,
+        range_id: FullRangeId,
+        changes: HashMap<Bytes, Option<Bytes>>,
+        version: KeyVersion,
+    ) -> Result<(), Error> {
+        let mut batch: Batch = Batch::new(BatchType::Unlogged);
+        for (key, value) in changes {
+            batch.append_statement(UPSERT_QUERY);
+            if let Some(value) = value {
+                batch.add_statement_values((
+                    range_id.range_id,
+                    key.to_vec(),
+                    value.to_vec(),
+                    version.epoch as i64,
+                    false,
+                    version.version_counter as i64,
+                ))?;
+            } else {
+                batch.add_statement_values((
+                    range_id.range_id,
+                    key.to_vec(),
+                    Unset,
+                    version.epoch as i64,
+                    true,
+                    version.version_counter as i64,
+                ))?;
+            }
+        }
+        self.session
+            .batch(&batch)
+            .consistency(Consistency::Quorum)
+            .execute()
+            .await?;
         Ok(())
     }
 

@@ -77,15 +77,15 @@ impl RangeClient {
             .map_err(|e| self.handle_rangeserver_err(range_id, e))
     }
 
-    pub async fn commit_transaction(
+    pub async fn commit_transactions(
         &self,
-        tx: Arc<TransactionInfo>,
+        transactions: Vec<&TransactionInfo>,
         range_id: &FullRangeId,
         epoch: u64,
     ) -> Result<(), Error> {
         let client = self.get_range_client(range_id).await?;
         client
-            .commit_transaction(tx, range_id, epoch)
+            .commit_transactions(transactions, range_id, epoch)
             .await
             .map_err(|e| self.handle_rangeserver_err(range_id, e))
     }

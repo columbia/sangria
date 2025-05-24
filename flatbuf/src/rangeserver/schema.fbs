@@ -79,7 +79,7 @@ table PrepareResponse {
 
 table CommitRequest {
   request_id:Uuidu128;
-  transaction_id:Uuidu128;
+  transaction_ids:[Uuidu128];
   range_id:RangeId;
   epoch:uint64;
   vid:int64;

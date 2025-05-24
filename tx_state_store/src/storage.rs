@@ -37,4 +37,10 @@ pub trait Storage: Send + Sync + 'static {
         transaction_id: Uuid,
         epoch: u64,
     ) -> impl std::future::Future<Output = Result<OpResult, Error>> + Send;
+
+    fn batch_commit_transactions(
+        &self,
+        transaction_ids: Vec<Uuid>,
+        epoch: u64,
+    ) -> impl std::future::Future<Output = Result<OpResult, Error>> + Send;
 }
