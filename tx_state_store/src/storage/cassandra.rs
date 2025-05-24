@@ -7,6 +7,7 @@ use scylla::transport::errors::QueryError;
 use scylla::transport::PagingState;
 use scylla::Session;
 use scylla::SessionBuilder;
+
 pub struct Cassandra {
     session: Session,
 }

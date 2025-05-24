@@ -76,7 +76,6 @@ where
     storage: Arc<S>,
     epoch_supplier: Arc<dyn EpochSupplier>,
     wal: Arc<W>,
-    resolver: Arc<Resolver<S, W>>,
     state: Arc<RwLock<State>>,
     prefetching_buffer: Arc<PrefetchingBuffer>,
     bg_runtime: tokio::runtime::Handle,
