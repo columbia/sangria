@@ -5,11 +5,10 @@ use common::{
     network::fast_network::FastNetwork, region::Zone, transaction_info::TransactionInfo,
 };
 use epoch_reader::reader::EpochReader;
-use resolver::Resolver;
 use tokio_util::sync::CancellationToken;
 use tx_state_store::client::Client as TxStateStoreClient;
 
-use crate::transaction::Transaction;
+use crate::{transaction::Transaction, group_commit::GroupCommit, resolver::Resolver};
 
 pub struct Coordinator {
     range_assignment_oracle: Arc<dyn RangeAssignmentOracle>,

@@ -9,6 +9,7 @@ use common::{
 use rangeclient::client::{Error, GetResult, PrepareOk, RangeClient as Client};
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 /// RangeClient abstracts away the individual rangeservers and allows users
 /// to reach any range just by using the range id.
@@ -79,7 +80,7 @@ impl RangeClient {
 
     pub async fn commit_transactions(
         &self,
-        transactions: Vec<&TransactionInfo>,
+        transactions: Vec<Uuid>,
         range_id: &FullRangeId,
         epoch: u64,
     ) -> Result<(), Error> {

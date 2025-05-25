@@ -10,17 +10,15 @@ use common::{
     transaction_info::TransactionInfo,
 };
 use epoch_reader::reader::EpochReader;
-use resolver::ParticipantRangeInfo;
-use resolver::Resolver;
 use tokio::task::JoinSet;
 use uuid::Uuid;
 
 use crate::{
     error::{Error, TransactionAbortReason},
     rangeclient::RangeClient,
+    resolver::{ParticipantRangeInfo, Resolver},
 };
-use tx_state_store::client::Client as TxStateStoreClient;
-use tx_state_store::client::OpResult;
+use tx_state_store::client::{Client as TxStateStoreClient, OpResult};
 
 enum State {
     Running,
@@ -295,7 +293,11 @@ impl Transaction {
         // Delegate commit to the resolver.
         let _ = self
             .resolver
-            .commit(self.id, self.dependencies, participants_info)
+            .commit(
+                self.id,
+                self.dependencies.clone(),
+                participants_info,
+            )
             .await;
 
         // 3. --- NOTIFICATION PHASE ---
@@ -311,17 +313,20 @@ impl Transaction {
         epoch_reader: Arc<EpochReader>,
         tx_state_store: Arc<TxStateStoreClient>,
         runtime: tokio::runtime::Handle,
+        resolver: Arc<Resolver>,
     ) -> Transaction {
         Transaction {
             id: transaction_info.id,
             transaction_info,
             state: State::Running,
             participant_ranges: HashMap::new(),
+            dependencies: HashSet::new(),
             range_client,
             range_assignment_oracle,
             epoch_reader,
             tx_state_store,
             runtime,
+            resolver,
         }
     }
 }

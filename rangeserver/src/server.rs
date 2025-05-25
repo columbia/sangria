@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use common::network::fast_network::FastNetwork;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -161,7 +161,7 @@ where
         }
     }
 
-    async fn remove_transactions(&self, ids: Vec<Uuid>) {
+    async fn remove_transactions(&self, ids: &Vec<Uuid>) {
         let mut tx_table = self.transaction_table.write().await;
         for id in ids {
             (*tx_table).remove(&id);
@@ -272,7 +272,7 @@ where
     async fn get_inner(
         &self,
         request: GetRequest<'_>,
-    ) -> Result<(i64, Vec<(Bytes, Option<Bytes>)>), Error> {
+    ) -> Result<(i64, Vec<(Bytes, Option<Bytes>)>, Vec<Uuid>), Error> {
         let range_id = match request.range_id() {
             None => return Err(Error::InvalidRequestFormat),
             Some(id) => id,
@@ -369,7 +369,13 @@ where
                     }
                 };
                 let records = Some(fbb.create_vector(&records_vector));
-                let dependencies = Some(fbb.create_vector(&dependencies));
+                let dependencies_vector: Vec<_> = dependencies.into_iter().map(|dep| {
+                    Uuidu128::create(
+                        &mut fbb,
+                        &util::flatbuf::serialize_uuid(dep),
+                    )
+                }).collect();
+                let dependencies = Some(fbb.create_vector(&dependencies_vector));
                 let request_id = Some(Uuidu128::create(
                     &mut fbb,
                     &util::flatbuf::serialize_uuid(request_id),
@@ -457,7 +463,13 @@ where
                         )
                     }
                 };
-                let dependencies = Some(fbb.create_vector(&dependencies));
+                let dependencies_vector: Vec<_> = dependencies.into_iter().map(|dep| {
+                    Uuidu128::create(
+                        &mut fbb,
+                        &util::flatbuf::serialize_uuid(dep),
+                    )
+                }).collect();
+                let dependencies = Some(fbb.create_vector(&dependencies_vector));
                 let request_id = Some(Uuidu128::create(
                     &mut fbb,
                     &util::flatbuf::serialize_uuid(request_id),
@@ -489,7 +501,7 @@ where
             None => return Err(Error::InvalidRequestFormat),
             Some(id) => id,
         };
-        let transaction_ids = match request.transaction_ids() {
+        let transaction_ids = match &request.transaction_ids() {
             None => return Err(Error::InvalidRequestFormat),
             Some(ids) => ids
                 .iter()
@@ -497,12 +509,14 @@ where
                 .collect::<Vec<_>>(),
         };
         let rm = self.maybe_load_and_get_range(&range_id).await?;
-        let txs = transaction_ids
-            .iter()
-            .map(|id| self.get_transaction_info(id).await)
-            .collect::<Vec<_>>();
+        
+        let mut txs = Vec::new();
+        for id in transaction_ids.iter() {
+            let tx = self.get_transaction_info(*id).await?;
+            txs.push(tx);
+        }
         rm.commit(txs, request).await?;
-        self.remove_transactions(transaction_ids).await;
+        self.remove_transactions(&transaction_ids).await;
         Ok(())
     }
 
@@ -556,7 +570,7 @@ where
         let rm = self.maybe_load_and_get_range(&range_id).await?;
         let tx = self.get_transaction_info(transaction_id).await?;
         rm.abort(tx.clone(), request).await?;
-        self.remove_transaction(transaction_id).await;
+        self.remove_transactions(&vec![transaction_id]).await;
         Ok(())
     }
 

@@ -1,5 +1,5 @@
 use super::*;
-use scylla::batch::{Batch, BatchType};
+use scylla::batch::Batch;
 use scylla::query::Query;
 use scylla::statement::SerialConsistency;
 use scylla::transport::errors::DbError;
@@ -139,20 +139,39 @@ impl Storage for Cassandra {
 
     async fn batch_commit_transactions(
         &self,
-        transaction_ids: Vec<Uuid>,
+        transaction_ids: &Vec<Uuid>,
         epoch: u64,
     ) -> Result<OpResult, Error> {
-        let mut batch: Batch = Batch::new(BatchType::Unlogged);
-        for transaction_id in transaction_ids {
-            batch.append_statement(COMMIT_TRANSACTION_QUERY);
-            batch.append_statement_values((epoch as i64, transaction_id));
+        let mut batch: Batch = Default::default();
+        batch.set_serial_consistency(Some(SerialConsistency::Serial));
+        let mut batch_args = Vec::new();
+        for id in transaction_ids {
+            batch.append_statement(Query::new(COMMIT_TRANSACTION_QUERY));
+            batch_args.push((epoch as i64, id));
         }
-        let _ = self
+        let query_result = self
             .session
-            .batch(batch)
+            .batch(&batch, batch_args)
             .await
-            .map_err(scylla_query_error_to_storage_error)?;
-        Ok(())
+            .map_err(scylla_query_error_to_storage_error)?
+            .rows;
+        let res = match query_result {
+            None => panic!("no results results from a LWT"),
+            Some(mut rows) => {
+                if rows.len() != 1 {
+                    panic!("found multiple results from a LWT");
+                } else {
+                    let row = rows.pop().unwrap();
+                    let applied = row.columns[0].as_ref().unwrap().as_boolean().unwrap();
+                    if applied {
+                        Ok(OpResult::TransactionIsCommitted(CommitInfo { epoch }))
+                    } else {
+                        Ok(OpResult::TransactionIsAborted)
+                    }
+                }
+            }
+        };
+        res
     }
 
     async fn abort_transaction(&self, transaction_id: Uuid) -> Result<OpResult, Error> {

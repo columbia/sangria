@@ -176,7 +176,10 @@ impl RangeClient {
                     flatbuffers::root::<GetResponse>(envelope.bytes().unwrap().bytes()).unwrap();
                 let () = rangeserver::error::Error::from_flatbuf_status(response_msg.status())?;
                 let leader_sequence_number = response_msg.leader_sequence_number();
-                let dependencies = response_msg.dependencies().to_vec();
+                let dependencies = match response_msg.dependencies() {
+                    Some(dependencies) => dependencies.iter().map(|d| common::util::flatbuf::deserialize_uuid(d)).collect(),
+                    None => Vec::new(),
+                };
                 let mut result = Vec::new();
                 for record in response_msg.records().iter() {
                     for rec in record.iter() {
@@ -276,13 +279,17 @@ impl RangeClient {
                         .unwrap();
                 let () = rangeserver::error::Error::from_flatbuf_status(response_msg.status())?;
                 let epoch_lease = response_msg.epoch_lease().unwrap();
+                let dependencies = match response_msg.dependencies() {
+                    Some(dependencies) => dependencies.iter().map(|d| common::util::flatbuf::deserialize_uuid(d)).collect(),
+                    None => Vec::new(),
+                };
                 return Ok(PrepareOk {
                     highest_known_epoch: response_msg.highest_known_epoch(),
                     epoch_lease: EpochLease {
                         lower_bound_inclusive: epoch_lease.lower_bound_inclusive(),
                         upper_bound_inclusive: epoch_lease.upper_bound_inclusive(),
                     },
-                    dependencies: response_msg.dependencies().to_vec(),
+                    dependencies,
                 });
             }
             _ => return Err(RangeServerError::InvalidRequestFormat),
@@ -345,7 +352,7 @@ impl RangeClient {
 
     pub async fn commit_transactions(
         &self,
-        transactions: Vec<&TransactionInfo>,
+        transactions: Vec<Uuid>,
         range_id: &FullRangeId,
         epoch: u64,
     ) -> Result<(), RangeServerError> {
@@ -354,15 +361,14 @@ impl RangeClient {
         let req_id = Uuid::new_v4();
         let mut fbb = FlatBufferBuilder::new();
 
-        let transaction_ids = Some(
-            fbb.create_vector(
-                transactions
-                    .iter()
-                    .map(|t| util::flatbuf::serialize_uuid(t.id))
-                    .collect::<Vec<_>>()
-                    .as_slice(),
-            ),
-        );
+        let transaction_ids_vector: Vec<_> = transactions.iter().map(|t| {
+            Uuidu128::create(
+                &mut fbb,
+                &util::flatbuf::serialize_uuid(*t),
+            )
+        }).collect();
+        let transaction_ids = Some(fbb.create_vector(&transaction_ids_vector));
+
         let range_id = Some(util::flatbuf::serialize_range_id(&mut fbb, &range_id));
         let request_id = Some(Uuidu128::create(
             &mut fbb,

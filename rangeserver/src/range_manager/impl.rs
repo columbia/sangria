@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::prefetching_buffer::KeyState;
 use crate::prefetching_buffer::PrefetchingBuffer;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::sync::Arc;
@@ -185,14 +185,14 @@ where
                 let mut get_result = GetResult {
                     val: None,
                     leader_sequence_number: state.range_info.leader_sequence_number as i64,
-                    dependencies: None,
+                    dependencies: vec![],
                 };
 
                 // First, check if operation has any dependencies with another transaction
                 if let Some(dependency) = state.pending_commit_table.read().await.get(&key) {
                     get_result.dependencies = vec![dependency.clone()];
                     // Read the value from the pending_prepare_record of the dependee transaction
-                    let mut pending_prepare_records = state.pending_prepare_records.lock().await;
+                    let pending_prepare_records = state.pending_prepare_records.lock().await;
                     let prepare_record = pending_prepare_records.get(&dependency).unwrap();
                     if prepare_record.writes.contains_key(&key) {
                         // Check the writes set
@@ -282,18 +282,17 @@ where
                             // TODO: too much copying :(
                             let key =
                                 Bytes::copy_from_slice(put.key().unwrap().k().unwrap().bytes());
-                            if !state.range_info.key_range.includes(key) {
+                            if !state.range_info.key_range.includes(key.clone()) {
                                 return Err(Error::KeyIsOutOfRange);
                             }
-                            let value =
-                                Bytes::copy_from_slice(put.value().unwrap().v().unwrap().bytes());
-                            prepare_record.writes.insert(key, value);
+                            let val = Bytes::copy_from_slice(put.value().unwrap().bytes());
+                            prepare_record.writes.insert(key, val);
                         }
                     }
                     for del in prepare.deletes().iter() {
                         for del in del.iter() {
                             let key = Bytes::copy_from_slice(del.k().unwrap().bytes());
-                            if !state.range_info.key_range.includes(key) {
+                            if !state.range_info.key_range.includes(key.clone()) {
                                 return Err(Error::KeyIsOutOfRange);
                             }
                             prepare_record.deletes.insert(key);
@@ -312,12 +311,7 @@ where
                 // 2) Acquire the range lock
                 self.acquire_range_lock(state, tx.clone()).await?;
 
-                // 3) Save the prepare record to the pending_prepare_records
-                {
-                    let mut pending_prepare_records = state.pending_prepare_records.lock().await;
-                    pending_prepare_records.insert(tx.id, prepare_record);
-                }
-                // 4) Get any Write-Write dependencies for the transaction and update the pending_commit_table
+                // 3) Get any Write-Write dependencies for the transaction and update the pending_commit_table
                 let mut dependencies = HashSet::new();
                 {
                     let mut pending_commit_table = state.pending_commit_table.write().await;
@@ -336,6 +330,13 @@ where
                         pending_commit_table.insert(key.clone(), tx.id);
                     }
                 }
+
+                // 4) Save the prepare record to the pending_prepare_records
+                {
+                    let mut pending_prepare_records = state.pending_prepare_records.lock().await;
+                    pending_prepare_records.insert(tx.id, prepare_record);
+                }
+
 
                 // 5) Release the range lock
                 state.lock_table.release().await;
@@ -388,7 +389,7 @@ where
 
     async fn commit(
         &self,
-        transactions: Vec<&TransactionInfo>,
+        transactions: Vec<Arc<TransactionInfo>>,
         commit: CommitRequest<'_>,
     ) -> Result<(), Error> {
         let s = self.state.read().await;
@@ -412,7 +413,7 @@ where
                     for tx in &transactions {
                         match pending_prepare_records.remove(&tx.id) {
                             Some(prepare_record) => {
-                                pending_prepare_record_per_tx.insert(tx.id, prepare_record)
+                                _ = pending_prepare_record_per_tx.insert(tx.id, prepare_record)
                             }
                             None => panic!("Prepare record not found for transaction {:?}", tx.id),
                             // TODO: Panic for now, but maybe it's just that the TX had already been committed?
@@ -421,15 +422,19 @@ where
                 }
 
                 let mut all_changes = HashMap::new();
+                let mut last_tx_per_key = HashMap::new();
                 for tx in &transactions {
                     // Apply the changes to the keys in the correct order to respect the commit dependencies.
+                    // For every key, collect the last transaction that has updated it. This will help us update the pending_commit_table later.
                     // TODO: overlaps should have been handled in the prepare phase.
-                    let prepare_record = pending_prepare_record_per_tx.get(tx.id).unwrap();
+                    let prepare_record = pending_prepare_record_per_tx.get(&tx.id).unwrap();
                     for (key, val) in prepare_record.writes.iter() {
-                        all_changes.insert(key, val);
+                        all_changes.insert(key.clone(), Some(val.clone()));
+                        last_tx_per_key.insert(key.clone(), tx.id);
                     }
                     for key in prepare_record.deletes.iter() {
-                        all_changes.insert(key, None);
+                        all_changes.insert(key.clone(), None);
+                        last_tx_per_key.insert(key.clone(), tx.id);
                     }
                 }
 
@@ -443,15 +448,15 @@ where
                 // Batch upsert for all puts and deletes
                 if !all_changes.is_empty() {
                     self.storage
-                        .batch_upsert(self.range_id, all_changes.clone(), version)
+                        .batch_upsert(self.range_id, &all_changes, version)
                         .await
                         .map_err(Error::from_storage_error)?;
                     // Update the prefetch buffer for all puts and deletes
                     for (key, val) in all_changes.iter() {
                         if let Some(val) = val {
-                            self.prefetching_buffer.upsert(key, val).await;
+                            self.prefetching_buffer.upsert(key.clone(), val.clone()).await;
                         } else {
-                            self.prefetching_buffer.delete(key).await;
+                            self.prefetching_buffer.delete(key.clone()).await;
                         }
                     }
                 }
@@ -459,8 +464,14 @@ where
                 // Update the pending_commit_table
                 {
                     let mut pending_commit_table = state.pending_commit_table.write().await;
-                    for tx in &transactions {
-                        pending_commit_table.remove(&tx.id);
+                    for (key, tx_id) in last_tx_per_key {
+                        if pending_commit_table.contains_key(&key) {
+                            let last_dependee = pending_commit_table.get(&key).unwrap();
+                            if tx_id == *last_dependee {
+                                pending_commit_table.remove(&key);
+                            }
+                            // Otherwise, the transaction that last updated the key in the pending_commit_table has not committed yet.
+                        }
                     }
                 }
 

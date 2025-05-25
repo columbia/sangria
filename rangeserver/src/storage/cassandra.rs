@@ -2,8 +2,10 @@ use super::*;
 use bytes::Bytes;
 use common::full_range_id::FullRangeId;
 
-use scylla::batch::{Batch, BatchType};
-use scylla::statement::Consistency;
+use scylla::batch::Batch;
+use scylla::query::Query;
+
+use std::collections::HashMap;
 
 use scylla::frame::value::Unset;
 use scylla::macros::FromUserType;
@@ -259,37 +261,54 @@ impl Storage for Cassandra {
     async fn batch_upsert(
         &self,
         range_id: FullRangeId,
-        changes: HashMap<Bytes, Option<Bytes>>,
+        changes: &HashMap<Bytes, Option<Bytes>>,
         version: KeyVersion,
     ) -> Result<(), Error> {
-        let mut batch: Batch = Batch::new(BatchType::Unlogged);
+        let mut insert_batch_args = Vec::new();
+        let mut delete_batch_args = Vec::new();
+        let mut insert_batch: Batch = Default::default();
+        let mut delete_batch: Batch = Default::default();
+        
         for (key, value) in changes {
-            batch.append_statement(UPSERT_QUERY);
             if let Some(value) = value {
-                batch.add_statement_values((
+                // Prepare insert batch
+                insert_batch.append_statement(Query::new(UPSERT_QUERY));
+                insert_batch_args.push((
                     range_id.range_id,
                     key.to_vec(),
                     value.to_vec(),
                     version.epoch as i64,
                     false,
                     version.version_counter as i64,
-                ))?;
+                ));
             } else {
-                batch.add_statement_values((
+                // Prepare delete batch
+                delete_batch.append_statement(Query::new(UPSERT_QUERY));
+                delete_batch_args.push((
                     range_id.range_id,
                     key.to_vec(),
                     Unset,
                     version.epoch as i64,
                     true,
                     version.version_counter as i64,
-                ))?;
+                ));
             }
         }
-        self.session
-            .batch(&batch)
-            .consistency(Consistency::Quorum)
-            .execute()
-            .await?;
+
+        if !insert_batch_args.is_empty() {
+            self.session
+                .batch(&insert_batch, insert_batch_args)
+                .await
+                .map_err(scylla_query_error_to_persistence_error)?;
+        }
+
+        if !delete_batch_args.is_empty() {
+            self.session
+                .batch(&delete_batch, delete_batch_args)
+                .await
+                .map_err(scylla_query_error_to_persistence_error)?;
+        }
+
         Ok(())
     }
 

@@ -57,7 +57,7 @@ table GetResponse {
   status:Status;
   leader_sequence_number:int64;
   records:[Record];
-  dependencies: [Uuidu128];
+  dependencies:[Uuidu128];
 }
 
 table PrepareRequest {
@@ -74,7 +74,7 @@ table PrepareResponse {
   status:Status;
   highest_known_epoch:uint64;
   epoch_lease:EpochLease;
-  dependencies: [Uuidu128];
+  dependencies:[Uuidu128];
 }
 
 table CommitRequest {

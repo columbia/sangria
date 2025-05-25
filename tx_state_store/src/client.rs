@@ -41,4 +41,13 @@ impl Client {
     pub async fn try_commit_transaction(&self, id: Uuid, epoch: u64) -> Result<OpResult, Error> {
         self.storage.commit_transaction(id, epoch).await
     }
+
+    /// Attempt to commit a batch of transactions.
+    pub async fn try_batch_commit_transactions(
+        &self,
+        transaction_ids: &Vec<Uuid>,
+        epoch: u64,
+    ) -> Result<OpResult, Error> {
+        self.storage.batch_commit_transactions(transaction_ids, epoch).await
+    }
 }

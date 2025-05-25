@@ -6,6 +6,7 @@ use crate::key_version::KeyVersion;
 use bytes::Bytes;
 use common::full_range_id::FullRangeId;
 use common::key_range::KeyRange;
+use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -58,7 +59,7 @@ pub trait Storage: Send + Sync + 'static {
     fn batch_upsert(
         &self,
         range_id: FullRangeId,
-        changes: HashMap<Bytes, Option<Bytes>>,
+        changes: &HashMap<Bytes, Option<Bytes>>,
         version: KeyVersion,
     ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
     fn get(
