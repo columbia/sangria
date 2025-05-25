@@ -80,6 +80,7 @@ impl MockRangeServer {
                 status: Status::Ok,
                 records,
                 leader_sequence_number: 1,
+                dependencies: None,
             },
         );
 
@@ -152,6 +153,7 @@ impl MockRangeServer {
                 status: Status::Ok,
                 epoch_lease: epoch_lease,
                 highest_known_epoch: epoch,
+                dependencies: None,
             },
         );
 
@@ -176,31 +178,40 @@ impl MockRangeServer {
             &mut fbb,
             &util::flatbuf::serialize_uuid(request_id),
         ));
-        let transaction_id = match request.transaction_id() {
-            None => panic!("Transaction ID is required"),
-            Some(id) => util::flatbuf::deserialize_uuid(id),
+        let transaction_ids = match &request.transaction_ids() {
+            None => panic!("Transaction IDs are required"),
+            Some(ids) => ids
+                .iter()
+                .map(|id| util::flatbuf::deserialize_uuid(id))
+                .collect::<Vec<_>>(),
         };
-        let prepare_record_bytes = {
+        let prepare_record_bytes_vec = {
             let mut pending_prepare_records = self.state.pending_prepare_records.lock().unwrap();
-            pending_prepare_records
-                .remove(&transaction_id)
-                .unwrap()
-                .clone()
-        };
-        let prepare_record = flatbuffers::root::<PrepareRequest>(prepare_record_bytes.as_ref())?;
-        let mut data = self.state.data.write().await;
-        for put in prepare_record.puts().iter() {
-            for put in put.iter() {
-                let key = Bytes::copy_from_slice(put.key().unwrap().k().unwrap().bytes());
-                let val = Bytes::copy_from_slice(put.value().unwrap().bytes());
-                info!("Committing key {:?} with value {:?}", key, val);
-                data.insert(key, val);
+            let mut prepare_record_bytes_vec = Vec::new();
+            for transaction_id in transaction_ids {
+                prepare_record_bytes_vec.push(pending_prepare_records
+                    .remove(&transaction_id)
+                    .unwrap()
+                    .clone());
             }
-        }
-        for del in prepare_record.deletes().iter() {
-            for del in del.iter() {
-                let key = Bytes::copy_from_slice(del.k().unwrap().bytes());
-                data.remove(&key);
+            prepare_record_bytes_vec
+        };
+        for prepare_record_bytes in prepare_record_bytes_vec {
+            let prepare_record = flatbuffers::root::<PrepareRequest>(prepare_record_bytes.as_ref())?;
+            let mut data = self.state.data.write().await;
+            for put in prepare_record.puts().iter() {
+                for put in put.iter() {
+                    let key = Bytes::copy_from_slice(put.key().unwrap().k().unwrap().bytes());
+                    let val = Bytes::copy_from_slice(put.value().unwrap().bytes());
+                    info!("Committing key {:?} with value {:?}", key, val);
+                    data.insert(key, val);
+                }
+            }
+            for del in prepare_record.deletes().iter() {
+                for del in del.iter() {
+                    let key = Bytes::copy_from_slice(del.k().unwrap().bytes());
+                    data.remove(&key);
+                }
             }
         }
         let commit_response = CommitResponse::create(
