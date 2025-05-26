@@ -15,10 +15,10 @@ use crate::{error::Error, rangeclient::RangeClient, resolver::TransactionInfo};
 // we need to add new participant ranges to the hashmap.
 
 struct State {
+    // Transactions ready to commit grouped by participant range
     group_per_participant: HashMap<FullRangeId, Arc<RwLock<Vec<TransactionInfo>>>>,
 }
 
-// Transactions ready to commit grouped by participant range
 pub struct GroupCommit {
     state: RwLock<State>,
     // Helps us keep track of the number of participant commits we need to wait for in order to register the transaction as committed
@@ -71,16 +71,20 @@ impl GroupCommit {
     pub async fn add_transactions(&self, transactions: &Vec<TransactionInfo>) -> Result<(), Error> {
         // Group transactions by participant range
         let mut tmp_group_per_participant = HashMap::new();
+        let mut tmp_num_pending_commits = HashMap::new();
         for transaction in transactions {
+            let mut num_pending_commits = 0;
             for participant_range in transaction.participant_ranges_info.iter() {
                 // If a transaction has no writes in a participant range, it is not added to that participant range's group
                 if participant_range.has_writes {
+                    num_pending_commits += 1;
                     tmp_group_per_participant
                         .entry(participant_range.participant_range)
                         .or_insert_with(|| Vec::new())
                         .push(transaction.clone());
                 }
             }
+            tmp_num_pending_commits.insert(transaction.id, num_pending_commits);
         }
 
         let _ = self
@@ -95,10 +99,9 @@ impl GroupCommit {
                 .num_pending_participant_commits_per_transaction
                 .write()
                 .await;
-            for transaction in transactions {
-                *num_pending_participant_commits_per_transaction
-                    .entry(transaction.id)
-                    .or_insert(0) = transaction.participant_ranges_info.len() as u32;
+            for (transaction_id, num_pending_commits) in tmp_num_pending_commits.iter() {
+                num_pending_participant_commits_per_transaction
+                    .insert(*transaction_id, *num_pending_commits);
             }
         }
 
