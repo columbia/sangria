@@ -369,12 +369,10 @@ where
                     }
                 };
                 let records = Some(fbb.create_vector(&records_vector));
-                let dependencies_vector: Vec<_> = dependencies.into_iter().map(|dep| {
-                    Uuidu128::create(
-                        &mut fbb,
-                        &util::flatbuf::serialize_uuid(dep),
-                    )
-                }).collect();
+                let dependencies_vector: Vec<_> = dependencies
+                    .into_iter()
+                    .map(|dep| Uuidu128::create(&mut fbb, &util::flatbuf::serialize_uuid(dep)))
+                    .collect();
                 let dependencies = Some(fbb.create_vector(&dependencies_vector));
                 let request_id = Some(Uuidu128::create(
                     &mut fbb,
@@ -463,12 +461,10 @@ where
                         )
                     }
                 };
-                let dependencies_vector: Vec<_> = dependencies.into_iter().map(|dep| {
-                    Uuidu128::create(
-                        &mut fbb,
-                        &util::flatbuf::serialize_uuid(dep),
-                    )
-                }).collect();
+                let dependencies_vector: Vec<_> = dependencies
+                    .into_iter()
+                    .map(|dep| Uuidu128::create(&mut fbb, &util::flatbuf::serialize_uuid(dep)))
+                    .collect();
                 let dependencies = Some(fbb.create_vector(&dependencies_vector));
                 let request_id = Some(Uuidu128::create(
                     &mut fbb,
@@ -509,7 +505,7 @@ where
                 .collect::<Vec<_>>(),
         };
         let rm = self.maybe_load_and_get_range(&range_id).await?;
-        
+
         let mut txs = Vec::new();
         for id in transaction_ids.iter() {
             let tx = self.get_transaction_info(*id).await?;

@@ -268,7 +268,7 @@ impl Storage for Cassandra {
         let mut delete_batch_args = Vec::new();
         let mut insert_batch: Batch = Default::default();
         let mut delete_batch: Batch = Default::default();
-        
+
         for (key, value) in changes {
             if let Some(value) = value {
                 // Prepare insert batch

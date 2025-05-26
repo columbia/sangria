@@ -1,16 +1,18 @@
-use common::full_range_id::FullRangeId;
-use std::{collections::{HashMap, HashSet}, mem};
-use tokio::sync::mpsc;
-use tokio::sync::RwLock;
-use uuid::Uuid;
 use crate::{error::Error, group_commit::GroupCommit};
+use common::full_range_id::FullRangeId;
+use std::{
+    collections::{HashMap, HashSet},
+    mem,
+};
+use tokio::sync::{oneshot, RwLock};
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct ParticipantRangeInfo {
     pub participant_range: FullRangeId,
     pub has_writes: bool,
 }
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct TransactionInfo {
     pub id: Uuid,
     pub num_dependencies: u32,
@@ -18,15 +20,27 @@ pub struct TransactionInfo {
     pub participant_ranges_info: Vec<ParticipantRangeInfo>,
 }
 
-struct State {
+impl TransactionInfo {
+    pub fn default(id: Uuid) -> Self {
+        TransactionInfo {
+            id,
+            num_dependencies: 0,
+            dependents: HashSet::new(),
+            participant_ranges_info: Vec::new(),
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct State {
     info_per_transaction: HashMap<Uuid, TransactionInfo>,
     resolved_transactions: HashSet<Uuid>,
-    waiting_transactions: HashMap<Uuid, mpsc::Sender<()>>,
 }
 
 pub struct Resolver {
     state: RwLock<State>,
     group_commit: GroupCommit,
+    waiting_transactions: RwLock<HashMap<Uuid, oneshot::Sender<()>>>,
 }
 
 impl Resolver {
@@ -35,9 +49,9 @@ impl Resolver {
             state: RwLock::new(State {
                 info_per_transaction: HashMap::new(),
                 resolved_transactions: HashSet::new(),
-                waiting_transactions: HashMap::new(),
             }),
             group_commit,
+            waiting_transactions: RwLock::new(HashMap::new()),
         }
     }
 
@@ -47,7 +61,7 @@ impl Resolver {
         dependencies: HashSet<Uuid>,
         participant_ranges_info: Vec<ParticipantRangeInfo>,
     ) -> Result<(), Error> {
-        let (s, mut r) = mpsc::channel(1);
+        let (s, r) = oneshot::channel();
 
         // A transaction that is read-only across all participant ranges will not have a commit phase and so we also ignore any dependencies it may have
         if participant_ranges_info.iter().all(|info| !info.has_writes) {
@@ -67,7 +81,7 @@ impl Resolver {
                     state
                         .info_per_transaction
                         .entry(dependency)
-                        .or_insert(TransactionInfo::default())
+                        .or_insert(TransactionInfo::default(dependency))
                         .dependents
                         .insert(transaction_id);
                 }
@@ -76,32 +90,44 @@ impl Resolver {
             let transaction_info = state
                 .info_per_transaction
                 .entry(transaction_id)
-                .or_insert(TransactionInfo::default());
+                .or_insert(TransactionInfo::default(transaction_id));
 
-            let transaction_info_clone = transaction_info.clone();
             transaction_info.num_dependencies = num_pending_dependencies;
             transaction_info.participant_ranges_info = participant_ranges_info;
-
-            state.waiting_transactions.insert(transaction_id, s);
+            let transaction_info_clone = transaction_info.clone();
+            self.waiting_transactions.write().await.insert(transaction_id, s);
             transaction_info_clone
         };
 
         if num_pending_dependencies == 0 {
             // If there are no pending dependencies, we can commit the transaction
-            let _ = self.group_commit
-                .add_transactions(&vec![transaction_info.clone()])
-                .await;
-            // Trigger a commit, no need to wait for it here
-            let _ = self.group_commit.commit().await;
+            // Don't wait for the commit to finish here
+            self.trigger_commit(vec![transaction_info.clone()]);
         }
 
         // Block until the transaction is actually committed
-        // Wait to read as many messages as there are participant ranges with non empty writesets
-        for participant_range_info in transaction_info.participant_ranges_info {
-            if participant_range_info.has_writes {
-                r.recv().await.unwrap();
+        r.await.unwrap();
+        Ok(())
+    }
+
+    async fn trigger_commit(&self, transactions: Vec<TransactionInfo>) -> Result<(), Error> {
+        let _ = self.group_commit.add_transactions(&transactions).await;
+        let finished_transactions = self.group_commit.commit().await?;
+        let finished_transactions_ids = finished_transactions.iter().map(|tx| tx.id).collect();
+
+        // Notify the transactions currently waiting for messages in the channels so that they unblock
+        {
+            let mut waiting_transactions = self.waiting_transactions.write().await;
+            for transaction in finished_transactions {
+                let sender = waiting_transactions.remove(&transaction.id).unwrap();
+                sender.send(()).unwrap();
             }
+            // TODO: Clean up other state too here?
         }
+
+        // Register the transactions as committed so that more dependencies can be resolved
+        self.register_committed_transactions(finished_transactions_ids).await;
+
         Ok(())
     }
 
@@ -125,13 +151,11 @@ impl Resolver {
                 let transaction_id = new_resolved_dependencies.pop().unwrap();
 
                 if !state.info_per_transaction.contains_key(&transaction_id) {
+                    // Transaction has no dependents
                     continue;
                 }
 
-                let transaction_info = state
-                    .info_per_transaction
-                    .get_mut(&transaction_id)
-                    .unwrap();
+                let transaction_info = state.info_per_transaction.get_mut(&transaction_id).unwrap();
                 // Move dependents out of the transaction info
                 let dependents = mem::take(&mut transaction_info.dependents);
                 assert!(transaction_info.dependents.is_empty());
@@ -157,12 +181,9 @@ impl Resolver {
                 }
             }
         }
-
-        let _ = self.group_commit
-            .add_transactions(&new_ready_to_commit)
-            .await;
-        let _ = self.group_commit.commit().await;
-
+        // Trigger a commit so that the new ready transactions are added to the group commit and get committed
+        // Don't wait for the commit to finish here
+        self.trigger_commit(new_ready_to_commit);
         Ok(())
     }
 }

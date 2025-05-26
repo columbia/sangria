@@ -308,7 +308,7 @@ where
                     ));
                 }
 
-                // 2) Acquire the range lock
+                // 2) Acquire the range lock if it hasn't already been acquired by previous Gets
                 self.acquire_range_lock(state, tx.clone()).await?;
 
                 // 3) Get any Write-Write dependencies for the transaction and update the pending_commit_table
@@ -336,7 +336,6 @@ where
                     let mut pending_prepare_records = state.pending_prepare_records.lock().await;
                     pending_prepare_records.insert(tx.id, prepare_record);
                 }
-
 
                 // 5) Release the range lock
                 state.lock_table.release().await;
@@ -406,7 +405,7 @@ where
                     .await
                     .map_err(Error::from_wal_error)?;
 
-                // Collect all pending prepare records for the transactions
+                // Collect all pending prepare records for the transactions to be committed
                 let mut pending_prepare_record_per_tx = HashMap::new();
                 {
                     let mut pending_prepare_records = state.pending_prepare_records.lock().await;
@@ -454,7 +453,9 @@ where
                     // Update the prefetch buffer for all puts and deletes
                     for (key, val) in all_changes.iter() {
                         if let Some(val) = val {
-                            self.prefetching_buffer.upsert(key.clone(), val.clone()).await;
+                            self.prefetching_buffer
+                                .upsert(key.clone(), val.clone())
+                                .await;
                         } else {
                             self.prefetching_buffer.delete(key.clone()).await;
                         }

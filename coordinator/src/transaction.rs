@@ -293,11 +293,7 @@ impl Transaction {
         // Delegate commit to the resolver.
         let _ = self
             .resolver
-            .commit(
-                self.id,
-                self.dependencies.clone(),
-                participants_info,
-            )
+            .commit(self.id, self.dependencies.clone(), participants_info)
             .await;
 
         // 3. --- NOTIFICATION PHASE ---

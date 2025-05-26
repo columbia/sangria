@@ -189,15 +189,18 @@ impl MockRangeServer {
             let mut pending_prepare_records = self.state.pending_prepare_records.lock().unwrap();
             let mut prepare_record_bytes_vec = Vec::new();
             for transaction_id in transaction_ids {
-                prepare_record_bytes_vec.push(pending_prepare_records
-                    .remove(&transaction_id)
-                    .unwrap()
-                    .clone());
+                prepare_record_bytes_vec.push(
+                    pending_prepare_records
+                        .remove(&transaction_id)
+                        .unwrap()
+                        .clone(),
+                );
             }
             prepare_record_bytes_vec
         };
         for prepare_record_bytes in prepare_record_bytes_vec {
-            let prepare_record = flatbuffers::root::<PrepareRequest>(prepare_record_bytes.as_ref())?;
+            let prepare_record =
+                flatbuffers::root::<PrepareRequest>(prepare_record_bytes.as_ref())?;
             let mut data = self.state.data.write().await;
             for put in prepare_record.puts().iter() {
                 for put in put.iter() {

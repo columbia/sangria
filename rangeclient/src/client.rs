@@ -177,7 +177,10 @@ impl RangeClient {
                 let () = rangeserver::error::Error::from_flatbuf_status(response_msg.status())?;
                 let leader_sequence_number = response_msg.leader_sequence_number();
                 let dependencies = match response_msg.dependencies() {
-                    Some(dependencies) => dependencies.iter().map(|d| common::util::flatbuf::deserialize_uuid(d)).collect(),
+                    Some(dependencies) => dependencies
+                        .iter()
+                        .map(|d| common::util::flatbuf::deserialize_uuid(d))
+                        .collect(),
                     None => Vec::new(),
                 };
                 let mut result = Vec::new();
@@ -280,7 +283,10 @@ impl RangeClient {
                 let () = rangeserver::error::Error::from_flatbuf_status(response_msg.status())?;
                 let epoch_lease = response_msg.epoch_lease().unwrap();
                 let dependencies = match response_msg.dependencies() {
-                    Some(dependencies) => dependencies.iter().map(|d| common::util::flatbuf::deserialize_uuid(d)).collect(),
+                    Some(dependencies) => dependencies
+                        .iter()
+                        .map(|d| common::util::flatbuf::deserialize_uuid(d))
+                        .collect(),
                     None => Vec::new(),
                 };
                 return Ok(PrepareOk {
@@ -361,12 +367,10 @@ impl RangeClient {
         let req_id = Uuid::new_v4();
         let mut fbb = FlatBufferBuilder::new();
 
-        let transaction_ids_vector: Vec<_> = transactions.iter().map(|t| {
-            Uuidu128::create(
-                &mut fbb,
-                &util::flatbuf::serialize_uuid(*t),
-            )
-        }).collect();
+        let transaction_ids_vector: Vec<_> = transactions
+            .iter()
+            .map(|t| Uuidu128::create(&mut fbb, &util::flatbuf::serialize_uuid(*t)))
+            .collect();
         let transaction_ids = Some(fbb.create_vector(&transaction_ids_vector));
 
         let range_id = Some(util::flatbuf::serialize_range_id(&mut fbb, &range_id));

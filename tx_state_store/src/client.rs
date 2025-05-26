@@ -48,6 +48,8 @@ impl Client {
         transaction_ids: &Vec<Uuid>,
         epoch: u64,
     ) -> Result<OpResult, Error> {
-        self.storage.batch_commit_transactions(transaction_ids, epoch).await
+        self.storage
+            .batch_commit_transactions(transaction_ids, epoch)
+            .await
     }
 }

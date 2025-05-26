@@ -8,7 +8,7 @@ use epoch_reader::reader::EpochReader;
 use tokio_util::sync::CancellationToken;
 use tx_state_store::client::Client as TxStateStoreClient;
 
-use crate::{transaction::Transaction, group_commit::GroupCommit, resolver::Resolver};
+use crate::{group_commit::GroupCommit, resolver::Resolver, transaction::Transaction};
 
 pub struct Coordinator {
     range_assignment_oracle: Arc<dyn RangeAssignmentOracle>,
