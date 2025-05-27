@@ -6,6 +6,7 @@ use std::{
 };
 use tokio::sync::{oneshot, RwLock};
 use uuid::Uuid;
+use tracing::info;
 
 #[derive(Clone)]
 pub struct ParticipantRangeInfo {
@@ -61,13 +62,14 @@ impl Resolver {
         dependencies: HashSet<Uuid>,
         participant_ranges_info: Vec<ParticipantRangeInfo>,
     ) -> Result<(), Error> {
-        let (s, r) = oneshot::channel();
-
-        // A transaction that is read-only across all participant ranges will not have a commit phase and so we also ignore any dependencies it may have
+        
+        // A transaction that is read-only across all participant ranges will 
+        // not have a commit phase and so we also ignore any dependencies it may have
         if participant_ranges_info.iter().all(|info| !info.has_writes) {
             return Ok(());
         }
 
+        let (s, r) = oneshot::channel();
         let mut num_pending_dependencies = 0;
 
         // Acquire the write lock and update the state with new dependencies
@@ -107,6 +109,7 @@ impl Resolver {
 
         // Block until the transaction is actually committed
         r.await.unwrap();
+        info!("Transaction {} finally committed!", transaction_id);
         Ok(())
     }
 

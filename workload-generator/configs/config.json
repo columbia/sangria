@@ -1,7 +1,7 @@
 {
     "num-keys": 1, 
     "max-concurrency": 1,
-    "num-queries": 1000,
+    "num-queries": 1,
     "zipf-exponent": 1.0, 
     "namespace": "mr", 
     "name": "bubbles",

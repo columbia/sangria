@@ -121,54 +121,57 @@ impl GroupCommit {
 
     pub async fn commit(&self) -> Result<Vec<TransactionInfo>, Error> {
         // Commit all groups in parallel
-        let state = self.state.read().await;
-        let mut commit_join_set = JoinSet::<Result<Vec<TransactionInfo>, Error>>::new();
+        let mut commit_join_set = {
+            let state = self.state.read().await;
+            let mut commit_join_set = JoinSet::<Result<Vec<TransactionInfo>, Error>>::new();
 
-        for (participant_range, group_guard) in state.group_per_participant.iter() {
-            let range_client = self.range_client.clone();
-            let group_guard_clone = group_guard.clone();
-            let participant_range_clone = participant_range.clone();
-            let tx_state_store_clone = self.tx_state_store.clone();
+            for (participant_range, group_guard) in state.group_per_participant.iter() {
+                let range_client = self.range_client.clone();
+                let group_guard_clone = group_guard.clone();
+                let participant_range_clone = participant_range.clone();
+                let tx_state_store_clone = self.tx_state_store.clone();
 
-            commit_join_set.spawn(async move {
-                // Most common path is that the group is empty. Acquire the read lock to check.
-                let group_clone = group_guard_clone.read().await;
-                if group_clone.is_empty() {
-                    return Ok(Vec::new());
-                }
+                commit_join_set.spawn(async move {
+                    // Most common path is that the group is empty. Acquire the read lock to check.
+                    let group_clone = group_guard_clone.read().await;
+                    if group_clone.is_empty() {
+                        return Ok(Vec::new());
+                    }
 
-                // Acquire the write lock to commit and clear the group
-                let mut group_clone = group_guard_clone.write().await;
-                let transactions = std::mem::take(&mut *group_clone);
+                    // Acquire the write lock to commit and clear the group
+                    let mut group_clone = group_guard_clone.write().await;
+                    let transactions = std::mem::take(&mut *group_clone);
 
-                // TODO: Handle cascading aborts
-                // TODO: Does order of tx_ids matter in the tx_state_store?
-                // NOTE: A transaction will be recorded as committed in the tx_state_store once per every participant range it is part of.
-                // Log all transactions of the group that ready to commit as committed in the tx_state_store
-                let tx_ids_vec = transactions.iter().map(|tx| tx.id).collect();
-                tx_state_store_clone
-                    .try_batch_commit_transactions(&tx_ids_vec, 0)
-                    .await
-                    .unwrap();
-                // {
-                //     OpResult::TransactionIsAborted => {
-                //         // Somebody must have aborted the transaction (maybe due to timeout)
-                //         // so unfortunately the commit was not successful.
-                //         return Err(Error::TransactionAborted(TransactionAbortReason::Other));
-                //     }
-                // };
-                // Transactions Committed!
+                    // TODO: Handle cascading aborts
+                    // TODO: Does order of tx_ids matter in the tx_state_store?
+                    // NOTE: A transaction will be recorded as committed in the tx_state_store once per every participant range it is part of.
+                    // Log all transactions of the group that are ready to commit as committed in the tx_state_store
+                    let tx_ids_vec = transactions.iter().map(|tx| tx.id).collect();
+                    tx_state_store_clone
+                        .try_batch_commit_transactions(&tx_ids_vec, 0)
+                        .await
+                        .unwrap();
+                    // {
+                    //     OpResult::TransactionIsAborted => {
+                    //         // Somebody must have aborted the transaction (maybe due to timeout)
+                    //         // so unfortunately the commit was not successful.
+                    //         return Err(Error::TransactionAborted(TransactionAbortReason::Other));
+                    //     }
+                    // };
+                    // Transactions Committed!
 
-                // Notify participant so that:
-                // - it applies the TXs' PrepareRecords in storage
-                // - and then quickly updates its PendingCommitTable to stop treating these transactions as dependencies for other transactions
-                let _ = range_client
-                    .commit_transactions(tx_ids_vec, &participant_range_clone, 0)
-                    .await;
-                
-                Ok(transactions.clone())
-            });
-        }
+                    // Notify participant so that:
+                    // - it applies the TXs' PrepareRecords in storage
+                    // - and then quickly updates its PendingCommitTable to stop treating these transactions as dependencies for other transactions
+                    let _ = range_client
+                        .commit_transactions(tx_ids_vec, &participant_range_clone, 0)
+                        .await;
+                    
+                    Ok(transactions.clone())
+                });
+            }
+            commit_join_set
+        };
 
         let mut returned_transactions = Vec::new();
         while let Some(res) = commit_join_set.join_next().await {
