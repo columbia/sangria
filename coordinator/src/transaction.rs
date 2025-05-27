@@ -11,6 +11,7 @@ use common::{
 };
 use epoch_reader::reader::EpochReader;
 use tokio::task::JoinSet;
+use tracing::info;
 use uuid::Uuid;
 
 use crate::{
@@ -119,6 +120,10 @@ impl Transaction {
 
         //  Update the transaction's dependencies with those returned by the Get in the range.
         self.dependencies.extend(get_result.dependencies);
+        info!(
+            "Transaction {} has dependencies: {:?}",
+            self.id, self.dependencies
+        );
 
         let participant_range = self.get_participant_range(full_record_key.range_id);
         let current_range_leader_seq_num = get_result.leader_sequence_number;
@@ -265,6 +270,10 @@ impl Transaction {
             //     epoch = res.highest_known_epoch;
             // }
         }
+        info!(
+            "Transaction {} has dependencies: {:?}",
+            self.id, self.dependencies
+        );
 
         // for lease in &epoch_leases {
         //     info!("epoch: {:?}, lease: {:?}", epoch, lease);
@@ -291,10 +300,17 @@ impl Transaction {
             .collect();
 
         // Delegate commit to the resolver.
-        let _ = self
-            .resolver
-            .commit(self.id, self.dependencies.clone(), participants_info)
-            .await;
+        info!(
+            "Delegating commit to resolver for transaction {:?}",
+            self.id
+        );
+        let _ = Resolver::commit(
+            self.resolver.clone(),
+            self.id,
+            self.dependencies.clone(),
+            participants_info,
+        )
+        .await;
 
         // 3. --- NOTIFICATION PHASE ---
         //  Notify all the other coordinators that the transaction is committed.

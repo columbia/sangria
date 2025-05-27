@@ -188,6 +188,7 @@ where
                     dependencies: vec![],
                 };
 
+                info!("Checking dependencies for transaction {:?}", tx.id);
                 // First, check if operation has any dependencies with another transaction
                 if let Some(dependency) = state.pending_commit_table.read().await.get(&key) {
                     get_result.dependencies = vec![dependency.clone()];
@@ -205,7 +206,7 @@ where
                         panic!("Key not found in pending_prepare_records but dependency found");
                     }
                 }
-
+                info!("No dependencies found for transaction {:?}", tx.id);
                 // Check prefetch buffer
                 let value = self
                     .prefetching_buffer
@@ -313,6 +314,7 @@ where
 
                 // 3) Get any Write-Write dependencies for the transaction and update the pending_commit_table
                 let mut dependencies = HashSet::new();
+                info!("Checking dependencies for transaction {:?}", tx.id);
                 {
                     let mut pending_commit_table = state.pending_commit_table.write().await;
                     for key in prepare_record.writes.keys() {
@@ -330,7 +332,10 @@ where
                         pending_commit_table.insert(key.clone(), tx.id);
                     }
                 }
-
+                info!(
+                    "Dependencies for transaction {:?}: {:?}",
+                    tx.id, dependencies
+                );
                 // 4) Save the prepare record to the pending_prepare_records
                 {
                     let mut pending_prepare_records = state.pending_prepare_records.lock().await;
@@ -475,6 +480,7 @@ where
                         }
                     }
                 }
+                info!("Done committing transactions");
 
                 // TODO(kelly): Update tx complete
                 // // Process transaction complete and remove the requests from the logs for all transactions

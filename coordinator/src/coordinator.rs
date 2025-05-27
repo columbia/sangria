@@ -46,12 +46,12 @@ impl Coordinator {
         let epoch_reader = Arc::new(EpochReader::new(
             fast_network.clone(),
             runtime.clone(),
-            bg_runtime,
+            bg_runtime.clone(),
             publisher_set.clone(),
             cancellation_token.clone(),
         ));
         let group_commit = GroupCommit::new(range_client.clone(), tx_state_store.clone());
-        let resolver = Arc::new(Resolver::new(group_commit));
+        let resolver = Arc::new(Resolver::new(group_commit, bg_runtime));
         Coordinator {
             range_assignment_oracle,
             runtime,
