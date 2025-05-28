@@ -153,7 +153,7 @@ impl Resolver {
         info!("Registering transactions as committed");
         // Register the transactions as committed so that more dependencies can be resolved
         if !finished_transactions_ids.is_empty() {
-            Self::spawn_register_committed_transactions(resolver, finished_transactions_ids);
+            let _ = Self::spawn_register_committed_transactions(resolver, finished_transactions_ids);
         }
         Ok(())
     }

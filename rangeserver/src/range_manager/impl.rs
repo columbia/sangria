@@ -33,7 +33,7 @@ struct LoadedState {
     range_info: RangeInfo,
     highest_known_epoch: HighestKnownEpoch,
     lock_table: lock_table::LockTable,
-    pending_prepare_records: Mutex<HashMap<Uuid, PrepareRecord>>,
+    pending_prepare_records: Mutex<HashMap<Uuid, Arc<PrepareRecord>>>,
     // key -> id of the last transaction that has updated this key
     pending_commit_table: RwLock<HashMap<Bytes, Uuid>>,
 }
@@ -339,7 +339,7 @@ where
                 // 4) Save the prepare record to the pending_prepare_records
                 {
                     let mut pending_prepare_records = state.pending_prepare_records.lock().await;
-                    pending_prepare_records.insert(tx.id, prepare_record);
+                    pending_prepare_records.insert(tx.id, Arc::new(prepare_record));
                 }
 
                 // 5) Release the range lock
@@ -413,7 +413,7 @@ where
                 // Collect all pending prepare records for the transactions to be committed
                 let mut pending_prepare_record_per_tx = HashMap::new();
                 {
-                    let mut pending_prepare_records = state.pending_prepare_records.lock().await;
+                    let pending_prepare_records = state.pending_prepare_records.lock().await;
                     for tx in &transactions {
                         match pending_prepare_records.get(&tx.id) {
                             Some(prepare_record) => {
