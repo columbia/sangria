@@ -223,10 +223,12 @@ impl Resolver {
             }
         }
         // Trigger a commit so that the new ready transactions are added to the group commit and get committed
+        if !new_ready_to_commit.is_empty() {
         let resolver_clone = resolver.clone();
-        resolver.bg_runtime.spawn(async move {
-            let _ = Resolver::trigger_commit(resolver_clone, new_ready_to_commit).await;
-        });
+            resolver.bg_runtime.spawn(async move {
+                let _ = Resolver::trigger_commit(resolver_clone, new_ready_to_commit).await;
+            });
+        }
         Ok(())
     }
 }

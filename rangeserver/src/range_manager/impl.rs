@@ -415,9 +415,9 @@ where
                 {
                     let mut pending_prepare_records = state.pending_prepare_records.lock().await;
                     for tx in &transactions {
-                        match pending_prepare_records.remove(&tx.id) {
+                        match pending_prepare_records.get(&tx.id) {
                             Some(prepare_record) => {
-                                _ = pending_prepare_record_per_tx.insert(tx.id, prepare_record)
+                                _ = pending_prepare_record_per_tx.insert(tx.id, prepare_record.clone())
                             }
                             None => panic!("Prepare record not found for transaction {:?}", tx.id),
                             // TODO: Panic for now, but maybe it's just that the TX had already been committed?
@@ -467,17 +467,25 @@ where
                     }
                 }
 
-                // Update the pending_commit_table
+                // First we update the pending_commit_table to remove the transactions that have committed and are listed as dependencies for other transactions.
+                // Then (and only then) we can remove the prepare records for the transactions that have committed.
                 {
                     let mut pending_commit_table = state.pending_commit_table.write().await;
                     for (key, tx_id) in last_tx_per_key {
                         if pending_commit_table.contains_key(&key) {
+                            // The last dependee per key might have changed since the prepare phase, so we need to check if it is still a dependency before removing it.
                             let last_dependee = pending_commit_table.get(&key).unwrap();
                             if tx_id == *last_dependee {
                                 pending_commit_table.remove(&key);
                             }
                             // Otherwise, the transaction that last updated the key in the pending_commit_table has not committed yet.
                         }
+                    }
+                }
+                {
+                    let mut pending_prepare_records = state.pending_prepare_records.lock().await;
+                    for tx in &transactions {
+                        pending_prepare_records.remove(&tx.id);
                     }
                 }
                 info!("Done committing transactions");
