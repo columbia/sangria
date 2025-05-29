@@ -89,6 +89,11 @@ impl Resolver {
                         .or_insert(TransactionInfo::default(dependency))
                         .dependents
                         .insert(transaction_id);
+                } else {
+                    info!(
+                        "Dependency {:?} was already resolved in the meantime",
+                        dependency
+                    );
                 }
             }
 
@@ -153,7 +158,8 @@ impl Resolver {
         info!("Registering transactions as committed");
         // Register the transactions as committed so that more dependencies can be resolved
         if !finished_transactions_ids.is_empty() {
-            let _ = Self::spawn_register_committed_transactions(resolver, finished_transactions_ids);
+            let _ =
+                Self::spawn_register_committed_transactions(resolver, finished_transactions_ids);
         }
         Ok(())
     }
@@ -224,7 +230,7 @@ impl Resolver {
         }
         // Trigger a commit so that the new ready transactions are added to the group commit and get committed
         if !new_ready_to_commit.is_empty() {
-        let resolver_clone = resolver.clone();
+            let resolver_clone = resolver.clone();
             resolver.bg_runtime.spawn(async move {
                 let _ = Resolver::trigger_commit(resolver_clone, new_ready_to_commit).await;
             });
