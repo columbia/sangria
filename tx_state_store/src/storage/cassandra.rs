@@ -20,8 +20,7 @@ static START_TRANSACTION_QUERY: &str = r#"
 
 static COMMIT_TRANSACTION_QUERY: &str = r#"
   UPDATE atomix.transactions SET status = 'committed', epoch = ?
-    WHERE transaction_id = ? 
-    IF status IN ('started', 'committed')
+    WHERE transaction_id = ?
 "#;
 
 static ABORT_TRANSACTION_QUERY: &str = r#"
@@ -149,29 +148,30 @@ impl Storage for Cassandra {
             batch.append_statement(Query::new(COMMIT_TRANSACTION_QUERY));
             batch_args.push((epoch as i64, id));
         }
-        let query_result = self
-            .session
+        self.session
             .batch(&batch, batch_args)
             .await
-            .map_err(scylla_query_error_to_storage_error)?
-            .rows;
-        let res = match query_result {
-            None => panic!("no results results from a LWT"),
-            Some(mut rows) => {
-                if rows.len() != 1 {
-                    panic!("found multiple results from a LWT");
-                } else {
-                    let row = rows.pop().unwrap();
-                    let applied = row.columns[0].as_ref().unwrap().as_boolean().unwrap();
-                    if applied {
-                        Ok(OpResult::TransactionIsCommitted(CommitInfo { epoch }))
-                    } else {
-                        Ok(OpResult::TransactionIsAborted)
-                    }
-                }
-            }
-        };
-        res
+            .map_err(scylla_query_error_to_storage_error)?;
+        Ok(OpResult::TransactionIsCommitted(CommitInfo { epoch }))
+        // TODO: Check if the transactions were committed
+
+        // let res = match query_result {
+        //     None => panic!("no results results from a LWT"),
+        //     Some(mut rows) => {
+        //         if rows.len() != 1 {
+        //             panic!("found multiple results from a LWT");
+        //         } else {
+        //             let row = rows.pop().unwrap();
+        //             let applied = row.columns[0].as_ref().unwrap().as_boolean().unwrap();
+        //             if applied {
+        //                 Ok(OpResult::TransactionIsCommitted(CommitInfo { epoch }))
+        //             } else {
+        //                 Ok(OpResult::TransactionIsAborted)
+        //             }
+        //         }
+        //     }
+        // };
+        // res
     }
 
     async fn abort_transaction(&self, transaction_id: Uuid) -> Result<OpResult, Error> {

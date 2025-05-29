@@ -417,7 +417,8 @@ where
                     for tx in &transactions {
                         match pending_prepare_records.get(&tx.id) {
                             Some(prepare_record) => {
-                                _ = pending_prepare_record_per_tx.insert(tx.id, prepare_record.clone())
+                                _ = pending_prepare_record_per_tx
+                                    .insert(tx.id, prepare_record.clone())
                             }
                             None => panic!("Prepare record not found for transaction {:?}", tx.id),
                             // TODO: Panic for now, but maybe it's just that the TX had already been committed?
