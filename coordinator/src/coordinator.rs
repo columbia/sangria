@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use common::{
-    config::Config, membership::range_assignment_oracle::RangeAssignmentOracle,
+    config::{CommitStrategy, Config}, membership::range_assignment_oracle::RangeAssignmentOracle,
     network::fast_network::FastNetwork, region::Zone, transaction_info::TransactionInfo,
 };
 use epoch_reader::reader::EpochReader;
@@ -17,6 +17,7 @@ pub struct Coordinator {
     epoch_reader: Arc<EpochReader>,
     tx_state_store: Arc<TxStateStoreClient>,
     resolver: Arc<Resolver>,
+    commit_strategy: CommitStrategy,
 }
 
 impl Coordinator {
@@ -59,6 +60,7 @@ impl Coordinator {
             epoch_reader,
             tx_state_store,
             resolver,
+            commit_strategy: config.commit_strategy.clone(),
         }
     }
 
@@ -76,6 +78,7 @@ impl Coordinator {
             self.tx_state_store.clone(),
             self.runtime.clone(),
             self.resolver.clone(),
+            self.commit_strategy.clone(),
         )
     }
 }

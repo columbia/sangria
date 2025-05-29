@@ -6,7 +6,7 @@ use crate::{
     transaction_abort_reason::TransactionAbortReason, wal::Wal,
 };
 use bytes::Bytes;
-use common::config::Config;
+use common::config::{Config, CommitStrategy};
 use common::full_range_id::FullRangeId;
 use common::transaction_info::TransactionInfo;
 
@@ -273,7 +273,7 @@ where
                 // 1) Validation Checks
                 // Sanity check that the written keys are all within this range. Build the prepare record while you are at it.
                 // TODO: check delete and write sets are non-overlapping.
-                let prepare_record = {
+                let prepare_record: Arc<PrepareRecord> = {
                     let mut prepare_record = PrepareRecord {
                         writes: HashMap::new(),
                         deletes: HashSet::new(),
@@ -299,7 +299,7 @@ where
                             prepare_record.deletes.insert(key);
                         }
                     }
-                    prepare_record
+                    Arc::new(prepare_record)
                 };
                 // Validate the transaction lock is not lost, this is essential to ensure 2PL
                 // invariants still hold.
@@ -312,38 +312,41 @@ where
                 // 2) Acquire the range lock if it hasn't already been acquired by previous Gets
                 self.acquire_range_lock(state, tx.clone()).await?;
 
-                // 3) Get any Write-Write dependencies for the transaction and update the pending_commit_table
-                let mut dependencies = HashSet::new();
-                info!("Checking dependencies for transaction {:?}", tx.id);
-                {
-                    let mut pending_commit_table = state.pending_commit_table.write().await;
-                    for key in prepare_record.writes.keys() {
-                        //  Check the writes set
-                        if pending_commit_table.contains_key(key) {
-                            dependencies.insert(pending_commit_table.get(key).unwrap().clone());
-                        }
-                        pending_commit_table.insert(key.clone(), tx.id);
-                    }
-                    for key in prepare_record.deletes.iter() {
-                        //  Check the deletes set
-                        if pending_commit_table.contains_key(key) {
-                            dependencies.insert(pending_commit_table.get(key).unwrap().clone());
-                        }
-                        pending_commit_table.insert(key.clone(), tx.id);
-                    }
-                }
-                info!(
-                    "Dependencies for transaction {:?}: {:?}",
-                    tx.id, dependencies
-                );
-                // 4) Save the prepare record to the pending_prepare_records
+                // 3) Save the prepare record to the pending_prepare_records
                 {
                     let mut pending_prepare_records = state.pending_prepare_records.lock().await;
-                    pending_prepare_records.insert(tx.id, Arc::new(prepare_record));
+                    pending_prepare_records.insert(tx.id, prepare_record.clone());
                 }
-
-                // 5) Release the range lock
-                state.lock_table.release().await;
+                
+                let mut dependencies = HashSet::new();
+                if self.config.commit_strategy == CommitStrategy::Pipelined {
+                    // 4) Get any Write-Write dependencies for the transaction and update the pending_commit_table
+                    info!("Checking dependencies for transaction {:?}", tx.id);
+                    {
+                        let mut pending_commit_table = state.pending_commit_table.write().await;
+                        for key in prepare_record.writes.keys() {
+                            //  Check the writes set
+                            if pending_commit_table.contains_key(key) {
+                                dependencies.insert(pending_commit_table.get(key).unwrap().clone());
+                            }
+                            pending_commit_table.insert(key.clone(), tx.id);
+                        }
+                        for key in prepare_record.deletes.iter() {
+                            //  Check the deletes set
+                            if pending_commit_table.contains_key(key) {
+                                dependencies.insert(pending_commit_table.get(key).unwrap().clone());
+                            }
+                            pending_commit_table.insert(key.clone(), tx.id);
+                        }
+                    }
+                    info!(
+                        "Dependencies for transaction {:?}: {:?}",
+                        tx.id, dependencies
+                    );
+                    
+                    // 5) Release the range lock
+                    state.lock_table.release().await;
+                }
 
                 // 6) Log prepare record to WAL
                 self.wal
@@ -402,6 +405,11 @@ where
                 return Err(Error::RangeIsNotLoaded)
             }
             State::Loaded(state) => {
+                // if !state.lock_table.is_currently_holding(tx.clone()).await {
+                //     // it must be that we already finished committing, but perhaps the coordinator didn't
+                //     // realize that, so we just return success.
+                //     return Ok(());
+                // }
                 state.highest_known_epoch.maybe_update(commit.epoch()).await;
 
                 // Write commit record to WAL
@@ -468,9 +476,9 @@ where
                     }
                 }
 
-                // First we update the pending_commit_table to remove the transactions that have committed and are listed as dependencies for other transactions.
-                // Then (and only then) we can remove the prepare records for the transactions that have committed.
-                {
+                if self.config.commit_strategy == CommitStrategy::Pipelined {
+                    // First we update the pending_commit_table to remove the transactions that have committed and are listed as dependencies for other transactions.
+                    // Then (and only then) we can remove the prepare records for the transactions that have committed.
                     let mut pending_commit_table = state.pending_commit_table.write().await;
                     for (key, tx_id) in last_tx_per_key {
                         if pending_commit_table.contains_key(&key) {
@@ -483,6 +491,7 @@ where
                         }
                     }
                 }
+                // Remove the prepare records for the transactions that have committed.
                 {
                     let mut pending_prepare_records = state.pending_prepare_records.lock().await;
                     for tx in &transactions {
@@ -490,6 +499,10 @@ where
                     }
                 }
                 info!("Done committing transactions");
+
+                if self.config.commit_strategy == CommitStrategy::Traditional {
+                    state.lock_table.release().await;
+                }
 
                 // TODO(kelly): Update tx complete
                 // // Process transaction complete and remove the requests from the logs for all transactions

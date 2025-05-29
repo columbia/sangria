@@ -5,7 +5,7 @@ use std::{
 
 use bytes::Bytes;
 use common::{
-    constants, full_range_id::FullRangeId, keyspace::Keyspace,
+    config::CommitStrategy, constants, full_range_id::FullRangeId, keyspace::Keyspace,
     membership::range_assignment_oracle::RangeAssignmentOracle, record::Record,
     transaction_info::TransactionInfo,
 };
@@ -47,6 +47,7 @@ pub struct Transaction {
     tx_state_store: Arc<TxStateStoreClient>,
     resolver: Arc<Resolver>,
     runtime: tokio::runtime::Handle,
+    commit_strategy: CommitStrategy,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
@@ -288,33 +289,79 @@ impl Transaction {
         // }
 
         // At this point we are prepared!
+        match self.commit_strategy {
+            CommitStrategy::Traditional => {
+                let epoch = 0;
+                // Attempt to commit.
+                match self
+                .tx_state_store
+                .try_commit_transaction(self.id, epoch)
+                .await
+                .unwrap()
+                {
+                    OpResult::TransactionIsAborted => {
+                        // Somebody must have aborted the transaction (maybe due to timeout)
+                        // so unfortunately the commit was not successful.
+                        return Err(Error::TransactionAborted(TransactionAbortReason::Other));
+                    }
+                    OpResult::TransactionIsCommitted(i) => assert!(i.epoch == epoch),
+                };
+        
+                // Transaction Committed!
+                self.state = State::Committed;
+                // notify participants so they can quickly release locks.
+                let mut commit_join_set = JoinSet::new();
+                for (range_id, info) in self.participant_ranges.iter() {
+                    let range_id = *range_id;
+                    let has_writes = !info.writeset.is_empty();
+                    let range_client = self.range_client.clone();
+                    let transaction_info = self.transaction_info.clone();
+                    
+                    if has_writes {
+                        commit_join_set.spawn_on(
+                            async move {
+                                range_client
+                                    .commit_transactions(vec![transaction_info.id], &range_id, epoch)
+                                    .await
+                            },
+                            &self.runtime,
+                        );
+                    }
+                }
+                while commit_join_set.join_next().await.is_some() {}
+            }
+            CommitStrategy::Pipelined => {
+                // 2. --- COMMIT PHASE ---
+                let participants_info = self
+                    .participant_ranges
+                    .iter()
+                    .map(|(range_id, info)| ParticipantRangeInfo {
+                        participant_range: *range_id,
+                        has_writes: !info.writeset.is_empty(),
+                    })
+                    .collect();
 
-        // 2. --- COMMIT PHASE ---
-        let participants_info = self
-            .participant_ranges
-            .iter()
-            .map(|(range_id, info)| ParticipantRangeInfo {
-                participant_range: *range_id,
-                has_writes: !info.writeset.is_empty(),
-            })
-            .collect();
+                // Delegate commit to the resolver.
+                info!(
+                    "Delegating commit to resolver for transaction {:?}",
+                    self.id
+                );
+                let _ = Resolver::commit(
+                    self.resolver.clone(),
+                    self.id,
+                    self.dependencies.clone(),
+                    participants_info,
+                )
+                .await;
 
-        // Delegate commit to the resolver.
-        info!(
-            "Delegating commit to resolver for transaction {:?}",
-            self.id
-        );
-        let _ = Resolver::commit(
-            self.resolver.clone(),
-            self.id,
-            self.dependencies.clone(),
-            participants_info,
-        )
-        .await;
-
-        // 3. --- NOTIFICATION PHASE ---
-        //  Notify all the other coordinators that the transaction is committed.
-        // notify_other_coordinators(self.id).await;
+                // 3. --- NOTIFICATION PHASE ---
+                //  Notify all the other coordinators that the transaction is committed.
+                // notify_other_coordinators(self.id).await;
+            }
+            CommitStrategy::Adaptive => {
+                todo!()
+            }
+        }
         Ok(())
     }
 
@@ -326,6 +373,7 @@ impl Transaction {
         tx_state_store: Arc<TxStateStoreClient>,
         runtime: tokio::runtime::Handle,
         resolver: Arc<Resolver>,
+        commit_strategy: CommitStrategy,
     ) -> Transaction {
         Transaction {
             id: transaction_info.id,
@@ -339,6 +387,7 @@ impl Transaction {
             tx_state_store,
             runtime,
             resolver,
+            commit_strategy,
         }
     }
 }

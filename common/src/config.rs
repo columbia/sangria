@@ -10,6 +10,13 @@ use std::{
     str::FromStr,
 };
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum CommitStrategy {
+    Traditional,
+    Pipelined,
+    Adaptive,
+}
+
 /// Represents a host and port combination.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct HostPort {
@@ -140,6 +147,7 @@ pub struct FrontendConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
+    pub commit_strategy: CommitStrategy,
     pub range_server: RangeServerConfig,
     pub epoch: EpochConfig,
     pub universe: UniverseConfig,
