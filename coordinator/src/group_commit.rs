@@ -110,7 +110,7 @@ impl GroupCommit {
         }
 
         // Update the participant ranges with the new transactions that are ready to commit
-        info!("Updating participant ranges with the new transactions that are ready to commit");
+        // info!("Updating participant ranges with the new transactions that are ready to commit");
         let state = self.state.read().await;
         for (participant_range, transactions) in tmp_group_per_participant.iter() {
             let mut group = state
@@ -138,7 +138,6 @@ impl GroupCommit {
                 let tx_state_store_clone = self.tx_state_store.clone();
 
                 commit_join_set.spawn(async move {
-                    info!("Committing group for participant range");
                     // Most common path is that the group is empty. Acquire the read lock to check.
                     {
                         let group_clone = group_guard_clone.read().await;
@@ -150,7 +149,7 @@ impl GroupCommit {
 
                     // Acquire the write lock to commit and clear the group -- release only after transactions are committed
                     let mut group_clone = group_guard_clone.write().await;
-                    info!("Acquired write lock");
+                    // info!("Acquired write lock");
                     let transactions = std::mem::take(&mut *group_clone);
 
                     // TODO: Handle cascading aborts
@@ -162,7 +161,7 @@ impl GroupCommit {
                         .try_batch_commit_transactions(&tx_ids_vec, 0)
                         .await
                         .unwrap();
-                    info!("Committed transactions in tx_state_store");
+                    // info!("Committed transactions in tx_state_store");
                     // {
                     //     OpResult::TransactionIsAborted => {
                     //         // Somebody must have aborted the transaction (maybe due to timeout)
@@ -178,7 +177,7 @@ impl GroupCommit {
                     let _ = range_client
                         .commit_transactions(tx_ids_vec, &participant_range_clone, 0)
                         .await;
-                    info!("Committed transactions in range");
+                    // info!("Committed transactions in range");
 
                     Ok(transactions.clone())
                 });
