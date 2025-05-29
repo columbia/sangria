@@ -6,7 +6,7 @@ use crate::{
     transaction_abort_reason::TransactionAbortReason, wal::Wal,
 };
 use bytes::Bytes;
-use common::config::{Config, CommitStrategy};
+use common::config::{CommitStrategy, Config};
 use common::full_range_id::FullRangeId;
 use common::transaction_info::TransactionInfo;
 
@@ -317,7 +317,7 @@ where
                     let mut pending_prepare_records = state.pending_prepare_records.lock().await;
                     pending_prepare_records.insert(tx.id, prepare_record.clone());
                 }
-                
+
                 let mut dependencies = HashSet::new();
                 if self.config.commit_strategy == CommitStrategy::Pipelined {
                     // 4) Get any Write-Write dependencies for the transaction and update the pending_commit_table
@@ -343,7 +343,7 @@ where
                         "Dependencies for transaction {:?}: {:?}",
                         tx.id, dependencies
                     );
-                    
+
                     // 5) Release the range lock
                     state.lock_table.release().await;
                 }

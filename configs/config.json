@@ -1,5 +1,5 @@
 {
-    "commit_strategy": "pipelined",
+    "commit_strategy": "Pipelined",
     "range_server": {
         "range_maintenance_duration": {
             "secs": 1,

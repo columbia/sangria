@@ -1,8 +1,11 @@
 use std::sync::Arc;
 
 use common::{
-    config::{CommitStrategy, Config}, membership::range_assignment_oracle::RangeAssignmentOracle,
-    network::fast_network::FastNetwork, region::Zone, transaction_info::TransactionInfo,
+    config::{CommitStrategy, Config},
+    membership::range_assignment_oracle::RangeAssignmentOracle,
+    network::fast_network::FastNetwork,
+    region::Zone,
+    transaction_info::TransactionInfo,
 };
 use epoch_reader::reader::EpochReader;
 use tokio_util::sync::CancellationToken;

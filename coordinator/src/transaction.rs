@@ -294,10 +294,10 @@ impl Transaction {
                 let epoch = 0;
                 // Attempt to commit.
                 match self
-                .tx_state_store
-                .try_commit_transaction(self.id, epoch)
-                .await
-                .unwrap()
+                    .tx_state_store
+                    .try_commit_transaction(self.id, epoch)
+                    .await
+                    .unwrap()
                 {
                     OpResult::TransactionIsAborted => {
                         // Somebody must have aborted the transaction (maybe due to timeout)
@@ -306,7 +306,7 @@ impl Transaction {
                     }
                     OpResult::TransactionIsCommitted(i) => assert!(i.epoch == epoch),
                 };
-        
+
                 // Transaction Committed!
                 self.state = State::Committed;
                 // notify participants so they can quickly release locks.
@@ -316,12 +316,16 @@ impl Transaction {
                     let has_writes = !info.writeset.is_empty();
                     let range_client = self.range_client.clone();
                     let transaction_info = self.transaction_info.clone();
-                    
+
                     if has_writes {
                         commit_join_set.spawn_on(
                             async move {
                                 range_client
-                                    .commit_transactions(vec![transaction_info.id], &range_id, epoch)
+                                    .commit_transactions(
+                                        vec![transaction_info.id],
+                                        &range_id,
+                                        epoch,
+                                    )
                                     .await
                             },
                             &self.runtime,
