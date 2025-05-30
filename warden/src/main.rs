@@ -26,8 +26,9 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let subscriber = tracing_subscriber::fmt::Subscriber::new();
-    tracing::subscriber::set_global_default(subscriber)?;
+    tracing_subscriber::fmt::init();
+    // let subscriber = tracing_subscriber::fmt::Subscriber::new();
+    // tracing::subscriber::set_global_default(subscriber)?;
     info!("Hello, Warden!");
     let args = Args::parse();
     let config: Config = serde_json::from_str(&read_to_string(&args.config).unwrap()).unwrap();

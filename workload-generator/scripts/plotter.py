@@ -84,7 +84,9 @@ def get_unique_key_values(df, key):
     return df[key].unique()
 
 
-def line(df, x, y, key=None, showlegend=True, color_map=None, marker_map=None, **kwargs) -> go.Scatter:
+def line(
+    df, x, y, key=None, showlegend=True, color_map=None, marker_map=None, **kwargs
+) -> go.Scatter:
     """Create a line plot"""
 
     if key is None:
@@ -117,7 +119,7 @@ def line(df, x, y, key=None, showlegend=True, color_map=None, marker_map=None, *
                 mode="lines+markers",
                 marker_color=color_map[unique_key],
                 marker_symbol=marker_map[unique_key],
-                marker_size=10
+                marker_size=10,
             )
             traces.append(trace)
     return traces

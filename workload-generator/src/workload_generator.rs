@@ -150,7 +150,6 @@ impl WorkloadGenerator {
         );
         let semaphore = Arc::new(Semaphore::new(max_concurrency as usize));
 
-        // Initialize start time
         {
             let mut metrics = self.metrics.lock().await;
             metrics.start_time = Some(Instant::now());

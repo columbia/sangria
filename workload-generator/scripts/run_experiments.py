@@ -1,18 +1,27 @@
 import os
 import json
 import subprocess
-import ray
-from ray import tune
 from pathlib import Path
 import psutil
+import ray
+from ray import tune
 import re
 import uuid
-import signal
+import time
 from coolname import generate_slug
-from functools import partial
+import signal
+import pandas as pd
 
-RAY_LOGS_DIR = Path(__file__).parent.parent / "experiments" / "ray_logs"
-
+ROOT_DIR = Path(__file__).parent.parent.parent
+SERVERS_CONFIG_PATH = ROOT_DIR / "configs" / "config.json"
+RAY_LOGS_DIR = ROOT_DIR / "workload-generator" / "experiments" / "ray_logs"
+RAY_SERVERS_CONFIG_PATH = (
+    ROOT_DIR / "workload-generator" / "configs" / "config-ray.json"
+)
+RAY_WORKLOAD_CONFIG_PATH = (
+    ROOT_DIR / "workload-generator" / "configs" / "workload-config-ray.json"
+)
+EXECUTABLES_DIR = ROOT_DIR / "target" / "release"
 
 def parse_metrics(output):
     metrics = {}
@@ -55,40 +64,79 @@ def parse_metrics(output):
     return metrics
 
 
+class AtomixSetup:
+    def __init__(self):
+        self.servers_config = json.load(open(SERVERS_CONFIG_PATH, "r"))
+        self.servers = ["universe", "warden", "rangeserver", "frontend"]
+
+    def dump_servers_config(self):
+        with open(RAY_SERVERS_CONFIG_PATH, "w") as f:
+            json.dump(self.servers_config, f)
+
+    def kill_servers(self):
+        for server in self.servers:
+            subprocess.run(["pkill", "-f", server])
+            print(f"Killed '{server}' processes.")
+
+    def restart_servers(self):
+        self.kill_servers()
+        for server in self.servers:
+            try:
+                subprocess.Popen(
+                    [
+                        # "cargo",
+                        # "run",
+                        # "--release",
+                        # "--bin",
+                        # server,
+                        str(EXECUTABLES_DIR / server),
+                        # "--",
+                        "--config",
+                        str(RAY_SERVERS_CONFIG_PATH),
+                    ],
+                    cwd=ROOT_DIR,
+                    env={**os.environ, "RUST_LOG": "error"},
+                )
+                time.sleep(2)
+            except Exception as e:
+                print(f"Error spinning up {server}: {e}")
+                self.kill_servers()
+
+
 def run_workload(config):
     #  Overwrite the namespace and name with a random UUID
     uuid_str = uuid.uuid4().hex[:8]
     # config["namespace"] += f"_{uuid_str}"
     config["name"] += f"_{uuid_str}"
+    del config["baseline"]
 
     # Create a temporary config file with the current parameters
-    root_dir = Path(__file__).parent.parent.parent
-    config_path = root_dir / "configs" / "config.json"
-    workload_config_path = root_dir / "workload-generator" / "configs" / f"config-ray.json"
-    os.makedirs(os.path.dirname(workload_config_path), exist_ok=True)
-    with open(workload_config_path, "w") as f:
+    os.makedirs(os.path.dirname(RAY_WORKLOAD_CONFIG_PATH), exist_ok=True)
+    with open(RAY_WORKLOAD_CONFIG_PATH, "w") as f:
         json.dump(config, f)
 
     # Run the workload generator with timeout
     try:
         process = subprocess.Popen(
             [
-                "cargo",
-                "run",
-                "--release",
-                "--bin",
-                "workload-generator",
-                "--",
+                # "cargo",
+                # "run",
+                # "--release",
+                # "--bin",
+                # "workload-generator",
+                str(EXECUTABLES_DIR / "workload-generator"),
+                # "--",
                 "--workload-config",
-                str(workload_config_path),
+                str(RAY_WORKLOAD_CONFIG_PATH),
                 "--config",
-                str(config_path),
+                str(RAY_SERVERS_CONFIG_PATH),
                 "--create-keyspace",
             ],
             cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            env={**os.environ, "RUST_LOG": "error"},
         )
 
         try:
@@ -109,53 +157,65 @@ def run_workload(config):
         return {"throughput": 0.0}
 
 
+def varying_contention_experiment(atomix_setup, ray_logs_dir):
+    namespace, name = generate_slug(2).split("-")
+    experiment_name = f"{namespace}_{name}_{uuid.uuid4().hex[:8]}"
+
+    # Define the search space
+    workload_config = {
+        "num-keys": tune.grid_search([5]),
+        "max-concurrency": tune.grid_search([29]),
+        "num-queries": tune.grid_search([1000]),
+        "zipf-exponent": tune.grid_search([0]),
+        "namespace": namespace,
+        "name": name,
+        "background-runtime-core-ids": list(range(3, 32)),
+    }
+
+    baselines = ["Traditional"]
+
+    for baseline in baselines:
+        atomix_setup.servers_config["commit-strategy"] = baseline
+        workload_config["baseline"] = tune.grid_search([baseline])
+        atomix_setup.dump_servers_config()
+        atomix_setup.restart_servers()
+
+        metrics = tune.run(
+            run_workload,
+            config=workload_config,
+            num_samples=5,
+            resources_per_trial={"cpu": psutil.cpu_count()},
+            storage_path=ray_logs_dir,
+            name=experiment_name,
+            progress_reporter=tune.CLIReporter(
+                metric_columns=["throughput", "avg_latency"],
+            ),
+        )
+        tune.report(**metrics)
+        results = metrics.results_df
+        results["baseline"] = baseline
+        results.to_csv(ray_logs_dir / experiment_name / f"{baseline}_results.csv")
+
+    atomix_setup.kill_servers()
+    results = pd.concat(
+        [
+            pd.read_csv(ray_logs_dir / experiment_name / f"{baseline}_results.csv")
+            for baseline in baselines
+        ]
+    )
+    results.to_csv(ray_logs_dir / experiment_name / "results.csv")
+    ray.shutdown()
+
+
 def main():
-    # Initialize Ray
     ray.init()
 
     ray_logs_dir = Path(RAY_LOGS_DIR)
     ray_logs_dir.mkdir(parents=True, exist_ok=True)
 
-    namespace, name = generate_slug(2).split("-")
+    atomix_setup = AtomixSetup()
 
-    # Define the search space
-    config = {
-        "num-keys": tune.grid_search([1, 10, 100]),
-        "max-concurrency": tune.grid_search([1, 5, 10]),
-        "num-queries": tune.grid_search([1000]),
-        "zipf-exponent": tune.grid_search([0, 0.5, 1.2]),
-        "namespace": namespace,
-        "name": name,
-        "background-runtime-core-ids": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
-    }
-
-    experiment_name = f"{namespace}_{name}_{uuid.uuid4().hex[:8]}"
-
-    # Run the experiment
-    analysis = tune.run(
-        run_workload,
-        config=config,
-        num_samples=5,
-        resources_per_trial={"cpu": psutil.cpu_count()},
-        storage_path=ray_logs_dir,
-        name=experiment_name,
-        # progress_reporter=tune.CLIReporter(
-        #     metric_columns=["throughput"],
-        #     parameter_columns=[
-        #         "max-concurrency",
-        #         "num-queries",
-        #         "num-keys",
-        #         "zipf-exponent",
-        #     ],
-        # ),
-    )
-
-    # Save results to a file
-    results = analysis.results_df
-    results.to_csv(ray_logs_dir / experiment_name / "results.csv")
-
-    # Shutdown Ray
-    ray.shutdown()
+    varying_contention_experiment(atomix_setup, ray_logs_dir)
 
 
 if __name__ == "__main__":

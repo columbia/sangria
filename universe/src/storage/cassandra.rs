@@ -218,7 +218,7 @@ impl Storage for Cassandra {
             .await
             .map_err(scylla_query_error_to_storage_error)?;
 
-        println!("Query result: {:?}", query_result);
+        info!("Query result: {:?}", query_result);
         // If the first row of the result is true, our insert was successful.
         // Else, insert failed, thus the keyspace already exists.
         if let Some(Some(insert_succeeded)) = query_result.0.first_row().unwrap().columns.first() {

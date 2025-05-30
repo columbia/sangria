@@ -1,6 +1,8 @@
+psutil
 ray[tune]
 coolname
 plotly
 pandas
 numpy
 kaleido
+black
