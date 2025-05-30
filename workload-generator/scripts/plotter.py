@@ -125,49 +125,22 @@ def line(
     return traces
 
 
-def bar(x, y, showlegend=True, **kwargs) -> go.Bar:
+def bar(df, x, y, key=None, showlegend=True, order=None, color_map=None, marker_map=None, **kwargs) -> go.Bar:
     """Create a bar plot"""
-    trace = go.Bar(
-        y=y,
-        x=x,
-        orientation="h",
-        marker_color="#3182bd",
-        showlegend=showlegend,
-    )
-    return trace
-
-
-def heatmap(z, x=None, y=None, showlegend=True, **kwargs) -> go.Heatmap:
-    """Create a heatmap plot"""
-    trace = go.Heatmap(
-        z=z,
-        x=x,
-        y=y,
-        colorscale="Blues",
-        showscale=False,
-        showlegend=showlegend,
-    )
-    return trace
-
-
-def box(x, y, name, showlegend=True, **kwargs) -> go.Box:
-    """Create a box plot"""
-    trace = go.Box(x=x, y=y, name=name, showlegend=showlegend)
-    return trace
-
-
-def cdf(
-    cumulative_probabilities, values, showlegend=True, **kwargs
-) -> List[go.Scatter]:
-    """Create a cdf plot"""
-    traces: list = []
-    traces.append(
-        go.Scatter(
-            x=cumulative_probabilities,
-            y=values,
-            # legendgroup=workload,
+    unique_keys = get_unique_key_values(df, key)
+    unique_keys = sorted(unique_keys)
+    traces = []
+    for i, unique_key in enumerate(unique_keys):
+        df_key = df[df[key] == unique_key]
+        trace = go.Bar(
+            x=df_key[x],
+            y=df_key[y],
+            name=unique_key,
+            legendgroup=unique_key,
             showlegend=showlegend,
-            mode="lines",
+            legendgrouptitle=dict(text=key) if i == 0 else None,
+            marker_color=color_map[unique_key],
+            # marker_symbol=marker_map[unique_key],
         )
-    )
+        traces.append(trace)
     return traces

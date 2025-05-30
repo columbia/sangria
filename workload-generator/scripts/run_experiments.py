@@ -40,13 +40,13 @@ def parse_metrics(output):
 
     # Regular expressions to match the metrics
     patterns = {
-        "total_duration": r"Total Duration: ([\d\.]+[µnm]?s)",
-        "total_transactions": r"Total Transactions: (\d+)",
+        "throughput": r"Throughput: ([\d\.]+) transactions/second",
         "avg_latency": r"Average Latency: ([\d\.]+[µnm]?s)",
         "p50_latency": r"P50 Latency: ([\d\.]+[µnm]?s)",
         "p95_latency": r"P95 Latency: ([\d\.]+[µnm]?s)",
         "p99_latency": r"P99 Latency: ([\d\.]+[µnm]?s)",
-        "throughput": r"Throughput: ([\d\.]+) transactions/second",
+        "total_duration": r"Total Duration: ([\d\.]+[µnm]?s)",
+        "total_transactions": r"Total Transactions: (\d+)",
     }
 
     for metric, pattern in patterns.items():
@@ -151,7 +151,7 @@ def run_workload(config):
         print(f"Error running workload: {e}")
         metrics = {"throughput": 0.0}
 
-    tune.report(metrics)
+    # tune.report(metrics)
     return metrics
 
 
@@ -161,7 +161,7 @@ def varying_contention_experiment(atomix_setup, ray_logs_dir):
 
     # Define the search space
     workload_config = {
-        "num-keys": tune.grid_search([5]),
+        "num-keys": tune.grid_search([5, 25, 50, 100]),
         "max-concurrency": tune.grid_search([29]),
         "num-queries": tune.grid_search([1000]),
         "zipf-exponent": tune.grid_search([0]),
@@ -170,11 +170,11 @@ def varying_contention_experiment(atomix_setup, ray_logs_dir):
         "background-runtime-core-ids": list(range(3, 32)),
     }
 
-    baselines = ["Traditional"]
+    baselines = ["Pipelined", "Traditional"]
 
     for baseline in baselines:
-        atomix_setup.servers_config["commit-strategy"] = baseline
         workload_config["baseline"] = tune.grid_search([baseline])
+        atomix_setup.servers_config["commit_strategy"] = baseline
         atomix_setup.dump_servers_config()
         atomix_setup.restart_servers()
 
@@ -185,20 +185,17 @@ def varying_contention_experiment(atomix_setup, ray_logs_dir):
             resources_per_trial={"cpu": psutil.cpu_count()},
             storage_path=ray_logs_dir,
             name=experiment_name,
-            callbacks=[
-                tune.logger.JsonLoggerCallback(),
-            ],
-            progress_reporter=ray.tune.CLIReporter(
-                metric_columns=["throughput", "avg_latency", "p50_latency", "p95_latency", "p99_latency", "total_duration", "total_transactions"],
-                parameter_columns={
-                    "num-keys": "num-keys",
-                    "max-concurrency": "max-concurrency",
-                    "num-queries": "num-queries",
-                    "zipf-exponent": "zipf-exponent",
-                    "baseline": "baseline",
-                },
-                # max_report_frequency=60,
-            ),
+            # progress_reporter=ray.tune.CLIReporter(
+            #     metric_columns=["throughput", "avg_latency","total_duration"],
+            #     parameter_columns={
+            #         "num-keys": "num-keys",
+            #         "max-concurrency": "max-concurrency",
+            #         "num-queries": "num-queries",
+            #         "zipf-exponent": "zipf-exponent",
+            #         "baseline": "baseline",
+            #     },
+            #     max_report_frequency=60,
+            # ),
         )
         results = analysis.results_df
         results["baseline"] = baseline

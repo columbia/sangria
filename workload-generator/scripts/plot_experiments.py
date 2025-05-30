@@ -3,15 +3,22 @@ from typing import Dict, List
 import pandas as pd
 import plotly.express as px
 from run_experiments import RAY_LOGS_DIR
-from plotter import make_plots, line
+from plotter import make_plots, line, bar
 import plotly.io as pio
 
 METRICS = [
     "throughput",
     "avg_latency",
-    "p99_latency",
+    # "p99_latency",
 ]  # "p50_latency", "p95_latency", "p99_latency"]
-CONFIG_PARAMS = ["num-queries", "max-concurrency", "zipf-exponent", "num-keys"]
+
+CONFIG_PARAMS = [
+    "baseline",
+    "num-queries",
+    "max-concurrency",
+    "zipf-exponent",
+    "num-keys",
+]
 
 
 class Plotter:
@@ -23,12 +30,12 @@ class Plotter:
         self.results = pd.read_csv(self.experiments_path / "results.csv")
         self.results.columns = self.results.columns.str.replace("config/", "")
 
-        self.results = self.results.groupby(CONFIG_PARAMS)[METRICS].mean().reset_index()
         self.latency_max = (
-            self.results["p99_latency"].max()
-            if "p99_latency" in self.results.columns
+            self.results["avg_latency"].max()
+            if "avg_latency" in self.results.columns
             else None
         )
+        self.results = self.results.groupby(CONFIG_PARAMS)[METRICS].mean().reset_index()
 
     def plot_metrics_vs_x_vs_z(
         self, metrics: List[str], x: str, z: str, fixed_params: Dict[str, int]
@@ -71,7 +78,7 @@ class Plotter:
                 "y": metric,
                 "key": z,
                 "y_range": (
-                    [0, self.latency_max + 0.01] if metric.endswith("latency") else None
+                    [0, self.latency_max + 0.001] if metric.endswith("latency") else None
                 ),
                 "color_map": color_map,
                 "marker_map": marker_map,
@@ -81,7 +88,7 @@ class Plotter:
                 "x_axis_title": x,
                 "y_axis_title": metric,
             }
-            figs.append([(line, arg)])
+            figs.append([(bar, arg)])
 
         rows = len(figs)
         cols = len(figs[0])
@@ -106,23 +113,23 @@ class Plotter:
         df = df.dropna()
         fig = px.line(df, x=x, y=y, color=z)
         pio.write_image(
-            fig, f"{self.plots_path.joinpath(f'{y}_vs_{x}_vs_{z}.png')}", format="png"
+            fig, f"{self.plots_path.joinpath(f'{y}_vs_{x}_vs_{z}')}", format="png"
         )
 
 
 if __name__ == "__main__":
-    experiment_name = "muscular_okapi_3140884c"
+    experiment_name = "cinnamon_carp_fd61a5f4"
     plotter = Plotter(experiment_name)
     plotter.plot_metrics_vs_x_vs_z(
         METRICS,
-        "max-concurrency",
         "num-keys",
-        {"num-queries": 1000, "zipf-exponent": 0.0},
+        "baseline",
+        {"num-queries": 1000, "zipf-exponent": 0.0, "max-concurrency": 29},
     )
 
-    plotter.plot_metrics_vs_x_vs_z(
-        METRICS,
-        "zipf-exponent",
-        "num-keys",
-        {"num-queries": 1000, "max-concurrency": 10},
-    )
+    # plotter.plot_metrics_vs_x_vs_z(
+    #     METRICS,
+    #     "zipf-exponent",
+    #     "num-keys",
+    #     {"num-queries": 1000, "max-concurrency": 10},
+    # )

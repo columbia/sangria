@@ -91,20 +91,20 @@ fn main() {
     // Return metrics in a format that the Python script can parse
     println!(
         "METRICS_START\n\
-        Total Duration: {:?}\n\
-        Total Transactions: {}\n\
+        Throughput: {:.2} transactions/second\n\
         Average Latency: {:?}\n\
         P50 Latency: {:?}\n\
         P95 Latency: {:?}\n\
         P99 Latency: {:?}\n\
-        Throughput: {:.2} transactions/second\n\
+        Total Duration: {:?}\n\
+        Total Transactions: {}\n\
         METRICS_END",
-        metrics.total_duration,
-        metrics.total_transactions,
+        metrics.throughput,
         metrics.avg_latency,
         metrics.p50_latency,
         metrics.p95_latency,
         metrics.p99_latency,
-        metrics.throughput
+        metrics.total_duration,
+        metrics.total_transactions,
     )
 }

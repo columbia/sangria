@@ -76,7 +76,7 @@ impl Resolver {
 
         // Acquire the write lock and update the state with new dependencies
         info!("Updating dependencies for transaction {:?}", transaction_id);
-        let transaction_info = {
+        {
             let mut state = resolver.state.write().await;
             for dependency in dependencies {
                 if !state.resolved_transactions.contains(&dependency) {
@@ -104,25 +104,26 @@ impl Resolver {
 
             transaction_info.num_dependencies = num_pending_dependencies;
             transaction_info.participant_ranges_info = participant_ranges_info;
-            let transaction_info_clone = transaction_info.clone();
             resolver
                 .waiting_transactions
                 .write()
                 .await
                 .insert(transaction_id, s);
-            transaction_info_clone
-        };
-        info!("Updated dependencies for transaction {:?}", transaction_id);
-        if num_pending_dependencies == 0 {
-            // If there are no pending dependencies, we can commit the transaction
-            info!(
-                "No pending dependencies, committing transaction {:?}",
-                transaction_id
-            );
-            let resolver_clone = resolver.clone();
-            resolver.bg_runtime.spawn(async move {
-                let _ = Self::trigger_commit(resolver_clone, vec![transaction_info]).await;
-            });
+            info!("Updated dependencies for transaction {:?}", transaction_id);
+            if num_pending_dependencies == 0 {
+                // If there are no pending dependencies, we can commit the transaction
+                info!(
+                    "No pending dependencies, committing transaction {:?}",
+                    transaction_id
+                );
+                // Add transaction while holding the write lock
+                let transaction_info_clone = transaction_info.clone();
+                resolver.group_commit.add_transactions(&vec![transaction_info_clone.clone()]).await?;
+                let resolver_clone = resolver.clone();
+                resolver.bg_runtime.spawn(async move {
+                    let _ = Self::trigger_commit(resolver_clone, vec![transaction_info_clone]).await;
+                });
+            }
         }
 
         // Block until the transaction is actually committed
@@ -139,7 +140,6 @@ impl Resolver {
             "Triggering commit for transactions {:?}",
             transactions.iter().map(|tx| tx.id).collect::<Vec<_>>()
         );
-        let _ = resolver.group_commit.add_transactions(&transactions).await;
         let finished_transactions = resolver.group_commit.commit().await?;
         let finished_transactions_ids = finished_transactions
             .iter()
@@ -222,14 +222,17 @@ impl Resolver {
                             // Transaction is now unblocked and ready to commit
                             new_ready_to_commit.push(dependent_transaction_info.clone());
                             new_resolved_dependencies.push(*dependent);
-                            state.resolved_transactions.insert(*dependent);
                         }
                     }
                 }
             }
+
+            // Add transactions to the group commit while holding the write lock so that dependencies order is respected
+            let _ = resolver.group_commit.add_transactions(&new_ready_to_commit).await;
         }
         // Trigger a commit so that the new ready transactions are added to the group commit and get committed
         if !new_ready_to_commit.is_empty() {
+            info!("New ready to commit transactions: {:?}", new_ready_to_commit.iter().map(|tx| tx.id).collect::<Vec<_>>());
             let resolver_clone = resolver.clone();
             resolver.bg_runtime.spawn(async move {
                 let _ = Resolver::trigger_commit(resolver_clone, new_ready_to_commit).await;

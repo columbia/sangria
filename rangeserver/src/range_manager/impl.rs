@@ -29,13 +29,17 @@ struct PrepareRecord {
     deletes: HashSet<Bytes>,       // key to delete
 }
 
+struct PendingState {
+    pending_prepare_records: HashMap<Uuid, Arc<PrepareRecord>>,
+    // key -> id of the last transaction that has updated this key
+    pending_commit_table: HashMap<Bytes, Uuid>,
+}
+
 struct LoadedState {
     range_info: RangeInfo,
     highest_known_epoch: HighestKnownEpoch,
     lock_table: lock_table::LockTable,
-    pending_prepare_records: Mutex<HashMap<Uuid, Arc<PrepareRecord>>>,
-    // key -> id of the last transaction that has updated this key
-    pending_commit_table: RwLock<HashMap<Bytes, Uuid>>,
+    pending_state: RwLock<PendingState>,
 }
 
 enum State {
@@ -190,11 +194,12 @@ where
 
                 info!("Checking dependencies for transaction {:?}", tx.id);
                 // First, check if operation has any dependencies with another transaction
-                if let Some(dependency) = state.pending_commit_table.read().await.get(&key) {
+                let pending_state = state.pending_state.read().await;
+                if let Some(dependency) = pending_state.pending_commit_table.get(&key) {
                     get_result.dependencies = vec![dependency.clone()];
                     // Read the value from the pending_prepare_record of the dependee transaction
-                    let pending_prepare_records = state.pending_prepare_records.lock().await;
-                    let prepare_record = pending_prepare_records.get(&dependency).unwrap();
+                    info!("Reading value from pending_prepare_record of transaction {:?}", dependency);
+                    let prepare_record = pending_state.pending_prepare_records.get(&dependency).unwrap();
                     if prepare_record.writes.contains_key(&key) {
                         // Check the writes set
                         get_result.val = Some(prepare_record.writes.get(&key).unwrap().clone());
@@ -311,41 +316,41 @@ where
 
                 // 2) Acquire the range lock if it hasn't already been acquired by previous Gets
                 self.acquire_range_lock(state, tx.clone()).await?;
-
-                // 3) Save the prepare record to the pending_prepare_records
-                {
-                    let mut pending_prepare_records = state.pending_prepare_records.lock().await;
-                    pending_prepare_records.insert(tx.id, prepare_record.clone());
-                }
-
+                
                 let mut dependencies = HashSet::new();
-                if self.config.commit_strategy == CommitStrategy::Pipelined {
-                    // 4) Get any Write-Write dependencies for the transaction and update the pending_commit_table
-                    info!("Checking dependencies for transaction {:?}", tx.id);
-                    {
-                        let mut pending_commit_table = state.pending_commit_table.write().await;
-                        for key in prepare_record.writes.keys() {
+                {
+                    // 3) Save the prepare record to the pending_prepare_records
+                    let mut pending_state = state.pending_state.write().await;
+                    pending_state.pending_prepare_records.insert(tx.id, prepare_record.clone());
+                
+                    if self.config.commit_strategy == CommitStrategy::Pipelined {
+                        // 4) Get any Write-Write dependencies for the transaction and update the pending_commit_table
+                        info!("Checking dependencies for transaction {:?}", tx.id);
+                        {
                             //  Check the writes set
-                            if pending_commit_table.contains_key(key) {
-                                dependencies.insert(pending_commit_table.get(key).unwrap().clone());
+                            for key in prepare_record.writes.keys() {
+                                if pending_state.pending_commit_table.contains_key(key) {
+                                    dependencies.insert(pending_state.pending_commit_table.get(key).unwrap().clone());
+                                }
+                                pending_state.pending_commit_table.insert(key.clone(), tx.id);
                             }
-                            pending_commit_table.insert(key.clone(), tx.id);
-                        }
-                        for key in prepare_record.deletes.iter() {
                             //  Check the deletes set
-                            if pending_commit_table.contains_key(key) {
-                                dependencies.insert(pending_commit_table.get(key).unwrap().clone());
+                            for key in prepare_record.deletes.iter() {
+                                if pending_state.pending_commit_table.contains_key(key) {
+                                    dependencies.insert(pending_state.pending_commit_table.get(key).unwrap().clone());
+                                }
+                                pending_state.pending_commit_table.insert(key.clone(), tx.id);
                             }
-                            pending_commit_table.insert(key.clone(), tx.id);
                         }
-                    }
-                    info!(
-                        "Dependencies for transaction {:?}: {:?}",
-                        tx.id, dependencies
-                    );
+                        drop(pending_state);
+                        info!(
+                            "Dependencies for transaction {:?}: {:?}",
+                            tx.id, dependencies
+                        );
 
-                    // 5) Release the range lock
-                    state.lock_table.release().await;
+                        // 5) Release the range lock
+                        state.lock_table.release().await;
+                    }
                 }
 
                 // 6) Log prepare record to WAL
@@ -421,9 +426,9 @@ where
                 // Collect all pending prepare records for the transactions to be committed
                 let mut pending_prepare_record_per_tx = HashMap::new();
                 {
-                    let pending_prepare_records = state.pending_prepare_records.lock().await;
+                    let pending_state = state.pending_state.read().await;
                     for tx in &transactions {
-                        match pending_prepare_records.get(&tx.id) {
+                        match pending_state.pending_prepare_records.get(&tx.id) {
                             Some(prepare_record) => {
                                 _ = pending_prepare_record_per_tx
                                     .insert(tx.id, prepare_record.clone())
@@ -475,29 +480,32 @@ where
                         }
                     }
                 }
-
-                if self.config.commit_strategy == CommitStrategy::Pipelined {
-                    // First we update the pending_commit_table to remove the transactions that have committed and are listed as dependencies for other transactions.
-                    // Then (and only then) we can remove the prepare records for the transactions that have committed.
-                    let mut pending_commit_table = state.pending_commit_table.write().await;
-                    for (key, tx_id) in last_tx_per_key {
-                        if pending_commit_table.contains_key(&key) {
-                            // The last dependee per key might have changed since the prepare phase, so we need to check if it is still a dependency before removing it.
-                            let last_dependee = pending_commit_table.get(&key).unwrap();
-                            if tx_id == *last_dependee {
-                                pending_commit_table.remove(&key);
+                
+                {
+                    let mut pending_state = state.pending_state.write().await;
+                    if self.config.commit_strategy == CommitStrategy::Pipelined {
+                        // We update the pending_commit_table to remove the transactions that have committed and are listed as dependencies for other transactions
+                        for (key, tx_id) in last_tx_per_key {
+                            if pending_state.pending_commit_table.contains_key(&key) {
+                                // The last dependee per key might have changed since the prepare phase, so we need to check if it is still a dependency before removing it.
+                                let last_dependee = pending_state.pending_commit_table.get(&key).unwrap();
+                                info!("Last dependee for key {:?} is {:?} and last tx is {:?}", key, last_dependee, tx_id);
+                                info!("All transaction ids: {:?}", transactions.iter().map(|tx| tx.id).collect::<Vec<_>>());
+                                if tx_id == *last_dependee {
+                                    info!("Removing key {:?} from pending_commit_table", key);
+                                    pending_state.pending_commit_table.remove(&key);
+                                }
+                                // Otherwise, the transaction that last updated the key in the pending_commit_table has not committed yet.
                             }
-                            // Otherwise, the transaction that last updated the key in the pending_commit_table has not committed yet.
                         }
                     }
-                }
-                // Remove the prepare records for the transactions that have committed.
-                {
-                    let mut pending_prepare_records = state.pending_prepare_records.lock().await;
+                    // Remove the prepare records for the transactions that have committed.
                     for tx in &transactions {
-                        pending_prepare_records.remove(&tx.id);
+                        info!("Removing prepare record for transaction {:?}", tx.id);
+                        pending_state.pending_prepare_records.remove(&tx.id);
                     }
                 }
+                
                 info!("Done committing transactions");
 
                 if self.config.commit_strategy == CommitStrategy::Traditional {
@@ -600,8 +608,10 @@ where
                     range_info,
                     highest_known_epoch: HighestKnownEpoch::new(highest_known_epoch),
                     lock_table: lock_table::LockTable::new(),
-                    pending_prepare_records: Mutex::new(HashMap::new()),
-                    pending_commit_table: RwLock::new(HashMap::new()),
+                    pending_state: RwLock::new(PendingState {
+                        pending_prepare_records: HashMap::new(),
+                        pending_commit_table: HashMap::new(),
+                    }),
                 })
             })
             .await

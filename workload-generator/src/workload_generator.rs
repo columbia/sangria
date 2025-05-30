@@ -219,13 +219,13 @@ impl WorkloadGenerator {
         let p50_latency = sorted_latencies[(sorted_latencies.len() as f64 * 0.50) as usize];
 
         info!("Workload Complete - Performance Metrics:");
-        info!("Total Duration: {:?}", total_duration);
-        info!("Total Transactions: {}", total_transactions);
+        info!("Throughput: {:.2} transactions/second", throughput);
         info!("Average Latency: {:?}", avg_latency);
         info!("P50 Latency: {:?}", p50_latency);
         info!("P95 Latency: {:?}", p95_latency);
         info!("P99 Latency: {:?}", p99_latency);
-        info!("Throughput: {:.2} transactions/second", throughput);
+        info!("Total Duration: {:?}", total_duration);
+        info!("Total Transactions: {}", total_transactions);
 
         Metrics {
             total_duration,
