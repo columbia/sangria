@@ -9,19 +9,24 @@ import re
 import uuid
 import time
 from coolname import generate_slug
-import signal
 import pandas as pd
+import argparse
 
 ROOT_DIR = Path(__file__).parent.parent.parent
 SERVERS_CONFIG_PATH = ROOT_DIR / "configs" / "config.json"
-RAY_LOGS_DIR = ROOT_DIR / "workload-generator" / "experiments" / "ray_logs"
-RAY_SERVERS_CONFIG_PATH = (
-    ROOT_DIR / "workload-generator" / "configs" / "config-ray.json"
-)
+WORKLOAD_GENERATOR_DIR = ROOT_DIR / "workload-generator"
+RAY_LOGS_DIR = WORKLOAD_GENERATOR_DIR / "experiments" / "ray_logs"
+RAY_SERVERS_CONFIG_PATH = WORKLOAD_GENERATOR_DIR / "configs" / "config-ray.json"
 RAY_WORKLOAD_CONFIG_PATH = (
-    ROOT_DIR / "workload-generator" / "configs" / "workload-config-ray.json"
+    WORKLOAD_GENERATOR_DIR / "configs" / "workload-config-ray.json"
 )
-EXECUTABLES_DIR = ROOT_DIR / "target" / "release"
+
+CARGO_RUN_CMD = "cargo run --release --bin "
+TARGET_RUN_CMD = str(ROOT_DIR) + "/target/release/"
+
+RUN_CMD = TARGET_RUN_CMD
+BUILD_ATOMIX = True
+
 
 def parse_metrics(output):
     metrics = {}
@@ -69,6 +74,9 @@ class AtomixSetup:
         self.servers_config = json.load(open(SERVERS_CONFIG_PATH, "r"))
         self.servers = ["universe", "warden", "rangeserver", "frontend"]
 
+    def build_servers(self):
+        subprocess.run(["cargo", "build", "--release"], cwd=ROOT_DIR)
+
     def dump_servers_config(self):
         with open(RAY_SERVERS_CONFIG_PATH, "w") as f:
             json.dump(self.servers_config, f)
@@ -84,13 +92,7 @@ class AtomixSetup:
             try:
                 subprocess.Popen(
                     [
-                        # "cargo",
-                        # "run",
-                        # "--release",
-                        # "--bin",
-                        # server,
-                        str(EXECUTABLES_DIR / server),
-                        # "--",
+                        TARGET_RUN_CMD + server,
                         "--config",
                         str(RAY_SERVERS_CONFIG_PATH),
                     ],
@@ -119,13 +121,7 @@ def run_workload(config):
     try:
         process = subprocess.Popen(
             [
-                # "cargo",
-                # "run",
-                # "--release",
-                # "--bin",
-                # "workload-generator",
-                str(EXECUTABLES_DIR / "workload-generator"),
-                # "--",
+                TARGET_RUN_CMD + "workload-generator",
                 "--workload-config",
                 str(RAY_WORKLOAD_CONFIG_PATH),
                 "--config",
@@ -144,17 +140,19 @@ def run_workload(config):
             metrics = parse_metrics(stdout)
             if not metrics:
                 print("Warning: No metrics found in output")
-                return {"throughput": 0.0}
-            return metrics
+                metrics = {"throughput": 0.0}
 
         except subprocess.TimeoutExpired:
             process.kill()
             print(f"Timeout exceeded for config: {config}")
-            return {"throughput": 0.0}
+            metrics = {"throughput": 0.0}
 
     except Exception as e:
         print(f"Error running workload: {e}")
-        return {"throughput": 0.0}
+        metrics = {"throughput": 0.0}
+
+    tune.report(metrics)
+    return metrics
 
 
 def varying_contention_experiment(atomix_setup, ray_logs_dir):
@@ -180,19 +178,29 @@ def varying_contention_experiment(atomix_setup, ray_logs_dir):
         atomix_setup.dump_servers_config()
         atomix_setup.restart_servers()
 
-        metrics = tune.run(
+        analysis = tune.run(
             run_workload,
             config=workload_config,
             num_samples=5,
             resources_per_trial={"cpu": psutil.cpu_count()},
             storage_path=ray_logs_dir,
             name=experiment_name,
-            progress_reporter=tune.CLIReporter(
-                metric_columns=["throughput", "avg_latency"],
+            callbacks=[
+                tune.logger.JsonLoggerCallback(),
+            ],
+            progress_reporter=ray.tune.CLIReporter(
+                metric_columns=["throughput", "avg_latency", "p50_latency", "p95_latency", "p99_latency", "total_duration", "total_transactions"],
+                parameter_columns={
+                    "num-keys": "num-keys",
+                    "max-concurrency": "max-concurrency",
+                    "num-queries": "num-queries",
+                    "zipf-exponent": "zipf-exponent",
+                    "baseline": "baseline",
+                },
+                # max_report_frequency=60,
             ),
         )
-        tune.report(**metrics)
-        results = metrics.results_df
+        results = analysis.results_df
         results["baseline"] = baseline
         results.to_csv(ray_logs_dir / experiment_name / f"{baseline}_results.csv")
 
@@ -214,9 +222,21 @@ def main():
     ray_logs_dir.mkdir(parents=True, exist_ok=True)
 
     atomix_setup = AtomixSetup()
+    if BUILD_ATOMIX:
+        atomix_setup.build_servers()
 
     varying_contention_experiment(atomix_setup, ray_logs_dir)
 
 
 if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(description="Run Atomix experiments.")
+    parser.add_argument(
+        "--build",
+        action="store_true",
+        help="Build Atomix servers before running experiments.",
+    )
+    args = parser.parse_args()
+
+    BUILD_ATOMIX = args.build
     main()

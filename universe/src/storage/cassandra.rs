@@ -10,6 +10,7 @@ use scylla::transport::errors::QueryError;
 use scylla::transport::PagingState;
 use scylla::Session;
 use scylla::{FromRow, SerializeRow, SessionBuilder};
+use tracing::info;
 use uuid::Uuid;
 
 pub struct Cassandra {
