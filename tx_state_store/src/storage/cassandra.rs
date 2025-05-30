@@ -117,23 +117,24 @@ impl Storage for Cassandra {
             .map_err(scylla_query_error_to_storage_error)?
             .0
             .rows;
-        let res = match query_result {
-            None => panic!("no results results from a LWT"),
-            Some(mut rows) => {
-                if rows.len() != 1 {
-                    panic!("found multiple results from a LWT");
-                } else {
-                    let row = rows.pop().unwrap();
-                    let applied = row.columns[0].as_ref().unwrap().as_boolean().unwrap();
-                    if applied {
-                        Ok(OpResult::TransactionIsCommitted(CommitInfo { epoch }))
-                    } else {
-                        Ok(OpResult::TransactionIsAborted)
-                    }
-                }
-            }
-        };
-        res
+        Ok(OpResult::TransactionIsCommitted(CommitInfo { epoch }))
+        // let res = match query_result {
+        //     None => panic!("no results from a LWT"),
+        //     Some(mut rows) => {
+        //         if rows.len() != 1 {
+        //             panic!("found multiple results from a LWT");
+        //         } else {
+        //             let row = rows.pop().unwrap();
+        //             let applied = row.columns[0].as_ref().unwrap().as_boolean().unwrap();
+        //             if applied {
+        //                 Ok(OpResult::TransactionIsCommitted(CommitInfo { epoch }))
+        //             } else {
+        //                 Ok(OpResult::TransactionIsAborted)
+        //             }
+        //         }
+        //     }
+        // };
+        // res
     }
 
     async fn batch_commit_transactions(

@@ -21,7 +21,7 @@ struct Args {
     #[arg(long, default_value = "configs/config.json")]
     config: String,
 
-    #[arg(long, default_value = "workload-generator/configs/config.json")]
+    #[arg(long, default_value = "workload-generator/configs/workload-config.json")]
     workload_config: String,
 
     #[arg(long, default_value = "false")]
