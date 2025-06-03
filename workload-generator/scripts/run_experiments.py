@@ -99,7 +99,7 @@ class AtomixSetup:
                     cwd=ROOT_DIR,
                     env={**os.environ, "RUST_LOG": "error"},
                 )
-                time.sleep(2)
+                time.sleep(10)
             except Exception as e:
                 print(f"Error spinning up {server}: {e}")
                 self.kill_servers()
@@ -161,7 +161,7 @@ def varying_contention_experiment(atomix_setup, ray_logs_dir):
 
     # Define the search space
     workload_config = {
-        "num-keys": tune.grid_search([5, 25, 50, 100]),
+        "num-keys": tune.grid_search([1, 5, 10, 25, 50, 75, 100]),
         "max-concurrency": tune.grid_search([29]),
         "num-queries": tune.grid_search([1000]),
         "zipf-exponent": tune.grid_search([0]),
