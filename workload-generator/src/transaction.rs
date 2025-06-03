@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 use tracing::info;
 use uuid::Uuid;
 
-const VERIFICATION: bool = true;
+const VERIFICATION: bool = false;
 
 #[derive(Debug)]
 pub struct Transaction {
@@ -57,19 +57,6 @@ impl Transaction {
                 })
                 .await
                 .unwrap();
-            // let value_bytes = response.get_ref().value.as_ref();
-            // let value_display = value_bytes
-            //     .map(|bytes| {
-            //         String::from_utf8(bytes.clone())
-            //             .unwrap_or_else(|_| format!("<invalid utf8: {:?}>", bytes))
-            //             .parse::<u64>()
-            //             .unwrap_or(0)
-            //     })
-            //     .unwrap_or(0);
-            // info!(
-            //     "Read key: {:?}, value: {:?} tx id: {:?}",
-            //     key, value_display, transaction_id_int
-            // );
             let value_int = match response.get_ref().value.as_ref() {
                 Some(bytes) => String::from_utf8(bytes.clone())
                     .unwrap()
@@ -79,12 +66,12 @@ impl Transaction {
             };
             if VERIFICATION {
                 let mut value_per_key = value_per_key.lock().await;
-                info!("key: {:?}, expected value: {:?}, value_int: {:?}", key, value_per_key.get(key), value_int);
-                // if let Some(expected_value) = value_per_key.get(key) {
-                    // if value_int != *expected_value {
-                        // panic!("Read value mismatch");
-                    // }
-                // }
+                // info!("key: {:?}, expected value: {:?}, value_int: {:?}", key, value_per_key.get(key), value_int);
+                if let Some(expected_value) = value_per_key.get(key) {
+                    if value_int != *expected_value {
+                        panic!("Read value mismatch");
+                    }
+                }
             }
             results.insert(key, value_int);
         }
@@ -111,7 +98,7 @@ impl Transaction {
                     .unwrap();
                 if VERIFICATION {
                     let mut value_per_key = value_per_key.lock().await;
-                    info!("Writing key: {:?}, value: {:?}", key, value);
+                    // info!("Writing key: {:?}, value: {:?}", key, value);
                     value_per_key.insert(*key, value);
                 }
             }
