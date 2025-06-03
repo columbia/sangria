@@ -38,7 +38,7 @@ async fn run_workload(
     create_keyspace: bool,
 ) -> Metrics {
     let frontend_addr = config.frontend.proto_server_addr.to_string();
-    let mut client = FrontendClient::connect(format!("http://{}", frontend_addr))
+    let client = FrontendClient::connect(format!("http://{}", frontend_addr))
         .await
         .unwrap();
 

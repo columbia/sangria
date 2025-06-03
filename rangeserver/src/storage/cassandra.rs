@@ -81,7 +81,6 @@ static RENEW_EPOCH_LEASE_QUERY: &str = r#"
 static UPSERT_QUERY: &str = r#"
   INSERT INTO atomix.records (range_id, key, value, epoch, is_tombstone) 
     VALUES (?, ?, ?, ?, ?) 
-    USING TIMESTAMP ?
 "#;
 
 static GET_QUERY: &str = r#"
@@ -225,8 +224,7 @@ impl Storage for Cassandra {
                     key.to_vec(),
                     val.to_vec(),
                     version.epoch as i64,
-                    false,
-                    version.version_counter as i64,
+                    false
                 ),
             )
             .await
@@ -279,7 +277,6 @@ impl Storage for Cassandra {
                     value.to_vec(),
                     version.epoch as i64,
                     false,
-                    version.version_counter as i64,
                 ));
             } else {
                 // Prepare delete batch

@@ -45,14 +45,16 @@ impl PrefetchingBuffer {
     /// Returns the value for a key from the prefetch_store
     pub async fn get_from_buffer(&self, key: Bytes) -> Result<Option<Bytes>, ()> {
         let cur_state = self.state.lock().await;
-        if let Some(KeyState::Fetched) = cur_state.key_state.get(&key.clone()) {
-            let val = cur_state.prefetch_store.get(&key);
-            if let Some(value) = val {
-                Ok(Some(value.clone()))
-            } else {
-                Err(())
-            }
-        } else {
+        // if let Some(KeyState::Fetched) = cur_state.key_state.get(&key.clone()) {
+        let val = cur_state.prefetch_store.get(&key);
+        if let Some(value) = val {
+            Ok(Some(value.clone()))
+        } 
+        // else {
+        //     Err(())
+        // }
+        // } 
+        else {
             Ok(None)
         }
     }
@@ -268,17 +270,17 @@ impl PrefetchingBuffer {
     pub async fn upsert(&self, key: Bytes, value: Bytes) {
         let mut cur_state = self.state.lock().await;
         // If key is in key_state, it is being requested by a transaction
-        if cur_state.key_state.contains_key(&key.clone()) {
-            let _ = cur_state.prefetch_store.insert(key.clone(), value);
+        // if cur_state.key_state.contains_key(&key.clone()) {
+        let _ = cur_state.prefetch_store.insert(key.clone(), value);
             // If the key is still loading in a prefetch, change to fetched
-            if let KeyState::Loading(_) = cur_state.key_state.get(&key).unwrap() {
-                cur_state.key_state.insert(key.clone(), KeyState::Fetched);
+            // if let KeyState::Loading(_) = cur_state.key_state.get(&key).unwrap() {
+                // cur_state.key_state.insert(key.clone(), KeyState::Fetched);
                 // Notify all watchers of the state change
-                if let Some(sender) = cur_state.key_state_sender.get(&key) {
-                    let _ = sender.send(KeyState::Fetched);
-                }
-            }
-        }
+                // if let Some(sender) = cur_state.key_state_sender.get(&key) {
+                //     let _ = sender.send(KeyState::Fetched);
+                // }
+            // }
+        // }
     }
 
     /// If a transaction deletes a key, it must also be deleted from the buffer

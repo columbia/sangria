@@ -10,6 +10,7 @@ use proto::{
 use rand::{distributions::WeightedIndex, prelude::*};
 use std::{
     cmp::min,
+    collections::HashMap,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -44,6 +45,7 @@ pub struct WorkloadGenerator {
     workload_config: WorkloadConfig,
     client: FrontendClient<tonic::transport::Channel>,
     metrics: Arc<Mutex<InternalMetrics>>,
+    value_per_key: Arc<Mutex<HashMap<usize, u64>>>, // For verification
 }
 
 impl WorkloadGenerator {
@@ -55,6 +57,7 @@ impl WorkloadGenerator {
             workload_config,
             client,
             metrics: Arc::new(Mutex::new(InternalMetrics::default())),
+            value_per_key: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -95,6 +98,7 @@ impl WorkloadGenerator {
         //  sample num_keys uniformly from {1, 2}
         let num_keys = thread_rng().gen_range(1..3);
         let keys = self.zipf_sample_without_replacement(num_keys);
+
         Transaction::new(
             Keyspace {
                 namespace: self.workload_config.namespace.clone(),
@@ -168,10 +172,11 @@ impl WorkloadGenerator {
                     let next_task = self.generate_transaction();
                     let mut client_clone = self.client.clone();
                     let metrics = self.metrics.clone();
+                    let value_per_key = self.value_per_key.clone();
 
                     let join_handle = runtime_handle.spawn(async move {
                         let start_time = Instant::now();
-                        let result = next_task.execute(&mut client_clone).await;
+                        let result = next_task.execute(&mut client_clone, value_per_key).await;
                         let latency = start_time.elapsed();
 
                         // Record metrics

@@ -3,9 +3,15 @@ use frontend::error::Error as FrontendError;
 use proto::frontend::frontend_client::FrontendClient;
 use proto::frontend::Keyspace as ProtoKeyspace;
 use proto::frontend::{CommitRequest, GetRequest, PutRequest, StartTransactionRequest};
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::Arc,
+};
+use tokio::sync::Mutex;
 use tracing::info;
 use uuid::Uuid;
+
+const VERIFICATION: bool = true;
 
 #[derive(Debug)]
 pub struct Transaction {
@@ -26,6 +32,7 @@ impl Transaction {
     pub async fn execute(
         &self,
         client: &mut FrontendClient<tonic::transport::Channel>,
+        value_per_key: Arc<Mutex<HashMap<usize, u64>>>,
     ) -> Result<(), FrontendError> {
         let mut results = HashMap::new();
 
@@ -70,6 +77,15 @@ impl Transaction {
                     .unwrap(),
                 None => 0,
             };
+            if VERIFICATION {
+                let mut value_per_key = value_per_key.lock().await;
+                info!("key: {:?}, expected value: {:?}, value_int: {:?}", key, value_per_key.get(key), value_int);
+                // if let Some(expected_value) = value_per_key.get(key) {
+                    // if value_int != *expected_value {
+                        // panic!("Read value mismatch");
+                    // }
+                // }
+            }
             results.insert(key, value_int);
         }
 
@@ -93,6 +109,11 @@ impl Transaction {
                     })
                     .await
                     .unwrap();
+                if VERIFICATION {
+                    let mut value_per_key = value_per_key.lock().await;
+                    info!("Writing key: {:?}, value: {:?}", key, value);
+                    value_per_key.insert(*key, value);
+                }
             }
         }
 
