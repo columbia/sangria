@@ -45,6 +45,8 @@ class Plotter:
         for param, value in fixed_params.items():
             df = df[df[param] == value]
         df = df.dropna()
+        df = df.sort_values(by=x)
+        df[x] = df[x].astype(str)
         df[z] = df[z].astype(str)
         figs = []
         unique_keys = df[z].unique()
@@ -118,7 +120,7 @@ class Plotter:
 
 
 if __name__ == "__main__":
-    experiment_name = "cinnamon_carp_fd61a5f4"
+    experiment_name = "invaluable_cow_23c26fc6"
     plotter = Plotter(experiment_name)
     plotter.plot_metrics_vs_x_vs_z(
         METRICS,
@@ -126,10 +128,3 @@ if __name__ == "__main__":
         "baseline",
         {"num-queries": 1000, "zipf-exponent": 0.0, "max-concurrency": 29},
     )
-
-    # plotter.plot_metrics_vs_x_vs_z(
-    #     METRICS,
-    #     "zipf-exponent",
-    #     "num-keys",
-    #     {"num-queries": 1000, "max-concurrency": 10},
-    # )

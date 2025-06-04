@@ -75,34 +75,42 @@ class AtomixSetup:
         self.servers = ["universe", "warden", "rangeserver", "frontend"]
 
     def build_servers(self):
+        print("Building Atomix servers...")
         subprocess.run(["cargo", "build", "--release"], cwd=ROOT_DIR)
 
     def dump_servers_config(self):
         with open(RAY_SERVERS_CONFIG_PATH, "w") as f:
             json.dump(self.servers_config, f)
 
-    def kill_servers(self):
-        for server in self.servers:
+    def kill_servers(self, servers=None):
+        if servers is None:
+            servers = self.servers
+        for server in servers:
             subprocess.run(["pkill", "-f", server])
             print(f"Killed '{server}' processes.")
 
-    def restart_servers(self):
-        self.kill_servers()
-        for server in self.servers:
+    def restart_servers(self, servers=None):
+        if servers is None:
+            servers = self.servers
+        print(f"- Killing all servers: {servers}")
+        self.kill_servers(servers)
+        for server in servers:
             try:
+                print(f"- Spinning up {server}")
                 subprocess.Popen(
                     [
-                        TARGET_RUN_CMD + server,
+                        RUN_CMD + server,
                         "--config",
                         str(RAY_SERVERS_CONFIG_PATH),
                     ],
                     cwd=ROOT_DIR,
                     env={**os.environ, "RUST_LOG": "error"},
                 )
-                time.sleep(10)
+                time.sleep(5)
             except Exception as e:
                 print(f"Error spinning up {server}: {e}")
-                self.kill_servers()
+                self.kill_servers(servers=servers)
+                exit(1)
 
 
 def run_workload(config):
@@ -231,6 +239,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--build",
         action="store_true",
+        default=True,
         help="Build Atomix servers before running experiments.",
     )
     args = parser.parse_args()
