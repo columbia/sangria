@@ -118,10 +118,14 @@ impl Resolver {
                 );
                 // Add transaction while holding the write lock
                 let transaction_info_clone = transaction_info.clone();
-                resolver.group_commit.add_transactions(&vec![transaction_info_clone.clone()]).await?;
+                resolver
+                    .group_commit
+                    .add_transactions(&vec![transaction_info_clone.clone()])
+                    .await?;
                 let resolver_clone = resolver.clone();
                 resolver.bg_runtime.spawn(async move {
-                    let _ = Self::trigger_commit(resolver_clone, vec![transaction_info_clone]).await;
+                    let _ =
+                        Self::trigger_commit(resolver_clone, vec![transaction_info_clone]).await;
                 });
             }
         }
@@ -228,11 +232,20 @@ impl Resolver {
             }
 
             // Add transactions to the group commit while holding the write lock so that dependencies order is respected
-            let _ = resolver.group_commit.add_transactions(&new_ready_to_commit).await;
+            let _ = resolver
+                .group_commit
+                .add_transactions(&new_ready_to_commit)
+                .await;
         }
         // Trigger a commit so that the new ready transactions are added to the group commit and get committed
         if !new_ready_to_commit.is_empty() {
-            info!("New ready to commit transactions: {:?}", new_ready_to_commit.iter().map(|tx| tx.id).collect::<Vec<_>>());
+            info!(
+                "New ready to commit transactions: {:?}",
+                new_ready_to_commit
+                    .iter()
+                    .map(|tx| tx.id)
+                    .collect::<Vec<_>>()
+            );
             let resolver_clone = resolver.clone();
             resolver.bg_runtime.spawn(async move {
                 let _ = Resolver::trigger_commit(resolver_clone, new_ready_to_commit).await;

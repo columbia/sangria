@@ -17,6 +17,12 @@ pub enum CommitStrategy {
     Adaptive,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Heuristic {
+    LockContention,
+    // Static,
+}
+
 /// Represents a host and port combination.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct HostPort {
@@ -148,6 +154,7 @@ pub struct FrontendConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
     pub commit_strategy: CommitStrategy,
+    pub heuristic: Heuristic,
     pub range_server: RangeServerConfig,
     pub epoch: EpochConfig,
     pub universe: UniverseConfig,

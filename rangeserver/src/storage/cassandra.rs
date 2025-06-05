@@ -224,7 +224,7 @@ impl Storage for Cassandra {
                     key.to_vec(),
                     val.to_vec(),
                     version.epoch as i64,
-                    false
+                    false,
                 ),
             )
             .await

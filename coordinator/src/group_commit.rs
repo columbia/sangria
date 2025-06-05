@@ -145,7 +145,10 @@ impl GroupCommit {
                             return Ok(Vec::new());
                         }
                         info!("Group size: {}", group_clone.len());
-                        info!("Group: {:?}", group_clone.iter().map(|tx| tx.id).collect::<Vec<_>>());
+                        info!(
+                            "Group: {:?}",
+                            group_clone.iter().map(|tx| tx.id).collect::<Vec<_>>()
+                        );
                     }
 
                     // Acquire the write lock to commit and clear the group -- release only after transactions are committed

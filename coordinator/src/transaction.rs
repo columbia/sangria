@@ -363,7 +363,60 @@ impl Transaction {
                 // notify_other_coordinators(self.id).await;
             }
             CommitStrategy::Adaptive => {
-                todo!()
+                // If there is at least one dependency we must delegate the commit to the resolver.
+                if !self.dependencies.is_empty() {
+                    let participants_info = self
+                        .participant_ranges
+                        .iter()
+                        .map(|(range_id, info)| ParticipantRangeInfo {
+                            participant_range: *range_id,
+                            has_writes: !info.writeset.is_empty(),
+                        })
+                        .collect();
+                    info!(
+                        "Delegating commit to resolver for transaction {:?}",
+                        self.id
+                    );
+                    let _ = Resolver::commit(
+                        self.resolver.clone(),
+                        self.id,
+                        self.dependencies.clone(),
+                        participants_info,
+                    )
+                    .await;
+                } else {
+                    // If there are no dependencies we can commit locally.
+                    info!("Committing transaction {:?} without Resolver", self.id);
+                    let _ = self
+                        .tx_state_store
+                        .try_commit_transaction(self.id, 0)
+                        .await
+                        .unwrap();
+                    self.state = State::Committed;
+                    // notify participants so they can quickly release locks.
+                    let mut commit_join_set = JoinSet::new();
+                    for (range_id, info) in self.participant_ranges.iter() {
+                        let range_id = *range_id;
+                        let has_writes = !info.writeset.is_empty();
+                        let range_client = self.range_client.clone();
+                        let transaction_info = self.transaction_info.clone();
+                        if has_writes {
+                            commit_join_set.spawn_on(
+                                async move {
+                                    range_client
+                                        .commit_transactions(
+                                            vec![transaction_info.id],
+                                            &range_id,
+                                            0,
+                                        )
+                                        .await
+                                },
+                                &self.runtime,
+                            );
+                        }
+                    }
+                    while commit_join_set.join_next().await.is_some() {}
+                }
             }
         }
         Ok(())

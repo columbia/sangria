@@ -6,7 +6,7 @@ use crate::{
     transaction_abort_reason::TransactionAbortReason, wal::Wal,
 };
 use bytes::Bytes;
-use common::config::{CommitStrategy, Config};
+use common::config::{CommitStrategy, Config, Heuristic};
 use common::full_range_id::FullRangeId;
 use common::transaction_info::TransactionInfo;
 
@@ -25,8 +25,7 @@ use tonic::async_trait;
 use tracing::info;
 
 struct PrepareRecord {
-    writes: HashMap<Bytes, Bytes>, // key to write -> new value
-    deletes: HashSet<Bytes>,       // key to delete
+    changes: HashMap<Bytes, Option<Bytes>>, // key to change -> new value
 }
 
 struct PendingState {
@@ -198,14 +197,16 @@ where
                 if let Some(dependency) = pending_state.pending_commit_table.get(&key) {
                     get_result.dependencies = vec![dependency.clone()];
                     // Read the value from the pending_prepare_record of the dependee transaction
-                    info!("Reading value from pending_prepare_record of transaction {:?}", dependency);
-                    let prepare_record = pending_state.pending_prepare_records.get(&dependency).unwrap();
-                    if prepare_record.writes.contains_key(&key) {
-                        // Check the writes set
-                        get_result.val = Some(prepare_record.writes.get(&key).unwrap().clone());
-                        return Ok(get_result);
-                    } else if prepare_record.deletes.contains(&key) {
-                        // Check the deletes set
+                    info!(
+                        "Reading value from pending_prepare_record of transaction {:?}",
+                        dependency
+                    );
+                    let prepare_record = pending_state
+                        .pending_prepare_records
+                        .get(&dependency)
+                        .unwrap();
+                    if prepare_record.changes.contains_key(&key) {
+                        get_result.val = prepare_record.changes.get(&key).unwrap().clone();
                         return Ok(get_result);
                     } else {
                         panic!("Key not found in pending_prepare_records but dependency found");
@@ -280,8 +281,7 @@ where
                 // TODO: check delete and write sets are non-overlapping.
                 let prepare_record: Arc<PrepareRecord> = {
                     let mut prepare_record = PrepareRecord {
-                        writes: HashMap::new(),
-                        deletes: HashSet::new(),
+                        changes: HashMap::new(),
                     };
                     for put in prepare.puts().iter() {
                         for put in put.iter() {
@@ -292,7 +292,7 @@ where
                                 return Err(Error::KeyIsOutOfRange);
                             }
                             let val = Bytes::copy_from_slice(put.value().unwrap().bytes());
-                            prepare_record.writes.insert(key, val);
+                            prepare_record.changes.insert(key, Some(val));
                         }
                     }
                     for del in prepare.deletes().iter() {
@@ -301,7 +301,7 @@ where
                             if !state.range_info.key_range.includes(key.clone()) {
                                 return Err(Error::KeyIsOutOfRange);
                             }
-                            prepare_record.deletes.insert(key);
+                            prepare_record.changes.insert(key, None);
                         }
                     }
                     Arc::new(prepare_record)
@@ -316,39 +316,58 @@ where
 
                 // 2) Acquire the range lock if it hasn't already been acquired by previous Gets
                 self.acquire_range_lock(state, tx.clone()).await?;
-                
+
                 let mut dependencies = HashSet::new();
                 {
+                    // Decide whether we should release the lock early for each key based on the commit strategy and the heuristic
+                    let mut early_lock_release_per_key = HashMap::new();
+                    for key in prepare_record.changes.keys() {
+                        early_lock_release_per_key.insert(
+                            key.clone(),
+                            self.do_early_lock_release(state, key.clone()).await,
+                        );
+                    }
+
                     // 3) Save the prepare record to the pending_prepare_records
                     let mut pending_state = state.pending_state.write().await;
-                    pending_state.pending_prepare_records.insert(tx.id, prepare_record.clone());
-                
-                    if self.config.commit_strategy == CommitStrategy::Pipelined {
-                        // 4) Get any Write-Write dependencies for the transaction and update the pending_commit_table
-                        info!("Checking dependencies for transaction {:?}", tx.id);
-                        {
-                            //  Check the writes set
-                            for key in prepare_record.writes.keys() {
-                                if pending_state.pending_commit_table.contains_key(key) {
-                                    dependencies.insert(pending_state.pending_commit_table.get(key).unwrap().clone());
-                                }
-                                pending_state.pending_commit_table.insert(key.clone(), tx.id);
-                            }
-                            //  Check the deletes set
-                            for key in prepare_record.deletes.iter() {
-                                if pending_state.pending_commit_table.contains_key(key) {
-                                    dependencies.insert(pending_state.pending_commit_table.get(key).unwrap().clone());
-                                }
-                                pending_state.pending_commit_table.insert(key.clone(), tx.id);
-                            }
-                        }
-                        drop(pending_state);
-                        info!(
-                            "Dependencies for transaction {:?}: {:?}",
-                            tx.id, dependencies
-                        );
+                    pending_state
+                        .pending_prepare_records
+                        .insert(tx.id, prepare_record.clone());
 
-                        // 5) Release the range lock
+                    // NOTE: CommitStrategy::Traditional will return no dependencies, will not update the pending_commit_table, and will not release the lock
+                    // so it could bypass the rest of this codeblock for efficiency.
+
+                    // 4) Get any Write-Write dependencies for the transaction and update the pending_commit_table if ran in "early-lock-release" mode
+                    info!("Checking dependencies for transaction {:?}", tx.id);
+                    for (key, early_lock_release) in early_lock_release_per_key.iter() {
+                        if pending_state.pending_commit_table.contains_key(key) {
+                            dependencies.insert(
+                                pending_state.pending_commit_table.get(key).unwrap().clone(),
+                            );
+                        }
+                        // Update the pending_commit_table only for keys that we will release the lock early for
+                        if *early_lock_release {
+                            pending_state
+                                .pending_commit_table
+                                .insert(key.clone(), tx.id);
+                        }
+                    }
+                    drop(pending_state);
+                    info!(
+                        "Dependencies for transaction {:?}: {:?}",
+                        tx.id, dependencies
+                    );
+
+                    // 5) Maybe Release the range lock
+                    // NOTE: This is for when we have per-key locking.
+                    // for (key, early_lock_release) in early_lock_release_per_key {
+                    //     if early_lock_release {
+                    //         state.lock_table.release(key).await;
+                    //     }
+                    // }
+                    // Now since we have one lock for all keys in the range, the heuristic is guaranteed to return the same early lock release decision for all keys.
+                    // So, we just check the early-lock-release flag for the first key and release the lock if it is true.
+                    if *early_lock_release_per_key.values().next().unwrap() {
                         state.lock_table.release().await;
                     }
                 }
@@ -390,10 +409,10 @@ where
                 }
                 state.lock_table.release().await;
 
-                let _ = self
-                    .prefetching_buffer
-                    .process_transaction_complete(tx.id)
-                    .await;
+                // let _ = self
+                //     .prefetching_buffer
+                //     .process_transaction_complete(tx.id)
+                //     .await;
                 Ok(())
             }
         }
@@ -446,12 +465,8 @@ where
                     // For every key, collect the last transaction that has updated it. This will help us update the pending_commit_table later.
                     // TODO: overlaps should have been handled in the prepare phase.
                     let prepare_record = pending_prepare_record_per_tx.get(&tx.id).unwrap();
-                    for (key, val) in prepare_record.writes.iter() {
-                        all_changes.insert(key.clone(), Some(val.clone()));
-                        last_tx_per_key.insert(key.clone(), tx.id);
-                    }
-                    for key in prepare_record.deletes.iter() {
-                        all_changes.insert(key.clone(), None);
+                    for (key, val) in prepare_record.changes.iter() {
+                        all_changes.insert(key.clone(), val.clone());
                         last_tx_per_key.insert(key.clone(), tx.id);
                     }
                 }
@@ -480,45 +495,57 @@ where
                         }
                     }
                 }
-                
+
                 {
                     let mut pending_state = state.pending_state.write().await;
-                    if self.config.commit_strategy == CommitStrategy::Pipelined {
-                        // We update the pending_commit_table to remove the transactions that have committed and are listed as dependencies for other transactions
-                        for (key, tx_id) in last_tx_per_key {
-                            if pending_state.pending_commit_table.contains_key(&key) {
-                                // The last dependee per key might have changed since the prepare phase, so we need to check if it is still a dependency before removing it.
-                                let last_dependee = pending_state.pending_commit_table.get(&key).unwrap();
-                                info!("Last dependee for key {:?} is {:?} and last tx is {:?}", key, last_dependee, tx_id);
-                                info!("All transaction ids: {:?}", transactions.iter().map(|tx| tx.id).collect::<Vec<_>>());
-                                if tx_id == *last_dependee {
-                                    info!("Removing key {:?} from pending_commit_table", key);
-                                    pending_state.pending_commit_table.remove(&key);
-                                }
-                                // Otherwise, the transaction that last updated the key in the pending_commit_table has not committed yet.
+                    // if self.config.commit_strategy != CommitStrategy::Traditional {
+                    // We update the pending_commit_table to remove the transactio  ns that have committed and are listed as dependencies for other transactions
+                    for (key, tx_id) in last_tx_per_key {
+                        if pending_state.pending_commit_table.contains_key(&key) {
+                            // The last dependee per key might have changed since the prepare phase, so we need to check if it is still a dependency before removing it.
+                            let last_dependee =
+                                pending_state.pending_commit_table.get(&key).unwrap();
+                            info!(
+                                "Last dependee for key {:?} is {:?} and last tx is {:?}",
+                                key, last_dependee, tx_id
+                            );
+                            info!(
+                                "All transaction ids: {:?}",
+                                transactions.iter().map(|tx| tx.id).collect::<Vec<_>>()
+                            );
+                            if tx_id == *last_dependee {
+                                info!("Removing key {:?} from pending_commit_table", key);
+                                pending_state.pending_commit_table.remove(&key);
                             }
+                            // Otherwise, the transaction that last updated the key in the pending_commit_table has not committed yet.
                         }
                     }
+
                     // Remove the prepare records for the transactions that have committed.
                     for tx in &transactions {
                         info!("Removing prepare record for transaction {:?}", tx.id);
                         pending_state.pending_prepare_records.remove(&tx.id);
                     }
                 }
-                
+
                 info!("Done committing transactions");
 
+                // For CommitStrategy::Traditional, this is the only transaction that can hold the lock.
                 if self.config.commit_strategy == CommitStrategy::Traditional {
-                    state.lock_table.release().await;
+                    assert!(transactions.len() == 1);
+                    assert!(
+                        transactions[0].id
+                            == state.lock_table.get_current_holder_id().await.unwrap()
+                    );
                 }
 
-                // TODO(kelly): Update tx complete
-                // // Process transaction complete and remove the requests from the logs for all transactions
-                // for tx_id in all_tx_ids {
-                //     self.prefetching_buffer
-                //         .process_transaction_complete(tx_id)
-                //         .await;
-                // }
+                // If any of the committed transactions is the one holding the lock, release it.
+                if let Some(current_holder_id) = state.lock_table.get_current_holder_id().await {
+                    if transactions.iter().any(|tx| tx.id == current_holder_id) {
+                        state.lock_table.release().await;
+                    }
+                }
+
                 Ok(())
             }
         }
@@ -679,6 +706,22 @@ where
             }
             // Sleep for a while before renewing the lease again.
             tokio::time::sleep(lease_renewal_interval).await;
+        }
+    }
+
+    async fn do_early_lock_release(&self, state: &LoadedState, key: Bytes) -> bool {
+        match self.config.commit_strategy {
+            CommitStrategy::Pipelined => true,
+            CommitStrategy::Traditional => false,
+            CommitStrategy::Adaptive => {
+                // When we have per-key locking, we can check contention for each key and allow early-lock-release for that key if it is contended.
+                // e.g. return self.lock_table.is_contended(&key).await;
+                // But for now, we just check the contention for the entire range based on how many transactions are currently waiting for the lock and return the same decision for all keys in the range.
+                match self.config.heuristic {
+                    Heuristic::LockContention => state.lock_table.is_contended().await,
+                    // Heuristic::Static => map(state.range_info.range_id) -> Yes or No,
+                }
+            }
         }
     }
 

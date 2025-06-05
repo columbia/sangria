@@ -3,10 +3,7 @@ use frontend::error::Error as FrontendError;
 use proto::frontend::frontend_client::FrontendClient;
 use proto::frontend::Keyspace as ProtoKeyspace;
 use proto::frontend::{CommitRequest, GetRequest, PutRequest, StartTransactionRequest};
-use std::{
-    collections::HashMap,
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::info;
 use uuid::Uuid;

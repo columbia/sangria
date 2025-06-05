@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio::sync::RwLock;
+use uuid::Uuid;
 
 type UtcDateTime = DateTime<chrono::Utc>;
 pub struct CurrentLockHolder {
@@ -43,6 +44,15 @@ impl LockTable {
             }),
         }
     }
+
+    pub async fn get_current_holder_id(&self) -> Option<Uuid> {
+        let state = self.state.read().await;
+        state
+            .current_holder
+            .as_ref()
+            .map(|holder| holder.transaction.id)
+    }
+
     pub async fn maybe_wait_for_current_holder(
         &self,
         tx: Arc<TransactionInfo>,
@@ -61,6 +71,11 @@ impl LockTable {
             }
         };
         r
+    }
+
+    pub async fn is_contended(&self) -> bool {
+        let state = self.state.read().await;
+        !state.waiting_for_release.is_empty()
     }
 
     pub async fn acquire(&self, tx: Arc<TransactionInfo>) -> Result<oneshot::Receiver<()>, Error> {
