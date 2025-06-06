@@ -155,6 +155,7 @@ pub struct FrontendConfig {
 pub struct Config {
     pub commit_strategy: CommitStrategy,
     pub heuristic: Heuristic,
+    pub print_lock_table_state: bool,
     pub range_server: RangeServerConfig,
     pub epoch: EpochConfig,
     pub universe: UniverseConfig,
