@@ -168,7 +168,7 @@ impl Resolver {
         Ok(())
     }
 
-    fn spawn_register_committed_transactions(
+    pub fn spawn_register_committed_transactions(
         resolver: Arc<Self>,
         transaction_ids: Vec<Uuid>,
     ) -> Result<(), Error> {
@@ -197,7 +197,7 @@ impl Resolver {
                 new_resolved_dependencies.push(transaction_id);
             }
 
-            //  Find iteratively all transactions that are now ready to commit until the new_resolved_dependencies vector is empty
+            // Find iteratively all transactions that are now ready to commit until the new_resolved_dependencies vector is empty
             while !new_resolved_dependencies.is_empty() {
                 let transaction_id = new_resolved_dependencies.pop().unwrap();
 
@@ -232,10 +232,12 @@ impl Resolver {
             }
 
             // Add transactions to the group commit while holding the write lock so that dependencies order is respected
-            let _ = resolver
-                .group_commit
-                .add_transactions(&new_ready_to_commit)
-                .await;
+            if !new_ready_to_commit.is_empty() {
+                let _ = resolver
+                    .group_commit
+                    .add_transactions(&new_ready_to_commit)
+                    .await;
+            }
         }
         // Trigger a commit so that the new ready transactions are added to the group commit and get committed
         if !new_ready_to_commit.is_empty() {

@@ -18,3 +18,4 @@ tx_state_store = { version = "0.1.0", path = "../tx_state_store" }
 uuid = "1.10.0"
 tonic = "0.11.0"
 tracing = "0.1.40"
+colored = "3.0.0"

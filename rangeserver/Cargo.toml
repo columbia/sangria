@@ -34,5 +34,7 @@ tracing = "0.1.40"
 num_cpus = "1.16.0"
 clap = { version = "4.5", features = ["derive"] }
 core_affinity = "0.7.0"
+colored = "3.0.0"
+
 [build-dependencies]
 tonic-build = "0.11"

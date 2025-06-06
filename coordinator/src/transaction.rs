@@ -4,6 +4,7 @@ use std::{
 };
 
 use bytes::Bytes;
+use colored::Colorize;
 use common::{
     config::CommitStrategy, constants, full_range_id::FullRangeId, keyspace::Keyspace,
     membership::range_assignment_oracle::RangeAssignmentOracle, record::Record,
@@ -347,8 +348,11 @@ impl Transaction {
 
                 // Delegate commit to the resolver.
                 info!(
-                    "Delegating commit to resolver for transaction {:?}",
-                    self.id
+                    "{}",
+                    format!("Delegating commit to resolver for transaction {}", self.id)
+                        .italic()
+                        .bold()
+                        .yellow()
                 );
                 let _ = Resolver::commit(
                     self.resolver.clone(),
@@ -363,8 +367,8 @@ impl Transaction {
                 // notify_other_coordinators(self.id).await;
             }
             CommitStrategy::Adaptive => {
-                // If there is at least one dependency we must delegate the commit to the resolver.
                 if !self.dependencies.is_empty() {
+                    // Delegate commit to the resolver.
                     let participants_info = self
                         .participant_ranges
                         .iter()
@@ -374,8 +378,11 @@ impl Transaction {
                         })
                         .collect();
                     info!(
-                        "Delegating commit to resolver for transaction {:?}",
-                        self.id
+                        "{}",
+                        format!("Delegating commit to resolver for transaction {}", self.id)
+                            .italic()
+                            .bold()
+                            .yellow()
                     );
                     let _ = Resolver::commit(
                         self.resolver.clone(),
@@ -385,15 +392,22 @@ impl Transaction {
                     )
                     .await;
                 } else {
-                    // If there are no dependencies we can commit locally.
-                    info!("Committing transaction {:?} without Resolver", self.id);
+                    // Send commit directly to the participant ranges.
+                    info!(
+                        "{}",
+                        format!("Committing transaction {:?} without Resolver", self.id)
+                            .italic()
+                            .bold()
+                            .green()
+                    );
                     let _ = self
                         .tx_state_store
                         .try_commit_transaction(self.id, 0)
                         .await
                         .unwrap();
                     self.state = State::Committed;
-                    // notify participants so they can quickly release locks.
+
+                    // Notify participants so they can quickly release locks.
                     let mut commit_join_set = JoinSet::new();
                     for (range_id, info) in self.participant_ranges.iter() {
                         let range_id = *range_id;
@@ -416,7 +430,19 @@ impl Transaction {
                         }
                     }
                     while commit_join_set.join_next().await.is_some() {}
+                    info!("Transaction {:?} has committed", self.id);
+
+                    // Now that commit is complete, we must register the transaction as committed in the resolver.
+                    info!(
+                        "Registering transaction {:?} as committed in the resolver",
+                        self.id
+                    );
+                    let _ = Resolver::spawn_register_committed_transactions(
+                        self.resolver.clone(),
+                        vec![self.id],
+                    );
                 }
+                info!("COMMIT OF TRANSACTION {:?} DONE!", self.id);
             }
         }
         Ok(())

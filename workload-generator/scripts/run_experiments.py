@@ -178,7 +178,7 @@ def varying_contention_experiment(atomix_setup, ray_logs_dir):
         "background-runtime-core-ids": list(range(3, 32)),
     }
 
-    baselines = ["Pipelined", "Traditional"]
+    baselines = ["Pipelined", "Traditional", "Adaptive"]
 
     for baseline in baselines:
         workload_config["baseline"] = tune.grid_search([baseline])

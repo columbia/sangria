@@ -10,6 +10,7 @@ use common::config::{CommitStrategy, Config, Heuristic};
 use common::full_range_id::FullRangeId;
 use common::transaction_info::TransactionInfo;
 
+use colored::Colorize;
 use uuid::Uuid;
 
 use crate::prefetching_buffer::KeyState;
@@ -327,7 +328,18 @@ where
                             self.do_early_lock_release(state, key.clone()).await,
                         );
                     }
-
+                    info!(
+                        "Early lock release per key:\n{}",
+                        early_lock_release_per_key
+                            .iter()
+                            .map(|(k, v)| format!(
+                                "{}: {}",
+                                format!("{:?}", k).blue(),
+                                v.to_string().red()
+                            ))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    );
                     // 3) Save the prepare record to the pending_prepare_records
                     let mut pending_state = state.pending_state.write().await;
                     pending_state
@@ -346,10 +358,13 @@ where
                             );
                         }
                         // Update the pending_commit_table only for keys that we will release the lock early for
+                        // For the keys that we will not release the lock early for, we clear the entry in the pending_commit_table
                         if *early_lock_release {
                             pending_state
                                 .pending_commit_table
                                 .insert(key.clone(), tx.id);
+                        } else {
+                            pending_state.pending_commit_table.remove(key);
                         }
                     }
                     drop(pending_state);
@@ -368,6 +383,10 @@ where
                     // Now since we have one lock for all keys in the range, the heuristic is guaranteed to return the same early lock release decision for all keys.
                     // So, we just check the early-lock-release flag for the first key and release the lock if it is true.
                     if *early_lock_release_per_key.values().next().unwrap() {
+                        info!(
+                            "Early lock release for transaction {:?} on range {:?}",
+                            tx.id, self.range_id.range_id
+                        );
                         state.lock_table.release().await;
                     }
                 }
@@ -499,7 +518,7 @@ where
                 {
                     let mut pending_state = state.pending_state.write().await;
                     // if self.config.commit_strategy != CommitStrategy::Traditional {
-                    // We update the pending_commit_table to remove the transactio  ns that have committed and are listed as dependencies for other transactions
+                    // We update the pending_commit_table to remove the transactions that have committed and are listed as dependencies for other transactions
                     for (key, tx_id) in last_tx_per_key {
                         if pending_state.pending_commit_table.contains_key(&key) {
                             // The last dependee per key might have changed since the prepare phase, so we need to check if it is still a dependency before removing it.
@@ -528,7 +547,10 @@ where
                     }
                 }
 
-                info!("Done committing transactions");
+                info!(
+                    "Done committing transactions {:?}",
+                    transactions.iter().map(|tx| tx.id).collect::<Vec<_>>()
+                );
 
                 // For CommitStrategy::Traditional, this is the only transaction that can hold the lock.
                 if self.config.commit_strategy == CommitStrategy::Traditional {
@@ -543,6 +565,10 @@ where
                 if let Some(current_holder_id) = state.lock_table.get_current_holder_id().await {
                     if transactions.iter().any(|tx| tx.id == current_holder_id) {
                         state.lock_table.release().await;
+                        info!(
+                            "Lock released for transaction {:?} on range {:?}",
+                            current_holder_id, self.range_id.range_id
+                        );
                     }
                 }
 
@@ -721,6 +747,18 @@ where
                     Heuristic::LockContention => state.lock_table.is_contended().await,
                     // Heuristic::Static => map(state.range_info.range_id) -> Yes or No,
                 }
+            }
+        }
+    }
+
+    pub async fn print_lock_table_state(&self) {
+        let s = self.state.read().await;
+        match s.deref() {
+            State::NotLoaded | State::Unloaded | State::Loading(_) => {
+                return;
+            }
+            State::Loaded(state) => {
+                state.lock_table.print_state(self.range_id.range_id).await;
             }
         }
     }

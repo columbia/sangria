@@ -1,3 +1,4 @@
+use crate::{error::Error, rangeclient::RangeClient, resolver::TransactionInfo};
 use common::full_range_id::FullRangeId;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -6,8 +7,6 @@ use tokio::task::JoinSet;
 use tracing::info;
 use tx_state_store::client::Client as TxStateStoreClient;
 use uuid::Uuid;
-
-use crate::{error::Error, rangeclient::RangeClient, resolver::TransactionInfo};
 
 // NOTE: Every participant range has its own group of transactions ready to commit.
 // Each group is protected by a read-write lock. We acquire the write lock only when
@@ -178,11 +177,16 @@ impl GroupCommit {
                     // Notify participant so that:
                     // - it applies the TXs' PrepareRecords in storage
                     // - and then quickly updates its PendingCommitTable to stop treating these transactions as dependencies for other transactions
-                    let _ = range_client
+                    // info!("Committing transactions {:?} in range {:?}", participant_range_clone, participant_range_clone);
+                    if let Err(e) = range_client
                         .commit_transactions(tx_ids_vec, &participant_range_clone, 0)
-                        .await;
-                    // info!("Committed transactions in range");
-
+                        .await
+                    {
+                        panic!(
+                            "Error committing transactions {:?}: {:?}",
+                            participant_range_clone, e
+                        );
+                    }
                     Ok(transactions.clone())
                 });
             }

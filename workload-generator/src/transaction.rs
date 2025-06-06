@@ -40,8 +40,11 @@ impl Transaction {
             .unwrap();
         let transaction_id = Uuid::parse_str(&response.get_ref().transaction_id).unwrap();
         // let transaction_id_int = transaction_id.as_u128() as u64;
-        // info!("Started transaction with ID: {:?}", transaction_id_int);
-
+        // info!("Started transaction with ID: {:?}", transaction_id);
+        // info!(
+        //     "Transaction id: {:?}, Readset: {:?}, Writeset: {:?}",
+        //     transaction_id, self.readset, self.writeset
+        // );
         for key in &self.readset {
             let response = client
                 .get(GetRequest {

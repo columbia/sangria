@@ -1,10 +1,12 @@
 use crate::{error::Error, transaction_abort_reason::TransactionAbortReason};
 use chrono::DateTime;
+use colored::Colorize;
 use common::transaction_info::TransactionInfo;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio::sync::RwLock;
+use tracing::info;
 use uuid::Uuid;
 
 type UtcDateTime = DateTime<chrono::Utc>;
@@ -45,6 +47,24 @@ impl LockTable {
         }
     }
 
+    pub async fn print_state(&self, range_id: Uuid) {
+        let state = self.state.read().await;
+        info!(
+            "{}",
+            format!(
+                "Range: {:?}, Lock table holder: {:?} and waiting to acquire: {:?}",
+                range_id,
+                state.current_holder.as_ref().map(|h| h.transaction.id),
+                state
+                    .waiting_to_acquire
+                    .iter()
+                    .map(|r| r.transaction.id)
+                    .collect::<Vec<_>>()
+            )
+            .blue()
+        );
+    }
+
     pub async fn get_current_holder_id(&self) -> Option<Uuid> {
         let state = self.state.read().await;
         state
@@ -75,7 +95,15 @@ impl LockTable {
 
     pub async fn is_contended(&self) -> bool {
         let state = self.state.read().await;
-        !state.waiting_for_release.is_empty()
+        info!(
+            "{}",
+            format!(
+                "{} transactions waiting to acquire",
+                state.waiting_to_acquire.len()
+            )
+            .purple()
+        );
+        !state.waiting_to_acquire.is_empty()
     }
 
     pub async fn acquire(&self, tx: Arc<TransactionInfo>) -> Result<oneshot::Receiver<()>, Error> {

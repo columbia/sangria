@@ -33,6 +33,7 @@ use proto::rangeserver::range_server_server::{RangeServer, RangeServerServer};
 use proto::rangeserver::{PrefetchRequest, PrefetchResponse};
 
 use crate::prefetching_buffer::PrefetchingBuffer;
+use colored::Colorize;
 
 #[derive(Clone)]
 struct ProtoServer<S>
@@ -216,6 +217,15 @@ where
                     (range_table).insert(id.range_id, rm.clone());
                     drop(range_table);
                     rm.load().await?;
+                    if self.config.print_lock_table_state {
+                        let rm_clone = rm.clone();
+                        self.bg_runtime.spawn(async move {
+                            loop {
+                                rm_clone.print_lock_table_state().await;
+                                tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+                            }
+                        });
+                    }
                     rm.clone()
                 }
             }
@@ -512,7 +522,7 @@ where
             txs.push(tx);
         }
         rm.commit(txs, request).await?;
-        self.remove_transactions(&transaction_ids).await;
+        // self.remove_transactions(&transaction_ids).await;
         Ok(())
     }
 
@@ -566,7 +576,7 @@ where
         let rm = self.maybe_load_and_get_range(&range_id).await?;
         let tx = self.get_transaction_info(transaction_id).await?;
         rm.abort(tx.clone(), request).await?;
-        self.remove_transactions(&vec![transaction_id]).await;
+        // self.remove_transactions(&vec![transaction_id]).await;
         Ok(())
     }
 
