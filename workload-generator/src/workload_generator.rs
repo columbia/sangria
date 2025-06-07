@@ -7,7 +7,7 @@ use proto::{
     frontend::frontend_client::FrontendClient,
     universe::{CreateKeyspaceRequest, KeyRangeRequest, Zone as ProtoZone},
 };
-use rand::{distributions::WeightedIndex, prelude::*};
+use rand::{distributions::WeightedIndex, prelude::*, seq::IteratorRandom};
 use std::{
     cmp::min,
     collections::HashMap,
@@ -98,6 +98,13 @@ impl WorkloadGenerator {
         //  sample num_keys uniformly from {1, 2}
         let num_keys = thread_rng().gen_range(1..3);
         let keys = self.zipf_sample_without_replacement(num_keys);
+        // sample num_keys without replacement from uniform distribution
+        // let mut keys: Vec<usize> = (0..self.workload_config.num_keys)
+        //     .choose_multiple(&mut thread_rng(), num_keys)
+        //     .into_iter()
+        //     .map(|k| k as usize)
+        //     .collect();
+        // keys.sort();
 
         Transaction::new(
             Keyspace {

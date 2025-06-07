@@ -135,7 +135,7 @@ def main():
         METRICS,
         "num-keys",
         "baseline",
-        {"num-queries": 5000, "zipf-exponent": 0.0, "max-concurrency": 29},
+        {"num-queries": 2000, "zipf-exponent": 0.0, "max-concurrency": 29},
     )
 
 if __name__ == "__main__":

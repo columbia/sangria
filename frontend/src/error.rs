@@ -1,4 +1,4 @@
-use coordinator::error::Error as CoordinatorError;
+use coordinator_rangeclient::error::Error as CoordinatorError;
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]

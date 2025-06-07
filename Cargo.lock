@@ -420,7 +420,30 @@ dependencies = [
  "bytes",
  "colored",
  "common",
+ "coordinator-rangeclient",
  "epoch_reader",
+ "proto",
+ "rangeclient",
+ "resolver",
+ "strum",
+ "tokio",
+ "tokio-util",
+ "tonic",
+ "tracing",
+ "tx_state_store",
+ "uuid 1.10.0",
+]
+
+[[package]]
+name = "coordinator-rangeclient"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "colored",
+ "common",
+ "epoch_reader",
+ "hex",
  "proto",
  "rangeclient",
  "strum",
@@ -428,7 +451,7 @@ dependencies = [
  "tokio-util",
  "tonic",
  "tracing",
- "tx_state_store",
+ "universe",
  "uuid 1.10.0",
 ]
 
@@ -669,12 +692,12 @@ checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 name = "frontend"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "bytes",
  "chrono",
  "clap",
  "common",
  "coordinator",
+ "coordinator-rangeclient",
  "core_affinity",
  "epoch_reader",
  "flatbuf",
@@ -684,6 +707,7 @@ dependencies = [
  "portpicker",
  "prost",
  "proto",
+ "resolver",
  "scylla 0.13.2",
  "serde",
  "serde_json",
@@ -694,6 +718,7 @@ dependencies = [
  "tonic",
  "tracing",
  "tracing-subscriber",
+ "tx_state_store",
  "universe",
  "uuid 1.10.0",
 ]
@@ -856,6 +881,12 @@ name = "hermit-abi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d231dfb89cfffdbc30e7fc41579ed6066ad03abda9e567ccafae602b97ec5024"
+
+[[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "histogram"
@@ -1567,6 +1598,39 @@ name = "regex-syntax"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a66a03ae7c801facd77a29370b4faec201768915ac14a721ba36f20bc9c209b"
+
+[[package]]
+name = "resolver"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "clap",
+ "common",
+ "coordinator-rangeclient",
+ "core_affinity",
+ "flatbuffers",
+ "hex",
+ "num_cpus",
+ "once_cell",
+ "portpicker",
+ "prost",
+ "proto",
+ "scylla 0.13.2",
+ "serde",
+ "serde_json",
+ "strum",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tonic",
+ "tracing",
+ "tracing-subscriber",
+ "tx_state_store",
+ "universe",
+ "uuid 1.10.0",
+]
 
 [[package]]
 name = "rustc-demangle"

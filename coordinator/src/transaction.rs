@@ -15,11 +15,12 @@ use tokio::task::JoinSet;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::{
+use coordinator_rangeclient::{
     error::{Error, TransactionAbortReason},
     rangeclient::RangeClient,
-    resolver::{ParticipantRangeInfo, Resolver},
 };
+use resolver::participant_range_info::ParticipantRangeInfo;
+use resolver::resolver_trait::Resolver;
 use tx_state_store::client::{Client as TxStateStoreClient, OpResult};
 
 enum State {
@@ -46,9 +47,9 @@ pub struct Transaction {
     range_assignment_oracle: Arc<dyn RangeAssignmentOracle>,
     epoch_reader: Arc<EpochReader>,
     tx_state_store: Arc<TxStateStoreClient>,
-    resolver: Arc<Resolver>,
     runtime: tokio::runtime::Handle,
     commit_strategy: CommitStrategy,
+    resolver: Arc<dyn Resolver>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
@@ -250,9 +251,6 @@ impl Transaction {
                 &self.runtime,
             );
         }
-        // let mut epoch = self.epoch_reader.read_epoch().await.unwrap();
-        // let mut epoch_leases = Vec::new();
-        // let epoch = 0;
 
         while let Some(res) = prepare_join_set.join_next().await {
             let res = match res {
@@ -276,18 +274,6 @@ impl Transaction {
             "Transaction {} has dependencies: {:?}",
             self.id, self.dependencies
         );
-
-        // for lease in &epoch_leases {
-        //     info!("epoch: {:?}, lease: {:?}", epoch, lease);
-        //     if lease.lower_bound_inclusive <= epoch && lease.upper_bound_inclusive >= epoch {
-        //         continue;
-        //     }
-        //     // Uh-oh, lease expired, must abort.
-        //     let _ = self.record_abort().await;
-        //     return Err(Error::TransactionAborted(
-        //         TransactionAbortReason::RangeLeaseExpired,
-        //     ));
-        // }
 
         // At this point we are prepared!
         match self.commit_strategy {
@@ -337,6 +323,13 @@ impl Transaction {
             }
             CommitStrategy::Pipelined => {
                 // 2. --- COMMIT PHASE ---
+                info!(
+                    "{}",
+                    format!("Delegating commit to resolver for transaction {}", self.id)
+                        .italic()
+                        .bold()
+                        .yellow()
+                );
                 let participants_info = self
                     .participant_ranges
                     .iter()
@@ -345,30 +338,19 @@ impl Transaction {
                         has_writes: !info.writeset.is_empty(),
                     })
                     .collect();
-
-                // Delegate commit to the resolver.
-                info!(
-                    "{}",
-                    format!("Delegating commit to resolver for transaction {}", self.id)
-                        .italic()
-                        .bold()
-                        .yellow()
-                );
-                let _ = Resolver::commit(
-                    self.resolver.clone(),
-                    self.id,
-                    self.dependencies.clone(),
-                    participants_info,
-                )
-                .await;
-
-                // 3. --- NOTIFICATION PHASE ---
-                //  Notify all the other coordinators that the transaction is committed.
-                // notify_other_coordinators(self.id).await;
+                self.resolver
+                    .commit(self.id, self.dependencies.clone(), participants_info)
+                    .await?;
             }
             CommitStrategy::Adaptive => {
                 if !self.dependencies.is_empty() {
-                    // Delegate commit to the resolver.
+                    info!(
+                        "{}",
+                        format!("Delegating commit to resolver for transaction {}", self.id)
+                            .italic()
+                            .bold()
+                            .yellow()
+                    );
                     let participants_info = self
                         .participant_ranges
                         .iter()
@@ -377,20 +359,9 @@ impl Transaction {
                             has_writes: !info.writeset.is_empty(),
                         })
                         .collect();
-                    info!(
-                        "{}",
-                        format!("Delegating commit to resolver for transaction {}", self.id)
-                            .italic()
-                            .bold()
-                            .yellow()
-                    );
-                    let _ = Resolver::commit(
-                        self.resolver.clone(),
-                        self.id,
-                        self.dependencies.clone(),
-                        participants_info,
-                    )
-                    .await;
+                    self.resolver
+                        .commit(self.id, self.dependencies.clone(), participants_info)
+                        .await?;
                 } else {
                     // Send commit directly to the participant ranges.
                     info!(
@@ -437,10 +408,7 @@ impl Transaction {
                         "Registering transaction {:?} as committed in the resolver",
                         self.id
                     );
-                    let _ = Resolver::spawn_register_committed_transactions(
-                        self.resolver.clone(),
-                        vec![self.id],
-                    );
+                    let _ = self.resolver.register_committed_transactions(vec![self.id]);
                 }
                 info!("COMMIT OF TRANSACTION {:?} DONE!", self.id);
             }
@@ -455,7 +423,7 @@ impl Transaction {
         epoch_reader: Arc<EpochReader>,
         tx_state_store: Arc<TxStateStoreClient>,
         runtime: tokio::runtime::Handle,
-        resolver: Arc<Resolver>,
+        resolver: Arc<dyn Resolver>,
         commit_strategy: CommitStrategy,
     ) -> Transaction {
         Transaction {
@@ -469,8 +437,8 @@ impl Transaction {
             epoch_reader,
             tx_state_store,
             runtime,
-            resolver,
             commit_strategy,
+            resolver,
         }
     }
 }

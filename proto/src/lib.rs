@@ -6,6 +6,8 @@ pub mod epoch_publisher;
 pub mod frontend;
 #[path = "../target/rangeserver/rangeserver.rs"]
 pub mod rangeserver;
+#[path = "../target/resolver/resolver.rs"]
+pub mod resolver;
 #[path = "../target/universe/universe.rs"]
 pub mod universe;
 #[path = "../target/warden/warden.rs"]

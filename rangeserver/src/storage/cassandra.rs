@@ -293,10 +293,18 @@ impl Storage for Cassandra {
         }
 
         if !insert_batch_args.is_empty() {
-            self.session
-                .batch(&insert_batch, insert_batch_args)
-                .await
-                .map_err(scylla_query_error_to_persistence_error)?;
+            if insert_batch_args.len() == 1 {
+                let (range_id, key, val, epoch, is_tombstone) = insert_batch_args.pop().unwrap();
+                self.session
+                    .query(UPSERT_QUERY, (range_id, key, val, epoch, is_tombstone))
+                    .await
+                    .map_err(scylla_query_error_to_persistence_error)?;
+            } else {
+                self.session
+                    .batch(&insert_batch, insert_batch_args)
+                    .await
+                    .map_err(scylla_query_error_to_persistence_error)?;
+            }
         }
 
         if !delete_batch_args.is_empty() {

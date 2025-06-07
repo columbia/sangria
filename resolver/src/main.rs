@@ -1,29 +1,28 @@
 use clap::Parser;
-use common::{
-    config::Config,
-    network::{
-        fast_network::spawn_tokio_polling_thread, for_testing::udp_fast_network::UdpFastNetwork,
-    },
-    region::{Region, Zone},
-    util::core_affinity::restrict_to_cores,
-};
+use common::network::fast_network::spawn_tokio_polling_thread;
+use common::region::Zone;
+use common::{config::Config, region::Region, util::core_affinity::restrict_to_cores};
+use core_affinity;
 use std::{
     fs::read_to_string,
     net::{ToSocketAddrs, UdpSocket},
     sync::Arc,
 };
-
-use coordinator_rangeclient::range_assignment_oracle::RangeAssignmentOracle;
-use core_affinity;
-use frontend::frontend::Server;
-use proto::universe::universe_client::UniverseClient;
 use tokio::runtime::Builder;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
+use common::network::for_testing::udp_fast_network::UdpFastNetwork;
+use coordinator_rangeclient::{
+    range_assignment_oracle::RangeAssignmentOracle, rangeclient::RangeClient,
+};
+use proto::universe::universe_client::UniverseClient;
+use resolver::{group_commit::GroupCommit, resolver::Resolver, resolver_remote::ResolverServer};
+use tx_state_store::client::Client as TxStateStoreClient;
+
 #[derive(Parser, Debug)]
-#[command(name = "frontend")]
-#[command(about = "Frontend", long_about = None)]
+#[command(name = "resolver")]
+#[command(about = "Resolver", long_about = None)]
 struct Args {
     #[arg(long, default_value = "configs/config.json")]
     config: String,
@@ -48,7 +47,8 @@ fn main() {
         },
         name: args.zone.into(),
     };
-    let mut background_runtime_cores = config.range_server.background_runtime_core_ids.clone();
+
+    let mut background_runtime_cores = config.resolver.background_runtime_core_ids.clone();
     if background_runtime_cores.is_empty() {
         background_runtime_cores = core_affinity::get_core_ids()
             .unwrap()
@@ -60,7 +60,7 @@ fn main() {
 
     let runtime = Builder::new_current_thread().enable_all().build().unwrap();
     let fast_network_addr = config
-        .frontend
+        .resolver
         .fast_network_addr
         .to_socket_addrs()
         .unwrap()
@@ -72,43 +72,43 @@ fn main() {
     let fast_network_clone = fast_network.clone();
     runtime.spawn(async move {
         spawn_tokio_polling_thread(
-            "fast-network-poller-frontend",
+            "fast-network-poller-resolver",
             fast_network_clone,
-            config.frontend.fast_network_polling_core_id as usize,
+            config.resolver.fast_network_polling_core_id as usize,
         )
         .await;
     });
 
     let cancellation_token = CancellationToken::new();
-    let runtime_handle = runtime.handle().clone();
-    let ct_clone = cancellation_token.clone();
 
     let bg_runtime = Builder::new_multi_thread()
         .worker_threads(background_runtime_cores.len())
         .enable_all()
         .build()
         .unwrap();
+
     let bg_runtime_clone = bg_runtime.handle().clone();
-
+    let runtime_clone = runtime.handle().clone();
+    let cancellation_token_clone = cancellation_token.clone();
     runtime.spawn(async move {
-        let proto_server_addr = &config.universe.proto_server_addr;
-        let client = UniverseClient::connect(format!("http://{}", proto_server_addr))
-            .await
-            .unwrap();
-        let range_assignment_oracle = Arc::new(RangeAssignmentOracle::new(client));
-        let server = Server::new(
-            config,
-            zone,
-            fast_network.clone(),
-            range_assignment_oracle,
-            runtime_handle,
-            bg_runtime_clone,
-            ct_clone,
-        )
-        .await;
+        // Initialize the Resolver
+        let client =
+            UniverseClient::connect(format!("http://{}", config.universe.proto_server_addr))
+                .await
+                .unwrap();
 
-        Server::start(server).await;
+        let range_client = Arc::new(RangeClient::new(
+            Arc::new(RangeAssignmentOracle::new(client)),
+            fast_network,
+            runtime_clone,
+            cancellation_token_clone,
+        ));
+        let tx_state_store = Arc::new(TxStateStoreClient::new(config.clone(), zone.region).await);
+        let group_commit = GroupCommit::new(range_client, tx_state_store);
+        let resolver = Arc::new(Resolver::new(group_commit, bg_runtime_clone.clone()));
+        let resolver_server = ResolverServer::new(config, resolver);
+        ResolverServer::start(resolver_server, bg_runtime_clone).await;
     });
-    info!("Hello Frontend...");
+    info!("Hello Resolver...");
     runtime.block_on(async move { cancellation_token.cancelled().await });
 }

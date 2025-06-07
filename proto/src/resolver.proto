@@ -1,0 +1,35 @@
+syntax = "proto3";
+package resolver;
+
+service Resolver {
+    rpc Commit(CommitRequest) returns (CommitResponse) {}
+    rpc RegisterCommittedTransactions(RegisterCommittedTransactionsRequest) returns (RegisterCommittedTransactionsResponse) {}
+}
+
+message RegisterCommittedTransactionsRequest {
+    repeated string transaction_ids = 1;
+}
+
+message RegisterCommittedTransactionsResponse {
+    string status = 1;
+}
+
+message RangeId {
+    string keyspace_id = 1;
+    string range_id = 2;
+}
+
+message ParticipantRangeInfo {
+    RangeId range_id = 1;
+    bool has_writes = 2;
+}
+
+message CommitRequest {
+    string transaction_id = 1;
+    repeated string dependencies = 2;
+    repeated ParticipantRangeInfo participant_ranges = 3;
+}
+
+message CommitResponse {
+    string status = 1;
+}

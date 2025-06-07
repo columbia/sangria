@@ -11,10 +11,11 @@ use common::{
     keyspace_id::KeyspaceId,
     region::{Region, Zone},
 };
+use hex;
 use proto::universe::universe_client::UniverseClient;
 use proto::universe::{
-    get_keyspace_info_request::KeyspaceInfoSearchField, GetKeyspaceInfoRequest,
-    Keyspace as ProtoKeyspace, KeyspaceInfo,
+    GetKeyspaceInfoRequest, Keyspace as ProtoKeyspace, KeyspaceInfo,
+    get_keyspace_info_request::KeyspaceInfoSearchField,
 };
 use std::{collections::HashMap, str::FromStr};
 use tokio::sync::RwLock;
@@ -47,7 +48,8 @@ impl RangeAssignmentOracleTrait for RangeAssignmentOracle {
         // second, we do linear search through the base ranges of keyspace_info to find the range_id which is inefficient
 
         //  Fast path: Get full range id from cache
-        let key_str = String::from_utf8(key.to_vec()).unwrap();
+        // let key_str = String::from_utf8(key.to_vec()).unwrap();
+        let key_str = hex::encode(&key);
         let key_to_full_range_id_cache_key =
             keyspace.namespace.clone() + &keyspace.name.clone() + &key_str;
         if let Some(full_range_id) = self
@@ -143,10 +145,10 @@ mod tests {
     use once_cell::sync::Lazy;
     use proto::universe::universe_client::UniverseClient;
     use proto::universe::{
-        universe_server::{Universe, UniverseServer},
         CreateKeyspaceRequest, CreateKeyspaceResponse, GetKeyspaceInfoRequest,
         GetKeyspaceInfoResponse, KeyRange as ProtoKeyRange, KeyspaceInfo, ListKeyspacesRequest,
         ListKeyspacesResponse, Region as ProtoRegion, Zone as ProtoZone,
+        universe_server::{Universe, UniverseServer},
     };
     use std::sync::{Arc, Mutex};
     use tokio::sync::oneshot;

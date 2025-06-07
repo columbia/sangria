@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use common::{
-    config::Config, keyspace::Keyspace, network::fast_network::FastNetwork, region::Zone,
+    config::{Config, ResolverMode},
+    keyspace::Keyspace,
+    network::fast_network::FastNetwork,
+    region::Zone,
     transaction_info::TransactionInfo,
 };
 use std::collections::HashMap;
@@ -16,6 +19,10 @@ use tokio_util::sync::CancellationToken;
 
 use tracing::instrument;
 
+use chrono::Utc;
+use coordinator_rangeclient::{
+    range_assignment_oracle::RangeAssignmentOracle, rangeclient::RangeClient,
+};
 use proto::frontend::frontend_server::{Frontend, FrontendServer};
 use proto::frontend::{
     AbortRequest, AbortResponse, CommitRequest, CommitResponse, DeleteRequest, DeleteResponse,
@@ -24,10 +31,13 @@ use proto::frontend::{
 };
 use proto::universe::universe_client::UniverseClient;
 use proto::universe::{CreateKeyspaceRequest, CreateKeyspaceResponse};
-
-use crate::range_assignment_oracle::RangeAssignmentOracle;
-use chrono::Utc;
+use resolver::{
+    group_commit::GroupCommit, resolver::Resolver, resolver_client::ResolverClient,
+    resolver_local::ResolverLocal, resolver_trait::Resolver as ResolverTrait,
+};
 use tracing::info;
+use tx_state_store::client::Client as TxStateStoreClient;
+
 #[derive(Clone)]
 struct ProtoServer {
     parent_server: Arc<Server>,
@@ -377,14 +387,33 @@ impl Server {
         bg_runtime: tokio::runtime::Handle,
         cancellation_token: CancellationToken,
     ) -> Arc<Self> {
+        let tx_state_store =
+            Arc::new(TxStateStoreClient::new(config.clone(), zone.region.clone()).await);
+        let range_client = Arc::new(RangeClient::new(
+            range_assignment_oracle.clone(),
+            fast_network.clone(),
+            runtime.clone(),
+            cancellation_token.clone(),
+        ));
+        let resolver: Arc<dyn ResolverTrait + Send + Sync> = match config.resolver.mode {
+            ResolverMode::Library => {
+                let group_commit = GroupCommit::new(range_client.clone(), tx_state_store.clone());
+                Arc::new(ResolverLocal::new(group_commit, bg_runtime.clone()))
+            }
+            ResolverMode::Server => Arc::new(ResolverClient::new(config.clone()).await),
+        };
+
         let coordinator = Coordinator::new(
             &config,
             zone,
-            range_assignment_oracle,
+            range_assignment_oracle.clone(),
             fast_network.clone(),
             runtime.clone(),
             bg_runtime.clone(),
             cancellation_token,
+            tx_state_store,
+            range_client,
+            resolver,
         )
         .await;
 

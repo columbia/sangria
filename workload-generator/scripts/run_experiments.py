@@ -192,14 +192,14 @@ def varying_contention_experiment(atomix_setup, ray_logs_dir):
     workload_config = {
         "num-keys": tune.grid_search([1, 5, 10, 25, 50, 75, 100]),
         "max-concurrency": tune.grid_search([29]),
-        "num-queries": tune.grid_search([5000]),
+        "num-queries": tune.grid_search([2000]),
         "zipf-exponent": tune.grid_search([0]),
         "namespace": namespace,
         "name": name,
         "background-runtime-core-ids": list(range(3, 32)),
     }
 
-    baselines = ["Pipelined", "Traditional"]
+    baselines = ["Pipelined", "Traditional", "Adaptive"]
 
     for baseline in baselines:
         workload_config["baseline"] = tune.grid_search([baseline])

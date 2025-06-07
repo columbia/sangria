@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::transaction::Transaction;
 use common::{
     config::{CommitStrategy, Config},
     membership::range_assignment_oracle::RangeAssignmentOracle,
@@ -7,20 +8,20 @@ use common::{
     region::Zone,
     transaction_info::TransactionInfo,
 };
+use coordinator_rangeclient::rangeclient::RangeClient;
 use epoch_reader::reader::EpochReader;
+use resolver::resolver_trait::Resolver;
 use tokio_util::sync::CancellationToken;
 use tx_state_store::client::Client as TxStateStoreClient;
-
-use crate::{group_commit::GroupCommit, resolver::Resolver, transaction::Transaction};
 
 pub struct Coordinator {
     range_assignment_oracle: Arc<dyn RangeAssignmentOracle>,
     runtime: tokio::runtime::Handle,
-    range_client: Arc<crate::rangeclient::RangeClient>,
+    range_client: Arc<RangeClient>,
     epoch_reader: Arc<EpochReader>,
     tx_state_store: Arc<TxStateStoreClient>,
-    resolver: Arc<Resolver>,
     commit_strategy: CommitStrategy,
+    resolver: Arc<dyn Resolver>,
 }
 
 impl Coordinator {
@@ -32,15 +33,10 @@ impl Coordinator {
         runtime: tokio::runtime::Handle,
         bg_runtime: tokio::runtime::Handle,
         cancellation_token: CancellationToken,
+        tx_state_store: Arc<TxStateStoreClient>,
+        range_client: Arc<RangeClient>,
+        resolver: Arc<dyn Resolver>,
     ) -> Coordinator {
-        let range_client = Arc::new(crate::rangeclient::RangeClient::new(
-            range_assignment_oracle.clone(),
-            fast_network.clone(),
-            runtime.clone(),
-            cancellation_token.clone(),
-        ));
-        let tx_state_store =
-            Arc::new(TxStateStoreClient::new(config.clone(), zone.region.clone()).await);
         let region_config = config.regions.get(&zone.region).unwrap();
         let publisher_set = region_config
             .epoch_publishers
@@ -54,16 +50,14 @@ impl Coordinator {
             publisher_set.clone(),
             cancellation_token.clone(),
         ));
-        let group_commit = GroupCommit::new(range_client.clone(), tx_state_store.clone());
-        let resolver = Arc::new(Resolver::new(group_commit, bg_runtime));
         Coordinator {
             range_assignment_oracle,
             runtime,
             range_client,
             epoch_reader,
             tx_state_store,
-            resolver,
             commit_strategy: config.commit_strategy.clone(),
+            resolver,
         }
     }
 

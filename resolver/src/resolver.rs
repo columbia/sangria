@@ -1,19 +1,15 @@
-use crate::{error::Error, group_commit::GroupCommit};
-use common::full_range_id::FullRangeId;
 use std::{
     collections::{HashMap, HashSet},
     mem,
     sync::Arc,
 };
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::{RwLock, oneshot};
 use tracing::info;
 use uuid::Uuid;
 
-#[derive(Clone, Debug)]
-pub struct ParticipantRangeInfo {
-    pub participant_range: FullRangeId,
-    pub has_writes: bool,
-}
+use crate::{group_commit::GroupCommit, participant_range_info::ParticipantRangeInfo};
+use coordinator_rangeclient::error::Error;
+
 #[derive(Clone, Debug)]
 pub struct TransactionInfo {
     pub id: Uuid,

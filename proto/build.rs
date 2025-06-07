@@ -66,4 +66,15 @@ fn main() {
             &["src"], // specify the root location to search proto dependencies
         )
         .unwrap();
+
+    let resolver_out_dir = "target/resolver";
+    fs::create_dir_all(resolver_out_dir).unwrap();
+    tonic_build::configure()
+        .build_server(true)
+        .out_dir(resolver_out_dir)
+        .compile(
+            &["src/resolver.proto"],
+            &["src"], // specify the root location to search proto dependencies
+        )
+        .unwrap();
 }

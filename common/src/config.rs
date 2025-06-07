@@ -11,6 +11,12 @@ use std::{
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ResolverMode {
+    Library,
+    Server,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum CommitStrategy {
     Traditional,
     Pipelined,
@@ -152,6 +158,15 @@ pub struct FrontendConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ResolverConfig {
+    pub mode: ResolverMode,
+    pub proto_server_addr: HostPort,
+    pub fast_network_addr: HostPort,
+    pub fast_network_polling_core_id: u32,
+    pub background_runtime_core_ids: Vec<u32>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
     pub commit_strategy: CommitStrategy,
     pub heuristic: Heuristic,
@@ -160,6 +175,7 @@ pub struct Config {
     pub epoch: EpochConfig,
     pub universe: UniverseConfig,
     pub frontend: FrontendConfig,
+    pub resolver: ResolverConfig,
     pub cassandra: CassandraConfig,
     pub regions: HashMap<Region, RegionConfig>,
 }
