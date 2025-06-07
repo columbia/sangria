@@ -5,6 +5,7 @@ import plotly.express as px
 from run_experiments import RAY_LOGS_DIR
 from plotter import make_plots, line, bar
 import plotly.io as pio
+import argparse
 
 METRICS = [
     "throughput",
@@ -103,7 +104,7 @@ class Plotter:
             "title": f"{', '.join([f'{k}={v}' for k, v in fixed_params.items()])}",
             "height": rows * 300,
             "width": 1500,
-        }
+        }   
         make_plots(figs, rows=rows, cols=cols, **figs_args)
 
     def plot_y_vs_x_vs_z(self, y: str, x: str, z: str, fixed_params: Dict[str, int]):
@@ -118,13 +119,24 @@ class Plotter:
             fig, f"{self.plots_path.joinpath(f'{y}_vs_{x}_vs_{z}')}", format="png"
         )
 
+def main():
+    parser = argparse.ArgumentParser(
+        description="Plot metrics for a given Ray Tune experiment"
+    )
+    parser.add_argument(
+        "-e", "--experiment-name",
+        required=True,
+        help="The Ray Tune experiment name (e.g. cooperative_giraffe_ba7b1a13)"
+    )
+    args = parser.parse_args()
 
-if __name__ == "__main__":
-    experiment_name = "invaluable_cow_23c26fc6"
-    plotter = Plotter(experiment_name)
+    plotter = Plotter(args.experiment_name)
     plotter.plot_metrics_vs_x_vs_z(
         METRICS,
         "num-keys",
         "baseline",
-        {"num-queries": 1000, "zipf-exponent": 0.0, "max-concurrency": 29},
+        {"num-queries": 5000, "zipf-exponent": 0.0, "max-concurrency": 29},
     )
+
+if __name__ == "__main__":
+    main()

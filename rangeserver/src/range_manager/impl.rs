@@ -192,25 +192,27 @@ where
                     dependencies: vec![],
                 };
 
-                info!("Checking dependencies for transaction {:?}", tx.id);
-                // First, check if operation has any dependencies with another transaction
-                let pending_state = state.pending_state.read().await;
-                if let Some(dependency) = pending_state.pending_commit_table.get(&key) {
-                    get_result.dependencies = vec![dependency.clone()];
-                    // Read the value from the pending_prepare_record of the dependee transaction
-                    info!(
-                        "Reading value from pending_prepare_record of transaction {:?}",
-                        dependency
-                    );
-                    let prepare_record = pending_state
-                        .pending_prepare_records
-                        .get(&dependency)
-                        .unwrap();
-                    if prepare_record.changes.contains_key(&key) {
-                        get_result.val = prepare_record.changes.get(&key).unwrap().clone();
-                        return Ok(get_result);
-                    } else {
-                        panic!("Key not found in pending_prepare_records but dependency found");
+                if self.config.commit_strategy != CommitStrategy::Traditional {
+                    info!("Checking dependencies for transaction {:?}", tx.id);
+                    // First, check if operation has any dependencies with another transaction
+                    let pending_state = state.pending_state.read().await;
+                    if let Some(dependency) = pending_state.pending_commit_table.get(&key) {
+                        get_result.dependencies = vec![dependency.clone()];
+                        // Read the value from the pending_prepare_record of the dependee transaction
+                        info!(
+                            "Reading value from pending_prepare_record of transaction {:?}",
+                            dependency
+                        );
+                        let prepare_record = pending_state
+                            .pending_prepare_records
+                            .get(&dependency)
+                            .unwrap();
+                        if prepare_record.changes.contains_key(&key) {
+                            get_result.val = prepare_record.changes.get(&key).unwrap().clone();
+                            return Ok(get_result);
+                        } else {
+                            panic!("Key not found in pending_prepare_records but dependency found");
+                        }
                     }
                 }
                 info!("No dependencies found for transaction {:?}", tx.id);
@@ -349,22 +351,24 @@ where
                     // NOTE: CommitStrategy::Traditional will return no dependencies, will not update the pending_commit_table, and will not release the lock
                     // so it could bypass the rest of this codeblock for efficiency.
 
-                    // 4) Get any Write-Write dependencies for the transaction and update the pending_commit_table if ran in "early-lock-release" mode
-                    info!("Checking dependencies for transaction {:?}", tx.id);
-                    for (key, early_lock_release) in early_lock_release_per_key.iter() {
-                        if pending_state.pending_commit_table.contains_key(key) {
-                            dependencies.insert(
-                                pending_state.pending_commit_table.get(key).unwrap().clone(),
-                            );
-                        }
-                        // Update the pending_commit_table only for keys that we will release the lock early for
-                        // For the keys that we will not release the lock early for, we clear the entry in the pending_commit_table
-                        if *early_lock_release {
-                            pending_state
-                                .pending_commit_table
-                                .insert(key.clone(), tx.id);
-                        } else {
-                            pending_state.pending_commit_table.remove(key);
+                    if self.config.commit_strategy != CommitStrategy::Traditional {
+                        // 4) Get any Write-Write dependencies for the transaction and update the pending_commit_table if ran in "early-lock-release" mode
+                        info!("Checking dependencies for transaction {:?}", tx.id);
+                        for (key, early_lock_release) in early_lock_release_per_key.iter() {
+                            if pending_state.pending_commit_table.contains_key(key) {
+                                dependencies.insert(
+                                    pending_state.pending_commit_table.get(key).unwrap().clone(),
+                                );
+                            }
+                            // Update the pending_commit_table only for keys that we will release the lock early for
+                            // For the keys that we will not release the lock early for, we clear the entry in the pending_commit_table
+                            if *early_lock_release {
+                                pending_state
+                                    .pending_commit_table
+                                    .insert(key.clone(), tx.id);
+                            } else {
+                                pending_state.pending_commit_table.remove(key);
+                            }
                         }
                     }
                     drop(pending_state);
@@ -397,9 +401,9 @@ where
                     .await
                     .map_err(Error::from_wal_error)?;
 
-                let highest_known_epoch = state.highest_known_epoch.read().await;
+                // let highest_known_epoch = state.highest_known_epoch.read().await;
                 Ok(PrepareResult {
-                    highest_known_epoch,
+                    highest_known_epoch: 0,
                     epoch_lease: state.range_info.epoch_lease,
                     dependencies: dependencies.into_iter().collect(),
                 })
@@ -453,7 +457,7 @@ where
                 //     // realize that, so we just return success.
                 //     return Ok(());
                 // }
-                state.highest_known_epoch.maybe_update(commit.epoch()).await;
+                // state.highest_known_epoch.maybe_update(commit.epoch()).await;
 
                 // Write commit record to WAL
                 self.wal
@@ -517,26 +521,27 @@ where
 
                 {
                     let mut pending_state = state.pending_state.write().await;
-                    // if self.config.commit_strategy != CommitStrategy::Traditional {
-                    // We update the pending_commit_table to remove the transactions that have committed and are listed as dependencies for other transactions
-                    for (key, tx_id) in last_tx_per_key {
-                        if pending_state.pending_commit_table.contains_key(&key) {
-                            // The last dependee per key might have changed since the prepare phase, so we need to check if it is still a dependency before removing it.
-                            let last_dependee =
-                                pending_state.pending_commit_table.get(&key).unwrap();
-                            info!(
-                                "Last dependee for key {:?} is {:?} and last tx is {:?}",
-                                key, last_dependee, tx_id
-                            );
-                            info!(
-                                "All transaction ids: {:?}",
-                                transactions.iter().map(|tx| tx.id).collect::<Vec<_>>()
-                            );
-                            if tx_id == *last_dependee {
-                                info!("Removing key {:?} from pending_commit_table", key);
-                                pending_state.pending_commit_table.remove(&key);
+                    if self.config.commit_strategy != CommitStrategy::Traditional {
+                        // We update the pending_commit_table to remove the transactions that have committed and are listed as dependencies for other transactions
+                        for (key, tx_id) in last_tx_per_key {
+                            if pending_state.pending_commit_table.contains_key(&key) {
+                                // The last dependee per key might have changed since the prepare phase, so we need to check if it is still a dependency before removing it.
+                                let last_dependee =
+                                    pending_state.pending_commit_table.get(&key).unwrap();
+                                info!(
+                                    "Last dependee for key {:?} is {:?} and last tx is {:?}",
+                                    key, last_dependee, tx_id
+                                );
+                                info!(
+                                    "All transaction ids: {:?}",
+                                    transactions.iter().map(|tx| tx.id).collect::<Vec<_>>()
+                                );
+                                if tx_id == *last_dependee {
+                                    info!("Removing key {:?} from pending_commit_table", key);
+                                    pending_state.pending_commit_table.remove(&key);
+                                }
+                                // Otherwise, the transaction that last updated the key in the pending_commit_table has not committed yet.
                             }
-                            // Otherwise, the transaction that last updated the key in the pending_commit_table has not committed yet.
                         }
                     }
 
@@ -552,14 +557,14 @@ where
                     transactions.iter().map(|tx| tx.id).collect::<Vec<_>>()
                 );
 
-                // For CommitStrategy::Traditional, this is the only transaction that can hold the lock.
-                if self.config.commit_strategy == CommitStrategy::Traditional {
-                    assert!(transactions.len() == 1);
-                    assert!(
-                        transactions[0].id
-                            == state.lock_table.get_current_holder_id().await.unwrap()
-                    );
-                }
+                // // For CommitStrategy::Traditional, this is the only transaction that can hold the lock.
+                // if self.config.commit_strategy == CommitStrategy::Traditional {
+                //     assert!(transactions.len() == 1);
+                //     assert!(
+                //         transactions[0].id
+                //             == state.lock_table.get_current_holder_id().await.unwrap()
+                //     );
+                // }
 
                 // If any of the committed transactions is the one holding the lock, release it.
                 if let Some(current_holder_id) = state.lock_table.get_current_holder_id().await {

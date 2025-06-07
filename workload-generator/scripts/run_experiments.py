@@ -12,6 +12,7 @@ from coolname import generate_slug
 import pandas as pd
 import argparse
 
+
 ROOT_DIR = Path(__file__).parent.parent.parent
 SERVERS_CONFIG_PATH = ROOT_DIR / "configs" / "config.json"
 WORKLOAD_GENERATOR_DIR = ROOT_DIR / "workload-generator"
@@ -132,7 +133,7 @@ class AtomixSetup:
 
 def run_workload(config, atomix_setup):
     # atomix_setup.reset_cassandra()
-    # atomix_setup.restart_servers(["frontend"])
+    atomix_setup.restart_servers(["frontend"])
 
     #  Overwrite the namespace and name with a random UUID
     uuid_str = uuid.uuid4().hex[:8]
@@ -191,14 +192,14 @@ def varying_contention_experiment(atomix_setup, ray_logs_dir):
     workload_config = {
         "num-keys": tune.grid_search([1, 5, 10, 25, 50, 75, 100]),
         "max-concurrency": tune.grid_search([29]),
-        "num-queries": tune.grid_search([1000]),
+        "num-queries": tune.grid_search([5000]),
         "zipf-exponent": tune.grid_search([0]),
         "namespace": namespace,
         "name": name,
         "background-runtime-core-ids": list(range(3, 32)),
     }
 
-    baselines = ["Pipelined"] #, "Adaptive"]
+    baselines = ["Pipelined", "Traditional"]
 
     for baseline in baselines:
         workload_config["baseline"] = tune.grid_search([baseline])
@@ -230,6 +231,13 @@ def varying_contention_experiment(atomix_setup, ray_logs_dir):
         ]
     )
     results.to_csv(ray_logs_dir / experiment_name / "results.csv")
+
+    subprocess.run([
+        "python",
+        WORKLOAD_GENERATOR_DIR / "scripts" / "plot_experiments.py",
+        "--experiment-name",
+        experiment_name,
+    ])
     ray.shutdown()
 
 
