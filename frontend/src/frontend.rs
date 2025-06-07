@@ -32,8 +32,9 @@ use proto::frontend::{
 use proto::universe::universe_client::UniverseClient;
 use proto::universe::{CreateKeyspaceRequest, CreateKeyspaceResponse};
 use resolver::{
-    group_commit::GroupCommit, resolver::Resolver, resolver_client::ResolverClient,
-    resolver_local::ResolverLocal, resolver_trait::Resolver as ResolverTrait,
+    local::client::ResolverClient as LocalResolverClient,
+    remote::client::ResolverClient as RemoteResolverClient,
+    resolver_client::ResolverClient as ResolverClientTrait,
 };
 use tracing::info;
 use tx_state_store::client::Client as TxStateStoreClient;
@@ -395,12 +396,16 @@ impl Server {
             runtime.clone(),
             cancellation_token.clone(),
         ));
-        let resolver: Arc<dyn ResolverTrait + Send + Sync> = match config.resolver.mode {
-            ResolverMode::Library => {
-                let group_commit = GroupCommit::new(range_client.clone(), tx_state_store.clone());
-                Arc::new(ResolverLocal::new(group_commit, bg_runtime.clone()))
+        let resolver: Arc<dyn ResolverClientTrait + Send + Sync> = match config.resolver.mode {
+            ResolverMode::Local => {
+                LocalResolverClient::new(
+                    range_client.clone(),
+                    tx_state_store.clone(),
+                    bg_runtime.clone(),
+                )
+                .await
             }
-            ResolverMode::Server => Arc::new(ResolverClient::new(config.clone()).await),
+            ResolverMode::Remote => RemoteResolverClient::new(config.clone()).await,
         };
 
         let coordinator = Coordinator::new(

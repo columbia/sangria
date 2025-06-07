@@ -20,7 +20,7 @@ use coordinator_rangeclient::{
     rangeclient::RangeClient,
 };
 use resolver::participant_range_info::ParticipantRangeInfo;
-use resolver::resolver_trait::Resolver;
+use resolver::resolver_client::ResolverClient;
 use tx_state_store::client::{Client as TxStateStoreClient, OpResult};
 
 enum State {
@@ -49,7 +49,7 @@ pub struct Transaction {
     tx_state_store: Arc<TxStateStoreClient>,
     runtime: tokio::runtime::Handle,
     commit_strategy: CommitStrategy,
-    resolver: Arc<dyn Resolver>,
+    resolver: Arc<dyn ResolverClient>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
@@ -423,7 +423,7 @@ impl Transaction {
         epoch_reader: Arc<EpochReader>,
         tx_state_store: Arc<TxStateStoreClient>,
         runtime: tokio::runtime::Handle,
-        resolver: Arc<dyn Resolver>,
+        resolver: Arc<dyn ResolverClient>,
         commit_strategy: CommitStrategy,
     ) -> Transaction {
         Transaction {

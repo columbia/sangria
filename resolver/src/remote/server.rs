@@ -11,7 +11,7 @@ use tonic::{Request, Response, Status as TStatus, transport::Server as TServer};
 use tracing::{info, instrument};
 use uuid::Uuid;
 
-use crate::{participant_range_info::ParticipantRangeInfo, resolver::Resolver};
+use crate::{core::resolver::Resolver, participant_range_info::ParticipantRangeInfo};
 
 #[derive(Clone)]
 struct ProtoServer {

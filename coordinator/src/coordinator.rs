@@ -10,7 +10,7 @@ use common::{
 };
 use coordinator_rangeclient::rangeclient::RangeClient;
 use epoch_reader::reader::EpochReader;
-use resolver::resolver_trait::Resolver;
+use resolver::resolver_client::ResolverClient;
 use tokio_util::sync::CancellationToken;
 use tx_state_store::client::Client as TxStateStoreClient;
 
@@ -21,7 +21,7 @@ pub struct Coordinator {
     epoch_reader: Arc<EpochReader>,
     tx_state_store: Arc<TxStateStoreClient>,
     commit_strategy: CommitStrategy,
-    resolver: Arc<dyn Resolver>,
+    resolver: Arc<dyn ResolverClient>,
 }
 
 impl Coordinator {
@@ -35,7 +35,7 @@ impl Coordinator {
         cancellation_token: CancellationToken,
         tx_state_store: Arc<TxStateStoreClient>,
         range_client: Arc<RangeClient>,
-        resolver: Arc<dyn Resolver>,
+        resolver: Arc<dyn ResolverClient>,
     ) -> Coordinator {
         let region_config = config.regions.get(&zone.region).unwrap();
         let publisher_set = region_config

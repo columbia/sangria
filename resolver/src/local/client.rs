@@ -2,26 +2,36 @@ use std::{collections::HashSet, sync::Arc};
 use uuid::Uuid;
 
 use crate::{
-    group_commit::GroupCommit, participant_range_info::ParticipantRangeInfo, resolver::Resolver,
-    resolver_trait::Resolver as ResolverTrait,
+    core::{group_commit::GroupCommit, resolver::Resolver},
+    participant_range_info::ParticipantRangeInfo,
+    resolver_client::ResolverClient as ResolverClientTrait,
 };
 use async_trait::async_trait;
 use coordinator_rangeclient::error::Error;
+use coordinator_rangeclient::rangeclient::RangeClient;
+use tx_state_store::client::Client as TxStateStoreClient;
 
-pub struct ResolverLocal {
+pub struct ResolverClient {
     resolver: Arc<Resolver>,
 }
 
-impl ResolverLocal {
-    pub fn new(group_commit: GroupCommit, bg_runtime: tokio::runtime::Handle) -> Self {
-        ResolverLocal {
-            resolver: Arc::new(Resolver::new(group_commit, bg_runtime)),
-        }
+impl ResolverClient {
+    pub async fn new(
+        range_client: Arc<RangeClient>,
+        tx_state_store: Arc<TxStateStoreClient>,
+        bg_runtime: tokio::runtime::Handle,
+    ) -> Arc<Self> {
+        Arc::new(ResolverClient {
+            resolver: Arc::new(Resolver::new(
+                GroupCommit::new(range_client, tx_state_store),
+                bg_runtime,
+            )),
+        })
     }
 }
 
 #[async_trait]
-impl ResolverTrait for ResolverLocal {
+impl ResolverClientTrait for ResolverClient {
     async fn commit(
         &self,
         transaction_id: Uuid,

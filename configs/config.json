@@ -26,7 +26,7 @@
         }
     },
     "resolver": {
-        "mode": "Server",
+        "mode": "Local",
         "proto_server_addr": "127.0.0.1:50059",
         "fast_network_addr": "127.0.0.1:50060",
         "fast_network_polling_core_id": 3,

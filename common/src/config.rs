@@ -12,8 +12,8 @@ use std::{
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ResolverMode {
-    Library,
-    Server,
+    Local,
+    Remote,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

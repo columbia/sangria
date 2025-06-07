@@ -7,7 +7,7 @@ use tokio::sync::{RwLock, oneshot};
 use tracing::info;
 use uuid::Uuid;
 
-use crate::{group_commit::GroupCommit, participant_range_info::ParticipantRangeInfo};
+use crate::{core::group_commit::GroupCommit, participant_range_info::ParticipantRangeInfo};
 use coordinator_rangeclient::error::Error;
 
 #[derive(Clone, Debug)]
@@ -34,7 +34,6 @@ pub struct State {
     info_per_transaction: HashMap<Uuid, TransactionInfo>,
     resolved_transactions: HashSet<Uuid>,
 }
-
 pub struct Resolver {
     state: RwLock<State>,
     group_commit: GroupCommit,

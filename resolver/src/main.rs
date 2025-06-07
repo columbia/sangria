@@ -17,7 +17,10 @@ use coordinator_rangeclient::{
     range_assignment_oracle::RangeAssignmentOracle, rangeclient::RangeClient,
 };
 use proto::universe::universe_client::UniverseClient;
-use resolver::{group_commit::GroupCommit, resolver::Resolver, resolver_remote::ResolverServer};
+use resolver::{
+    core::{group_commit::GroupCommit, resolver::Resolver},
+    remote::server::ResolverServer,
+};
 use tx_state_store::client::Client as TxStateStoreClient;
 
 #[derive(Parser, Debug)]

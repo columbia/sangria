@@ -1,4 +1,4 @@
-use crate::resolver::TransactionInfo;
+use crate::core::resolver::TransactionInfo;
 use common::full_range_id::FullRangeId;
 use coordinator_rangeclient::{error::Error, rangeclient::RangeClient};
 use std::collections::HashMap;
