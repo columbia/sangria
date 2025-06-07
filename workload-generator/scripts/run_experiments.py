@@ -89,10 +89,26 @@ class AtomixSetup:
             subprocess.run(["pkill", "-f", server])
             print(f"Killed '{server}' processes.")
 
+    def reset_cassandra(self):
+        try:
+            print("Cleaning Cassandra...")
+            subprocess.run([
+                "sudo", "docker", "exec", "-i", "cassandra", "cqlsh", "-e",
+                "TRUNCATE atomix.range_map; "
+                "TRUNCATE atomix.epoch; "
+                "TRUNCATE atomix.range_leases; "
+                "TRUNCATE atomix.records; "
+                "TRUNCATE atomix.wal; "
+                "TRUNCATE atomix.transactions; "
+                "TRUNCATE atomix.keyspaces;"
+            ])
+        except Exception as e:
+            print(f"Error cleaning Cassandra: {e}")
+
     def restart_servers(self, servers=None):
         if servers is None:
             servers = self.servers
-        print(f"- Killing all servers: {servers}")
+        print(f"- Killing servers: {servers}")
         self.kill_servers(servers)
         for server in servers:
             try:
@@ -106,14 +122,18 @@ class AtomixSetup:
                     cwd=ROOT_DIR,
                     env={**os.environ, "RUST_LOG": "error"},
                 )
-                time.sleep(5)
+                time.sleep(1)
             except Exception as e:
                 print(f"Error spinning up {server}: {e}")
                 self.kill_servers(servers=servers)
                 exit(1)
+        
 
 
-def run_workload(config):
+def run_workload(config, atomix_setup):
+    # atomix_setup.reset_cassandra()
+    # atomix_setup.restart_servers(["frontend"])
+
     #  Overwrite the namespace and name with a random UUID
     uuid_str = uuid.uuid4().hex[:8]
     # config["namespace"] += f"_{uuid_str}"
@@ -178,32 +198,25 @@ def varying_contention_experiment(atomix_setup, ray_logs_dir):
         "background-runtime-core-ids": list(range(3, 32)),
     }
 
-    baselines = ["Pipelined", "Traditional", "Adaptive"]
+    baselines = ["Pipelined"] #, "Adaptive"]
 
     for baseline in baselines:
         workload_config["baseline"] = tune.grid_search([baseline])
         atomix_setup.servers_config["commit_strategy"] = baseline
+        atomix_setup.reset_cassandra()
         atomix_setup.dump_servers_config()
         atomix_setup.restart_servers()
 
+        run_workload_task = tune.with_parameters(run_workload, atomix_setup=atomix_setup)
+
         analysis = tune.run(
-            run_workload,
+            run_workload_task,
             config=workload_config,
-            num_samples=5,
-            resources_per_trial={"cpu": psutil.cpu_count()},
+            num_samples=3,
+            resources_per_trial={"cpu"
+            : psutil.cpu_count()},
             storage_path=ray_logs_dir,
             name=experiment_name,
-            # progress_reporter=ray.tune.CLIReporter(
-            #     metric_columns=["throughput", "avg_latency","total_duration"],
-            #     parameter_columns={
-            #         "num-keys": "num-keys",
-            #         "max-concurrency": "max-concurrency",
-            #         "num-queries": "num-queries",
-            #         "zipf-exponent": "zipf-exponent",
-            #         "baseline": "baseline",
-            #     },
-            #     max_report_frequency=60,
-            # ),
         )
         results = analysis.results_df
         results["baseline"] = baseline

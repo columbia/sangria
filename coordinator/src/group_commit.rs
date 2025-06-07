@@ -1,4 +1,3 @@
-use crate::{error::Error, rangeclient::RangeClient, resolver::TransactionInfo};
 use common::full_range_id::FullRangeId;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -7,6 +6,7 @@ use tokio::task::JoinSet;
 use tracing::info;
 use tx_state_store::client::Client as TxStateStoreClient;
 use uuid::Uuid;
+use crate::{error::Error, rangeclient::RangeClient, resolver::TransactionInfo};
 
 // NOTE: Every participant range has its own group of transactions ready to commit.
 // Each group is protected by a read-write lock. We acquire the write lock only when
@@ -131,25 +131,24 @@ impl GroupCommit {
 
             info!("Committing groups in parallel");
             for (participant_range, group_guard) in state.group_per_participant.iter() {
+                {
+                    let group = group_guard.read().await;
+                    if group.is_empty() {
+                        continue;
+                    }
+                    info!("Group size: {}", group.len());
+                    info!(
+                        "Group: {:?}",
+                        group.iter().map(|tx| tx.id).collect::<Vec<_>>()
+                    );
+                }
+
                 let range_client = self.range_client.clone();
-                let group_guard_clone = group_guard.clone();
                 let participant_range_clone = participant_range.clone();
                 let tx_state_store_clone = self.tx_state_store.clone();
+                let group_guard_clone = group_guard.clone();
 
                 commit_join_set.spawn(async move {
-                    // Most common path is that the group is empty. Acquire the read lock to check.
-                    {
-                        let group_clone = group_guard_clone.read().await;
-                        if group_clone.is_empty() {
-                            return Ok(Vec::new());
-                        }
-                        info!("Group size: {}", group_clone.len());
-                        info!(
-                            "Group: {:?}",
-                            group_clone.iter().map(|tx| tx.id).collect::<Vec<_>>()
-                        );
-                    }
-
                     // Acquire the write lock to commit and clear the group -- release only after transactions are committed
                     let mut group_clone = group_guard_clone.write().await;
                     // info!("Acquired write lock");
@@ -177,16 +176,12 @@ impl GroupCommit {
                     // Notify participant so that:
                     // - it applies the TXs' PrepareRecords in storage
                     // - and then quickly updates its PendingCommitTable to stop treating these transactions as dependencies for other transactions
-                    // info!("Committing transactions {:?} in range {:?}", participant_range_clone, participant_range_clone);
+                    // info!("Committing transactions {:?} in range {:?}", participant_range_clone, participant_range_clone); 
                     if let Err(e) = range_client
                         .commit_transactions(tx_ids_vec, &participant_range_clone, 0)
-                        .await
-                    {
-                        panic!(
-                            "Error committing transactions {:?}: {:?}",
-                            participant_range_clone, e
-                        );
-                    }
+                        .await {
+                            panic!("Error committing transactions {:?}: {:?}", participant_range_clone, e);
+                        }
                     Ok(transactions.clone())
                 });
             }

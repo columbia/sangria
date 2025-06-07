@@ -81,7 +81,7 @@ where
     epoch_supplier: Arc<dyn EpochSupplier>,
     wal: Arc<W>,
     state: Arc<RwLock<State>>,
-    prefetching_buffer: Arc<PrefetchingBuffer>,
+    prefetching_buffer: PrefetchingBuffer,
     bg_runtime: tokio::runtime::Handle,
 }
 
@@ -589,7 +589,6 @@ where
         storage: Arc<S>,
         epoch_supplier: Arc<dyn EpochSupplier>,
         wal: W,
-        prefetching_buffer: Arc<PrefetchingBuffer>,
         bg_runtime: tokio::runtime::Handle,
     ) -> Arc<Self> {
         Arc::new(RangeManager {
@@ -599,7 +598,7 @@ where
             epoch_supplier,
             wal: Arc::new(wal),
             state: Arc::new(RwLock::new(State::NotLoaded)),
-            prefetching_buffer,
+            prefetching_buffer: PrefetchingBuffer::new(),
             bg_runtime,
         })
     }

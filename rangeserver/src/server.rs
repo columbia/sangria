@@ -107,7 +107,7 @@ where
     // TODO: parameterize the WAL implementation too.
     loaded_ranges: RwLock<HashMap<Uuid, Arc<RangeManager<S, InMemoryWal>>>>,
     transaction_table: RwLock<HashMap<Uuid, Arc<TransactionInfo>>>,
-    prefetching_buffer: Arc<PrefetchingBuffer>,
+    // prefetching_buffer: Arc<PrefetchingBuffer>,
 }
 
 type DynamicErr = Box<dyn std::error::Error + Sync + Send + 'static>;
@@ -132,7 +132,7 @@ where
             bg_runtime,
             loaded_ranges: RwLock::new(HashMap::new()),
             transaction_table: RwLock::new(HashMap::new()),
-            prefetching_buffer: Arc::new(PrefetchingBuffer::new()),
+            // prefetching_buffer: Arc::new(PrefetchingBuffer::new()),
         })
     }
 
@@ -211,7 +211,6 @@ where
                         self.storage.clone(),
                         self.epoch_supplier.clone(),
                         InMemoryWal::new(),
-                        self.prefetching_buffer.clone(),
                         self.bg_runtime.clone(),
                     );
                     (range_table).insert(id.range_id, rm.clone());
