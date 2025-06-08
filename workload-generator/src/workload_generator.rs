@@ -1,4 +1,5 @@
 use crate::{transaction::Transaction, workload_config::WorkloadConfig};
+use colored::Colorize;
 use common::{
     keyspace::Keyspace,
     region::{Region, Zone},
@@ -7,7 +8,7 @@ use proto::{
     frontend::frontend_client::FrontendClient,
     universe::{CreateKeyspaceRequest, KeyRangeRequest, Zone as ProtoZone},
 };
-use rand::{distributions::WeightedIndex, prelude::*, seq::IteratorRandom};
+use rand::{distributions::WeightedIndex, prelude::*, rngs::StdRng, SeedableRng};
 use std::{
     cmp::min,
     collections::HashMap,
@@ -46,6 +47,7 @@ pub struct WorkloadGenerator {
     client: FrontendClient<tonic::transport::Channel>,
     metrics: Arc<Mutex<InternalMetrics>>,
     value_per_key: Arc<Mutex<HashMap<usize, u64>>>, // For verification
+    rng: Arc<Mutex<StdRng>>,
 }
 
 impl WorkloadGenerator {
@@ -53,15 +55,21 @@ impl WorkloadGenerator {
         workload_config: WorkloadConfig,
         client: FrontendClient<tonic::transport::Channel>,
     ) -> Self {
+        let seed = workload_config
+            .seed
+            .unwrap_or_else(|| rand::thread_rng().gen());
+        info!("Using seed: {}", seed);
+        let rng = Arc::new(Mutex::new(StdRng::seed_from_u64(seed)));
         Self {
             workload_config,
             client,
             metrics: Arc::new(Mutex::new(InternalMetrics::default())),
             value_per_key: Arc::new(Mutex::new(HashMap::new())),
+            rng,
         }
     }
 
-    fn zipf_sample_without_replacement(&self, sample_count: usize) -> Vec<usize> {
+    fn zipf_sample_without_replacement(&self, sample_count: usize, rng: &mut StdRng) -> Vec<usize> {
         // Step 1: Build weights using Zipf formula: weight ∝ 1 / rank^s
         let mut weights: Vec<f64> = (1..=self.workload_config.num_keys)
             .map(|rank| 1.0 / (rank as f64).powf(self.workload_config.zipf_exponent))
@@ -82,7 +90,7 @@ impl WorkloadGenerator {
                 break;
             }
             let dist = WeightedIndex::new(&weights).unwrap();
-            let idx = dist.sample(&mut thread_rng());
+            let idx = dist.sample(&mut *rng);
             chosen_keys.push(available_keys[idx]);
 
             // Remove selected item and its weight
@@ -94,10 +102,12 @@ impl WorkloadGenerator {
         chosen_keys
     }
 
-    pub fn generate_transaction(&self) -> Transaction {
+    pub async fn generate_transaction(&self) -> Transaction {
         //  sample num_keys uniformly from {1, 2}
-        let num_keys = thread_rng().gen_range(1..3);
-        let keys = self.zipf_sample_without_replacement(num_keys);
+        let mut rng = self.rng.lock().await;
+        let num_keys = rng.gen_range(1..3);
+        let keys = self.zipf_sample_without_replacement(num_keys, &mut rng);
+        // info!("{}", format!("Generated transaction with keys: {:?}", keys).blue());
         // sample num_keys without replacement from uniform distribution
         // let mut keys: Vec<usize> = (0..self.workload_config.num_keys)
         //     .choose_multiple(&mut thread_rng(), num_keys)
@@ -112,11 +122,7 @@ impl WorkloadGenerator {
                 name: self.workload_config.name.clone(),
             },
             keys.clone(),
-            if thread_rng().gen_bool(1.0) {
-                Some(keys)
-            } else {
-                None
-            },
+            Some(keys),
         )
     }
 
@@ -176,7 +182,7 @@ impl WorkloadGenerator {
                         drop(permit);
                         break;
                     }
-                    let next_task = self.generate_transaction();
+                    let next_task = self.generate_transaction().await;
                     let mut client_clone = self.client.clone();
                     let metrics = self.metrics.clone();
                     let value_per_key = self.value_per_key.clone();

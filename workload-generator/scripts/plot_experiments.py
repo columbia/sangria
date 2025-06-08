@@ -55,7 +55,16 @@ class Plotter:
             key: color
             for key, color in zip(
                 unique_keys,
-                ["red", "blue", "green", "orange", "purple", "brown", "pink", "gray"],
+                [
+                    "red", "rgba(255, 0, 0, 0.4)",
+                    "blue", "rgba(0, 0, 255, 0.4)",
+                    "green", "rgba(0, 128, 0, 0.4)",
+                    "orange", "rgba(255, 165, 0, 0.4)",
+                    "purple", "rgba(128, 0, 128, 0.4)",
+                    "brown", "rgba(165, 42, 42, 0.4)",
+                    "pink", "rgba(255, 192, 203, 0.4)",
+                    "gray", "rgba(128, 128, 128, 0.4)"
+                ]
             )
         }
         marker_map = {
@@ -81,7 +90,9 @@ class Plotter:
                 "y": metric,
                 "key": z,
                 "y_range": (
-                    [0, self.latency_max + 0.001] if metric.endswith("latency") else None
+                    [0, self.latency_max + 0.001]
+                    if metric.endswith("latency")
+                    else None
                 ),
                 "color_map": color_map,
                 "marker_map": marker_map,
@@ -104,7 +115,7 @@ class Plotter:
             "title": f"{', '.join([f'{k}={v}' for k, v in fixed_params.items()])}",
             "height": rows * 300,
             "width": 1500,
-        }   
+        }
         make_plots(figs, rows=rows, cols=cols, **figs_args)
 
     def plot_y_vs_x_vs_z(self, y: str, x: str, z: str, fixed_params: Dict[str, int]):
@@ -119,14 +130,16 @@ class Plotter:
             fig, f"{self.plots_path.joinpath(f'{y}_vs_{x}_vs_{z}')}", format="png"
         )
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Plot metrics for a given Ray Tune experiment"
     )
     parser.add_argument(
-        "-e", "--experiment-name",
+        "-e",
+        "--experiment-name",
         required=True,
-        help="The Ray Tune experiment name (e.g. cooperative_giraffe_ba7b1a13)"
+        help="The Ray Tune experiment name (e.g. cooperative_giraffe_ba7b1a13)",
     )
     args = parser.parse_args()
 
@@ -135,8 +148,9 @@ def main():
         METRICS,
         "num-keys",
         "baseline",
-        {"num-queries": 2000, "zipf-exponent": 0.0, "max-concurrency": 29},
+        {"num-queries": 1500, "zipf-exponent": 0.0, "max-concurrency": 28},
     )
+
 
 if __name__ == "__main__":
     main()

@@ -11,7 +11,7 @@ import time
 from coolname import generate_slug
 import pandas as pd
 import argparse
-
+import random
 
 ROOT_DIR = Path(__file__).parent.parent.parent
 SERVERS_CONFIG_PATH = ROOT_DIR / "configs" / "config.json"
@@ -28,6 +28,12 @@ TARGET_RUN_CMD = str(ROOT_DIR) + "/target/release/"
 RUN_CMD = TARGET_RUN_CMD
 BUILD_ATOMIX = True
 
+LOCAL = "Local"
+REMOTE = "Remote"
+TRADITIONAL = "Traditional"
+PIPELINED = "Pipelined"
+ADAPTIVE = "Adaptive"
+from copy import deepcopy
 
 def parse_metrics(output):
     metrics = {}
@@ -73,7 +79,19 @@ def parse_metrics(output):
 class AtomixSetup:
     def __init__(self):
         self.servers_config = json.load(open(SERVERS_CONFIG_PATH, "r"))
-        self.servers = ["universe", "warden", "rangeserver", "frontend"]
+        self.servers = ["universe", "warden", "rangeserver", "resolver", "frontend"]
+        self.pids = {}
+
+    def get_servers(self, servers=None):
+        if servers:
+            return servers
+        mode = self.servers_config["resolver"]["mode"]
+        if mode == LOCAL:
+            return [server for server in self.servers if server != "resolver"]
+        elif mode == REMOTE:
+            return self.servers
+        else:
+            raise ValueError(f"Invalid mode: {mode}")
 
     def build_servers(self):
         print("Building Atomix servers...")
@@ -84,37 +102,55 @@ class AtomixSetup:
             json.dump(self.servers_config, f)
 
     def kill_servers(self, servers=None):
-        if servers is None:
-            servers = self.servers
+        servers = self.get_servers(servers)
         for server in servers:
-            subprocess.run(["pkill", "-f", server])
-            print(f"Killed '{server}' processes.")
+            if (
+                server == "resolver"
+                and self.servers_config["resolver"]["mode"] != REMOTE
+            ):
+                continue
+            if server in self.pids:
+                subprocess.run(["kill", "-9", str(self.pids[server])])
+                del self.pids[server]
+            print(f"Killed '{server}' process.")
 
     def reset_cassandra(self):
         try:
             print("Cleaning Cassandra...")
-            subprocess.run([
-                "sudo", "docker", "exec", "-i", "cassandra", "cqlsh", "-e",
-                "TRUNCATE atomix.range_map; "
-                "TRUNCATE atomix.epoch; "
-                "TRUNCATE atomix.range_leases; "
-                "TRUNCATE atomix.records; "
-                "TRUNCATE atomix.wal; "
-                "TRUNCATE atomix.transactions; "
-                "TRUNCATE atomix.keyspaces;"
-            ])
+            subprocess.run(
+                [
+                    "sudo",
+                    "docker",
+                    "exec",
+                    "-i",
+                    "cassandra",
+                    "cqlsh",
+                    "-e",
+                    "TRUNCATE atomix.range_map; "
+                    "TRUNCATE atomix.epoch; "
+                    "TRUNCATE atomix.range_leases; "
+                    "TRUNCATE atomix.records; "
+                    "TRUNCATE atomix.wal; "
+                    "TRUNCATE atomix.transactions; "
+                    "TRUNCATE atomix.keyspaces;",
+                ]
+            )
         except Exception as e:
             print(f"Error cleaning Cassandra: {e}")
 
-    def restart_servers(self, servers=None):
-        if servers is None:
-            servers = self.servers
+    def start_servers(self, servers=None):
+        servers = self.get_servers(servers)
         print(f"- Killing servers: {servers}")
-        self.kill_servers(servers)
+        # self.kill_servers(servers)
         for server in servers:
+            if (
+                server == "resolver"
+                and self.servers_config["resolver"]["mode"] != REMOTE
+            ):
+                continue
             try:
                 print(f"- Spinning up {server}")
-                subprocess.Popen(
+                p = subprocess.Popen(
                     [
                         RUN_CMD + server,
                         "--config",
@@ -124,21 +160,28 @@ class AtomixSetup:
                     env={**os.environ, "RUST_LOG": "error"},
                 )
                 time.sleep(1)
+                self.pids[server] = p.pid
             except Exception as e:
                 print(f"Error spinning up {server}: {e}")
                 self.kill_servers(servers=servers)
                 exit(1)
-        
 
 
-def run_workload(config, atomix_setup):
-    # atomix_setup.reset_cassandra()
-    atomix_setup.restart_servers(["frontend"])
+def run_workload(config, atomix_setup, seeds_map):
+    atomix_setup.reset_cassandra()
+    # atomix_setup.kill_servers(["resolver"])
+    # atomix_setup.start_servers(["resolver"])
+    atomix_setup.kill_servers()
+    atomix_setup.start_servers()
 
-    #  Overwrite the namespace and name with a random UUID
+    # Overwrite the namespace and name with a random UUID
     uuid_str = uuid.uuid4().hex[:8]
     # config["namespace"] += f"_{uuid_str}"
     config["name"] += f"_{uuid_str}"
+    config["seed"] = seeds_map[config["num-keys"], config["iteration"]]
+    # print(f"\033[32mRunning workload with seed: {config['seed']} for num-keys: {config['num-keys']} and iteration: {config['iteration']}\033[0m")
+    
+    del config["iteration"]
     del config["baseline"]
 
     # Create a temporary config file with the current parameters
@@ -188,56 +231,83 @@ def varying_contention_experiment(atomix_setup, ray_logs_dir):
     namespace, name = generate_slug(2).split("-")
     experiment_name = f"{namespace}_{name}_{uuid.uuid4().hex[:8]}"
 
+    resolver_modes = [REMOTE, LOCAL]
+    baselines = [TRADITIONAL, PIPELINED, ADAPTIVE]
+
+    num_keys = [1, 5, 10, 25, 50, 75, 100]
+    iterations = list(range(3))
+
+    seeds_map = {}
+    for k in num_keys:
+        for i in iterations:
+            seeds_map[k, i] = random.randint(0, 1000000000)
+
     # Define the search space
     workload_config = {
-        "num-keys": tune.grid_search([1, 5, 10, 25, 50, 75, 100]),
-        "max-concurrency": tune.grid_search([29]),
-        "num-queries": tune.grid_search([2000]),
+        "num-keys": tune.grid_search(num_keys),
+        "max-concurrency": tune.grid_search([28]),
+        "num-queries": tune.grid_search([1500]),
         "zipf-exponent": tune.grid_search([0]),
         "namespace": namespace,
         "name": name,
-        "background-runtime-core-ids": list(range(3, 32)),
+        "background-runtime-core-ids": list(range(4, 32)),
+        "iteration": tune.grid_search(iterations),
+        # "seed": tune.grid_search(seeds),
     }
 
-    baselines = ["Pipelined", "Traditional", "Adaptive"]
-
+    baseline_names = []
     for baseline in baselines:
-        workload_config["baseline"] = tune.grid_search([baseline])
         atomix_setup.servers_config["commit_strategy"] = baseline
-        atomix_setup.reset_cassandra()
-        atomix_setup.dump_servers_config()
-        atomix_setup.restart_servers()
+        # For traditional 2PC, the resolver mode has no effect.
+        modes = resolver_modes if baseline != TRADITIONAL else [LOCAL]
+        for mode in modes:
+            mode_name = "L" if mode == LOCAL else "R"
+            suffix = f"+{mode_name}R" if baseline != TRADITIONAL else ""
+            baseline_name = baseline + suffix
+            workload_config["baseline"] = tune.grid_search([baseline_name])
+            atomix_setup.servers_config["resolver"]["mode"] = mode
+            # atomix_setup.reset_cassandra()
+            atomix_setup.dump_servers_config()
+            # atomix_setup.start_servers()
 
-        run_workload_task = tune.with_parameters(run_workload, atomix_setup=atomix_setup)
+            run_workload_task = tune.with_parameters(
+                run_workload, atomix_setup=atomix_setup, seeds_map=seeds_map
+            )
 
-        analysis = tune.run(
-            run_workload_task,
-            config=workload_config,
-            num_samples=3,
-            resources_per_trial={"cpu"
-            : psutil.cpu_count()},
-            storage_path=ray_logs_dir,
-            name=experiment_name,
-        )
-        results = analysis.results_df
-        results["baseline"] = baseline
-        results.to_csv(ray_logs_dir / experiment_name / f"{baseline}_results.csv")
+            analysis = tune.run(
+                run_workload_task,
+                config=workload_config,
+                num_samples=1,
+                resources_per_trial={"cpu": psutil.cpu_count()},
+                storage_path=ray_logs_dir,
+                name=experiment_name,
+            )
+            results = analysis.results_df
+
+            results["baseline"] = baseline_name
+            baseline_names.append(baseline_name)
+            results.to_csv(
+                ray_logs_dir / experiment_name / f"{baseline_name}_results.csv"
+            )
+            # atomix_setup.kill_servers()
 
     atomix_setup.kill_servers()
     results = pd.concat(
         [
-            pd.read_csv(ray_logs_dir / experiment_name / f"{baseline}_results.csv")
-            for baseline in baselines
+            pd.read_csv(ray_logs_dir / experiment_name / f"{baseline_name}_results.csv")
+            for baseline_name in baseline_names
         ]
     )
     results.to_csv(ray_logs_dir / experiment_name / "results.csv")
 
-    subprocess.run([
-        "python",
-        WORKLOAD_GENERATOR_DIR / "scripts" / "plot_experiments.py",
-        "--experiment-name",
-        experiment_name,
-    ])
+    subprocess.run(
+        [
+            "python",
+            WORKLOAD_GENERATOR_DIR / "scripts" / "plot_experiments.py",
+            "--experiment-name",
+            experiment_name,
+        ]
+    )
     ray.shutdown()
 
 

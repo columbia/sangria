@@ -2586,6 +2586,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "clap",
+ "colored",
  "common",
  "core_affinity",
  "frontend",

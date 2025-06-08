@@ -125,7 +125,17 @@ def line(
     return traces
 
 
-def bar(df, x, y, key=None, showlegend=True, order=None, color_map=None, marker_map=None, **kwargs) -> go.Bar:
+def bar(
+    df,
+    x,
+    y,
+    key=None,
+    showlegend=True,
+    order=None,
+    color_map=None,
+    marker_map=None,
+    **kwargs,
+) -> go.Bar:
     """Create a bar plot"""
     unique_keys = get_unique_key_values(df, key)
     unique_keys = sorted(unique_keys)

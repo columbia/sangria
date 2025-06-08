@@ -408,7 +408,7 @@ impl Transaction {
                         "Registering transaction {:?} as committed in the resolver",
                         self.id
                     );
-                    let _ = self.resolver.register_committed_transactions(vec![self.id]);
+                    let _ = self.resolver.register_committed_transactions(vec![self.id]).await;
                 }
                 info!("COMMIT OF TRANSACTION {:?} DONE!", self.id);
             }
