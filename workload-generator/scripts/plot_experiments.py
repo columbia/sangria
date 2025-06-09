@@ -141,6 +141,14 @@ def main():
         required=True,
         help="The Ray Tune experiment name (e.g. cooperative_giraffe_ba7b1a13)",
     )
+    parser.add_argument(
+        "-m",
+        "--num-queries",
+        required=False,
+        type=int,
+        help="The number of queries to plot",
+        default=1500,
+    )
     args = parser.parse_args()
 
     plotter = Plotter(args.experiment_name)
@@ -148,7 +156,7 @@ def main():
         METRICS,
         "num-keys",
         "baseline",
-        {"num-queries": 1500, "zipf-exponent": 0.0, "max-concurrency": 28},
+        {"num-queries": args.num_queries, "zipf-exponent": 0.0, "max-concurrency": 28},
     )
 
 
