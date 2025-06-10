@@ -515,13 +515,8 @@ where
         };
         let rm = self.maybe_load_and_get_range(&range_id).await?;
 
-        let mut txs = Vec::new();
-        for id in transaction_ids.iter() {
-            let tx = self.get_transaction_info(*id).await?;
-            txs.push(tx);
-        }
-        rm.commit(txs, request).await?;
-        // self.remove_transactions(&transaction_ids).await;
+        rm.commit(transaction_ids, request).await?;
+        self.remove_transactions(&transaction_ids).await;
         Ok(())
     }
 

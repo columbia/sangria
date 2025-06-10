@@ -20,6 +20,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tonic::async_trait;
@@ -311,7 +312,7 @@ where
                 };
                 // Validate the transaction lock is not lost, this is essential to ensure 2PL
                 // invariants still hold.
-                if prepare.has_reads() && !state.lock_table.is_currently_holding(tx.clone()).await {
+                if prepare.has_reads() && !state.lock_table.is_currently_holding(tx.id).await {
                     return Err(Error::TransactionAborted(
                         TransactionAbortReason::TransactionLockLost,
                     ));
@@ -418,7 +419,7 @@ where
                 return Err(Error::RangeIsNotLoaded)
             }
             State::Loaded(state) => {
-                if !state.lock_table.is_currently_holding(tx.clone()).await {
+                if !state.lock_table.is_currently_holding(tx.id).await {
                     return Ok(());
                 }
                 {
@@ -443,7 +444,7 @@ where
 
     async fn commit(
         &self,
-        transactions: Vec<Arc<TransactionInfo>>,
+        transactions: Vec<Uuid>,
         commit: CommitRequest<'_>,
     ) -> Result<(), Error> {
         let s = self.state.read().await;
@@ -616,6 +617,18 @@ where
         let bg_runtime = self.bg_runtime.clone();
         let state = self.state.clone();
         let lease_renewal_interval = self.config.range_server.range_maintenance_duration;
+        let epoch_duration = self.config.epoch.epoch_duration;
+        // Calculate how many epochs we need for the desired lease duration.
+        // TODO(yanniszark): Put this in the config.
+        let intended_lease_duration = Duration::from_secs(2);
+        let num_epochs_per_lease = intended_lease_duration
+            .as_nanos()
+            .checked_div(epoch_duration.as_nanos())
+            .and_then(|n| u64::try_from(n).ok())
+            .unwrap();
+        // Ensure that we have at least one epoch per lease.
+        let num_epochs_per_lease = std::cmp::max(1, num_epochs_per_lease);
+
         self.bg_runtime
             .spawn(async move {
                 // TODO: handle all errors instead of panicking.
@@ -638,7 +651,8 @@ where
                 let highest_known_epoch = epoch + 1;
                 let new_epoch_lease_lower_bound =
                     std::cmp::max(highest_known_epoch, range_info.epoch_lease.1 + 1);
-                let new_epoch_lease_upper_bound = new_epoch_lease_lower_bound + 100;
+                let new_epoch_lease_upper_bound =
+                    new_epoch_lease_lower_bound + num_epochs_per_lease;
                 storage
                     .renew_epoch_lease(
                         range_id,
@@ -681,6 +695,7 @@ where
         storage: Arc<S>,
         state: Arc<RwLock<State>>,
         lease_renewal_interval: std::time::Duration,
+        num_epochs_per_lease: u64,
     ) -> Result<(), Error> {
         loop {
             let leader_sequence_number: u64;
@@ -697,11 +712,15 @@ where
                 tokio::time::sleep(lease_renewal_interval).await;
                 continue;
             }
-            // TODO: If we renew too often, this could get out of hand.
-            // We should probably limit the max number of epochs in the future
-            // we can request a lease for.
+            // How far are we from the current lease expiring? Check so we don't
+            // end up taking the lease for an unbounded amount of epochs.
+            let num_epochs_left = old_lease.1.saturating_sub(epoch);
+            if num_epochs_left > 2 * num_epochs_per_lease {
+                tokio::time::sleep(lease_renewal_interval).await;
+                continue;
+            }
             let new_epoch_lease_lower_bound = std::cmp::max(highest_known_epoch, old_lease.1 + 1);
-            let new_epoch_lease_upper_bound = new_epoch_lease_lower_bound + 100;
+            let new_epoch_lease_upper_bound = new_epoch_lease_lower_bound + num_epochs_per_lease;
             // TODO: We should handle some errors here. For example:
             // - If the error seems transient (e.g., a timeout), we should retry.
             // - If the error is something like RangeOwnershipLost, we should unload the range.
@@ -915,7 +934,7 @@ mod tests {
             fbb.finish(fbb_root, None);
             let commit_record_bytes = fbb.finished_data();
             let commit_record = flatbuffers::root::<CommitRequest>(commit_record_bytes).unwrap();
-            self.commit(tx.clone(), commit_record).await
+            self.commit(tx.id, commit_record).await
         }
     }
 

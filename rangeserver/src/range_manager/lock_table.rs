@@ -2,6 +2,7 @@ use crate::{error::Error, transaction_abort_reason::TransactionAbortReason};
 use chrono::DateTime;
 use colored::Colorize;
 use common::transaction_info::TransactionInfo;
+use uuid::Uuid;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -169,11 +170,11 @@ impl LockTable {
         }
     }
 
-    pub async fn is_currently_holding(&self, tx: Arc<TransactionInfo>) -> bool {
+    pub async fn is_currently_holding(&self, tx_id : Uuid) -> bool {
         let state = self.state.read().await;
         match &state.current_holder {
             None => false,
-            Some(current) => current.transaction.id == tx.id,
+            Some(current) => current.transaction.id == tx_id,
         }
     }
 }

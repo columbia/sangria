@@ -56,7 +56,7 @@ pub trait RangeManager {
     /// idempotent and safe to retry any number of times.
     async fn commit(
         &self,
-        tx: Vec<Arc<TransactionInfo>>,
+        tx_id: Vec<Uuid>,
         commit: CommitRequest<'_>,
     ) -> Result<(), Error>;
 }
