@@ -54,9 +54,5 @@ pub trait RangeManager {
     /// decide the transaction outcome.
     /// A call to commit can fail only for intermittent reasons, and must be
     /// idempotent and safe to retry any number of times.
-    async fn commit(
-        &self,
-        tx_id: Vec<Uuid>,
-        commit: CommitRequest<'_>,
-    ) -> Result<(), Error>;
+    async fn commit(&self, tx_id: Vec<Uuid>, commit: CommitRequest<'_>) -> Result<(), Error>;
 }

@@ -515,7 +515,7 @@ where
         };
         let rm = self.maybe_load_and_get_range(&range_id).await?;
 
-        rm.commit(transaction_ids, request).await?;
+        rm.commit(transaction_ids.clone(), request).await?;
         self.remove_transactions(&transaction_ids).await;
         Ok(())
     }

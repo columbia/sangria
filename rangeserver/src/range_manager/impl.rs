@@ -259,7 +259,7 @@ where
                 if !has_writes {
                     // If transaction has reads, verify lock and release it
                     if prepare.has_reads() {
-                        if !state.lock_table.is_currently_holding(tx.clone()).await {
+                        if !state.lock_table.is_currently_holding(tx.id).await {
                             return Err(Error::TransactionAborted(
                                 TransactionAbortReason::TransactionLockLost,
                             ));
@@ -470,13 +470,13 @@ where
                 let mut pending_prepare_record_per_tx = HashMap::new();
                 {
                     let pending_state = state.pending_state.read().await;
-                    for tx in &transactions {
-                        match pending_state.pending_prepare_records.get(&tx.id) {
+                    for tx_id in &transactions {
+                        match pending_state.pending_prepare_records.get(tx_id) {
                             Some(prepare_record) => {
                                 _ = pending_prepare_record_per_tx
-                                    .insert(tx.id, prepare_record.clone())
+                                    .insert(tx_id, prepare_record.clone())
                             }
-                            None => panic!("Prepare record not found for transaction {:?}", tx.id),
+                            None => panic!("Prepare record not found for transaction {:?}", tx_id),
                             // TODO: Panic for now, but maybe it's just that the TX had already been committed?
                         }
                     }
@@ -484,14 +484,14 @@ where
 
                 let mut all_changes = HashMap::new();
                 let mut last_tx_per_key = HashMap::new();
-                for tx in &transactions {
+                for tx_id in &transactions {
                     // Apply the changes to the keys in the correct order to respect the commit dependencies.
                     // For every key, collect the last transaction that has updated it. This will help us update the pending_commit_table later.
                     // TODO: overlaps should have been handled in the prepare phase.
-                    let prepare_record = pending_prepare_record_per_tx.get(&tx.id).unwrap();
+                    let prepare_record = pending_prepare_record_per_tx.get(tx_id).unwrap();
                     for (key, val) in prepare_record.changes.iter() {
                         all_changes.insert(key.clone(), val.clone());
-                        last_tx_per_key.insert(key.clone(), tx.id);
+                        last_tx_per_key.insert(key.clone(), tx_id);
                     }
                 }
 
@@ -533,11 +533,8 @@ where
                                     "Last dependee for key {:?} is {:?} and last tx is {:?}",
                                     key, last_dependee, tx_id
                                 );
-                                info!(
-                                    "All transaction ids: {:?}",
-                                    transactions.iter().map(|tx| tx.id).collect::<Vec<_>>()
-                                );
-                                if tx_id == *last_dependee {
+                                info!("All transaction ids: {:?}", transactions);
+                                if *tx_id == *last_dependee {
                                     info!("Removing key {:?} from pending_commit_table", key);
                                     pending_state.pending_commit_table.remove(&key);
                                 }
@@ -547,16 +544,13 @@ where
                     }
 
                     // Remove the prepare records for the transactions that have committed.
-                    for tx in &transactions {
-                        info!("Removing prepare record for transaction {:?}", tx.id);
-                        pending_state.pending_prepare_records.remove(&tx.id);
+                    for tx_id in &transactions {
+                        info!("Removing prepare record for transaction {:?}", tx_id);
+                        pending_state.pending_prepare_records.remove(tx_id);
                     }
                 }
 
-                info!(
-                    "Done committing transactions {:?}",
-                    transactions.iter().map(|tx| tx.id).collect::<Vec<_>>()
-                );
+                info!("Done committing transactions {:?}", transactions);
 
                 // // For CommitStrategy::Traditional, this is the only transaction that can hold the lock.
                 // if self.config.commit_strategy == CommitStrategy::Traditional {
@@ -569,7 +563,7 @@ where
 
                 // If any of the committed transactions is the one holding the lock, release it.
                 if let Some(current_holder_id) = state.lock_table.get_current_holder_id().await {
-                    if transactions.iter().any(|tx| tx.id == current_holder_id) {
+                    if transactions.iter().any(|tx| *tx == current_holder_id) {
                         state.lock_table.release().await;
                         info!(
                             "Lock released for transaction {:?} on range {:?}",
