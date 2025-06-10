@@ -3,6 +3,11 @@
     "heuristic": "LockContention",
     "print_lock_table_state": false,
     "range_server": {
+        "wal_buffer_capacity": 32,
+        "wal_buffer_flush_interval": {
+            "secs": 0,
+            "nanos": 100000
+        },
         "range_maintenance_duration": {
             "secs": 1,
             "nanos": 0
@@ -26,7 +31,7 @@
         }
     },
     "resolver": {
-        "mode": "Remote",
+        "mode": "Local",
         "proto_server_addr": "127.0.0.1:50059",
         "fast_network_addr": "127.0.0.1:50060",
         "fast_network_polling_core_id": 3,

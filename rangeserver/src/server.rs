@@ -211,6 +211,8 @@ where
                         self.epoch_supplier.clone(),
                         CassandraWal::new(
                             self.config.cassandra.cql_addr.to_string(),
+                            self.config.range_server.wal_buffer_capacity,
+                            self.config.range_server.wal_buffer_flush_interval,
                             id.range_id,
                             self.bg_runtime.clone(),
                         )

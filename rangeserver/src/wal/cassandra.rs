@@ -21,8 +21,8 @@ use tracing::info;
 use uuid::Uuid;
 
 // Buffer configuration constants
-const BUFFER_CAPACITY: usize = 32;
-const FLUSH_INTERVAL: Duration = Duration::from_micros(200);
+// const BUFFER_CAPACITY: usize = 32;
+// const FLUSH_INTERVAL: Duration = Duration::from_micros(200);
 
 #[derive(Debug)]
 struct BufferedEntry {
@@ -43,6 +43,8 @@ pub struct CassandraWal {
     buffer: Arc<Mutex<BufferState>>,
     flush_task_handle: Option<tokio::task::JoinHandle<()>>,
     bg_runtime: tokio::runtime::Handle,
+    buffer_capacity: usize,
+    flush_interval: Duration,
 }
 
 enum State {
@@ -108,6 +110,8 @@ static METADATA_OFFSET: i64 = i64::MAX;
 impl CassandraWal {
     pub async fn new(
         known_node: String,
+        buffer_capacity: usize,
+        flush_interval: Duration,
         wal_id: Uuid,
         bg_runtime: tokio::runtime::Handle,
     ) -> CassandraWal {
@@ -129,6 +133,8 @@ impl CassandraWal {
             buffer,
             flush_task_handle: None,
             bg_runtime,
+            buffer_capacity,
+            flush_interval,
         };
         // Start the background flush task
         wal.start_flush_task().await;
@@ -141,8 +147,18 @@ impl CassandraWal {
         let buffer = self.buffer.clone();
         let state = self.state.clone();
         let bg_runtime = self.bg_runtime.clone();
+        let buffer_capacity = self.buffer_capacity;
+        let flush_interval = self.flush_interval;
         let handle = bg_runtime.spawn(async move {
-            Self::flush_task(session, wal_id, buffer, state).await;
+            Self::flush_task(
+                session,
+                wal_id,
+                buffer,
+                state,
+                buffer_capacity,
+                flush_interval,
+            )
+            .await;
         });
 
         self.flush_task_handle = Some(handle);
@@ -153,15 +169,17 @@ impl CassandraWal {
         wal_id: Uuid,
         buffer: Arc<Mutex<BufferState>>,
         state: Arc<RwLock<State>>,
+        buffer_capacity: usize,
+        flush_interval: Duration,
     ) {
         loop {
-            sleep(FLUSH_INTERVAL).await;
+            sleep(flush_interval).await;
 
             let should_flush = {
                 let buffer_clone = buffer.clone();
                 let buffer_guard = buffer_clone.lock().await;
-                buffer_guard.entries.len() >= BUFFER_CAPACITY
-                    || buffer_guard.last_flush.elapsed() >= FLUSH_INTERVAL
+                buffer_guard.entries.len() >= buffer_capacity
+                    || buffer_guard.last_flush.elapsed() >= flush_interval
             };
 
             if should_flush {
@@ -300,6 +318,7 @@ impl CassandraWal {
     ) -> Result<oneshot::Receiver<Result<(), Error>>, Error> {
         let (sender, receiver) = oneshot::channel();
 
+        info!("{}", format!("Appending entry: {:?}", entry_type).purple());
         // Add entry to buffer
         {
             let mut buffer_guard = self.buffer.lock().await;
@@ -310,7 +329,7 @@ impl CassandraWal {
             });
 
             // Trigger immediate flush if buffer is full
-            if buffer_guard.entries.len() >= BUFFER_CAPACITY {
+            if buffer_guard.entries.len() >= self.buffer_capacity {
                 drop(buffer_guard);
                 let bg_runtime = self.bg_runtime.clone();
                 let session = self.session.clone();

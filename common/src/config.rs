@@ -130,6 +130,8 @@ pub struct EpochPublisherSet {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RangeServerConfig {
+    pub wal_buffer_capacity: usize,
+    pub wal_buffer_flush_interval: time::Duration,
     pub range_maintenance_duration: time::Duration,
     pub proto_server_addr: HostPort,
     pub fast_network_addr: HostPort,
