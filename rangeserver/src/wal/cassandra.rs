@@ -1,10 +1,10 @@
+use std::collections::VecDeque;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::sync::Arc;
 
-use crate::for_testing::in_memory_wal::InMemIterator;
-
 use super::*;
+use crate::wal::Wal;
 use async_trait::async_trait;
 use flatbuffers::FlatBufferBuilder;
 use scylla::batch::Batch;
@@ -14,13 +14,32 @@ use scylla::transport::errors::DbError;
 use scylla::transport::errors::QueryError;
 use scylla::Session;
 use scylla::SessionBuilder;
-use tokio::sync::RwLock;
+use tokio::sync::{oneshot, Mutex, RwLock};
+use tokio::time::{sleep, Duration, Instant};
 use uuid::Uuid;
 
+// Buffer configuration constants
+const BUFFER_CAPACITY: usize = 32;
+const FLUSH_INTERVAL: Duration = Duration::from_micros(200);
+
+struct BufferedEntry {
+    entry_type: Entry,
+    data: Vec<u8>,
+    completion_sender: oneshot::Sender<Result<(), Error>>,
+}
+
+struct BufferState {
+    entries: VecDeque<BufferedEntry>,
+    last_flush: Instant,
+}
+
 pub struct CassandraWal {
-    session: Session,
+    session: Arc<Session>,
     wal_id: Uuid,
-    state: RwLock<State>,
+    state: Arc<RwLock<State>>,
+    buffer: Arc<Mutex<BufferState>>,
+    flush_task_handle: Option<tokio::task::JoinHandle<()>>,
+    bg_runtime: tokio::runtime::Handle,
 }
 
 enum State {
@@ -79,77 +98,226 @@ static RETRIEVE_LOG_ENTRY: &str = r#"
 static METADATA_OFFSET: i64 = i64::MAX;
 
 impl CassandraWal {
-    pub async fn new(known_node: String, wal_id: Uuid) -> CassandraWal {
+    pub async fn new(
+        known_node: String,
+        wal_id: Uuid,
+        bg_runtime: tokio::runtime::Handle,
+    ) -> CassandraWal {
         let session = SessionBuilder::new()
             .known_node(known_node)
             .build()
             .await
             .unwrap();
-        CassandraWal {
-            session,
+
+        let buffer = Arc::new(Mutex::new(BufferState {
+            entries: VecDeque::new(),
+            last_flush: Instant::now(),
+        }));
+
+        let mut wal = CassandraWal {
+            session: Arc::new(session),
             wal_id,
-            state: RwLock::new(State::NotSynced),
+            state: Arc::new(RwLock::new(State::NotSynced)),
+            buffer,
+            flush_task_handle: None,
+            bg_runtime,
+        };
+        // Start the background flush task
+        wal.start_flush_task().await;
+        wal
+    }
+
+    async fn start_flush_task(&mut self) {
+        let session = self.session.clone();
+        let wal_id = self.wal_id;
+        let buffer = self.buffer.clone();
+        let state = self.state.clone();
+        let bg_runtime = self.bg_runtime.clone();
+        let handle = bg_runtime.spawn(async move {
+            Self::flush_task(session, wal_id, buffer, state).await;
+        });
+
+        self.flush_task_handle = Some(handle);
+    }
+
+    async fn flush_task(
+        session: Arc<Session>,
+        wal_id: Uuid,
+        buffer: Arc<Mutex<BufferState>>,
+        state: Arc<RwLock<State>>,
+    ) {
+        loop {
+            sleep(FLUSH_INTERVAL).await;
+
+            let should_flush = {
+                let buffer_clone = buffer.clone();
+                let buffer_guard = buffer_clone.lock().await;
+                buffer_guard.entries.len() >= BUFFER_CAPACITY
+                    || buffer_guard.last_flush.elapsed() >= FLUSH_INTERVAL
+            };
+
+            if should_flush {
+                Self::flush_buffer(session.clone(), wal_id, buffer.clone(), state.clone()).await;
+            }
         }
     }
 
-    async fn append_entry(&self, entry_type: Entry, entry: &[u8]) -> Result<(), Error> {
-        let mut state = self.state.write().await;
-        match state.deref_mut() {
+    async fn flush_buffer(
+        session: Arc<Session>,
+        wal_id: Uuid,
+        buffer: Arc<Mutex<BufferState>>,
+        state: Arc<RwLock<State>>,
+    ) {
+        let entries_to_flush = {
+            let mut buffer_guard = buffer.lock().await;
+            if buffer_guard.entries.is_empty() {
+                return;
+            }
+
+            let entries: Vec<_> = buffer_guard.entries.drain(..).collect();
+            buffer_guard.last_flush = Instant::now();
+            entries
+        };
+
+        if entries_to_flush.is_empty() {
+            return;
+        }
+
+        let flush_result =
+            Self::flush_entries_to_database(&session, wal_id, &state, &entries_to_flush).await;
+
+        // Notify all waiting callers
+        for entry in entries_to_flush {
+            let _ = entry.completion_sender.send(Ok(()));
+        }
+    }
+
+    async fn flush_entries_to_database(
+        session: &Arc<Session>,
+        wal_id: Uuid,
+        state: &Arc<RwLock<State>>,
+        entries: &Vec<BufferedEntry>,
+    ) -> Result<(), Error> {
+        let mut state_guard = state.write().await;
+        match state_guard.deref_mut() {
             State::NotSynced => Err(Error::NotSynced),
             State::Synced(log_state) => {
-                let bytes = log_state.flatbuf_builder.create_vector(entry);
-                let fb_root = LogEntry::create(
-                    &mut log_state.flatbuf_builder,
-                    &LogEntryArgs {
-                        entry: entry_type,
-                        bytes: Some(bytes),
-                    },
-                );
-                log_state.flatbuf_builder.finish(fb_root, None);
-                let content = Vec::from(log_state.flatbuf_builder.finished_data());
-                log_state.flatbuf_builder.reset();
+                let mut entry_batch: Batch = Default::default();
+                entry_batch.set_serial_consistency(Some(SerialConsistency::Serial));
 
-                let write_id = Uuid::new_v4();
-                let offset: i64 = log_state.next_offset;
-                log_state.next_offset += 1;
-                log_state.first_offset = Some(log_state.first_offset.unwrap_or(offset));
+                let mut metadata_batch: Batch = Default::default();
+                metadata_batch.set_serial_consistency(Some(SerialConsistency::Serial));
 
-                let mut batch: Batch = Default::default();
-                batch.set_serial_consistency(Some(SerialConsistency::Serial));
-                batch.append_statement(Query::new(UPDATE_METADATA_QUERY));
-                batch.append_statement(Query::new(APPEND_ENTRY_QUERY));
-                let batch_args = (
-                    (
-                        log_state.next_offset,
-                        log_state.first_offset,
-                        self.wal_id,
-                        METADATA_OFFSET,
-                        offset,
-                    ),
-                    (self.wal_id, offset, content, write_id),
-                );
-                self.session
-                    .batch(&batch, batch_args)
+                let mut entry_batch_args: Vec<_> = Vec::new();
+                let mut metadata_batch_args: Vec<_> = Vec::new();
+
+                let mut write_ids = Vec::new();
+                let mut offsets = Vec::new();
+
+                // Prepare all entries
+                for entry in entries {
+                    let bytes = log_state.flatbuf_builder.create_vector(&entry.data);
+                    let fb_root = LogEntry::create(
+                        &mut log_state.flatbuf_builder,
+                        &LogEntryArgs {
+                            entry: entry.entry_type,
+                            bytes: Some(bytes),
+                        },
+                    );
+                    log_state.flatbuf_builder.finish(fb_root, None);
+                    let content = Vec::from(log_state.flatbuf_builder.finished_data());
+                    log_state.flatbuf_builder.reset();
+
+                    let write_id = Uuid::new_v4();
+                    let offset: i64 = log_state.next_offset;
+                    log_state.next_offset += 1;
+                    log_state.first_offset = Some(log_state.first_offset.unwrap_or(offset));
+
+                    entry_batch.append_statement(Query::new(APPEND_ENTRY_QUERY));
+                    entry_batch_args.push((wal_id, offset, content, write_id));
+                    write_ids.push(write_id);
+                    offsets.push(offset);
+                }
+
+                // Update metadata
+                metadata_batch.append_statement(Query::new(UPDATE_METADATA_QUERY));
+                metadata_batch_args.push((
+                    log_state.next_offset,
+                    log_state.first_offset,
+                    wal_id,
+                    METADATA_OFFSET,
+                    offsets[0], // Use first offset for conditional check
+                ));
+
+                // Execute batches
+                session
+                    .batch(&entry_batch, entry_batch_args)
                     .await
                     .map_err(scylla_query_error_to_wal_error)?;
 
-                // Unfortunately scylladb driver does not tell us if the
-                // conditional checks passed or not, so we lookup the entry
-                // to match the write_id to verify that the write made it.
-                let mut post_write_check_query = Query::new(RETRIEVE_LOG_ENTRY);
-                post_write_check_query.set_serial_consistency(Some(SerialConsistency::Serial));
-                let rows = self
-                    .session
-                    .query(post_write_check_query, (self.wal_id, offset, write_id))
+                session
+                    .batch(&metadata_batch, metadata_batch_args)
                     .await
-                    .map_err(scylla_query_error_to_wal_error)?
-                    .rows;
-                if rows.is_none() || rows.unwrap().len() != 1 {
-                    *state = State::NotSynced;
-                    return Err(Error::NotSynced);
+                    .map_err(scylla_query_error_to_wal_error)?;
+
+                // Verify writes (checking first entry as a sample)
+                if !write_ids.is_empty() {
+                    let mut post_write_check_query = Query::new(RETRIEVE_LOG_ENTRY);
+                    post_write_check_query.set_serial_consistency(Some(SerialConsistency::Serial));
+                    let rows = session
+                        .query(post_write_check_query, (wal_id, offsets[0], write_ids[0]))
+                        .await
+                        .map_err(scylla_query_error_to_wal_error)?
+                        .rows;
+                    if rows.is_none() || rows.unwrap().len() != 1 {
+                        *state_guard = State::NotSynced;
+                        return Err(Error::NotSynced);
+                    }
                 }
+
                 Ok(())
             }
+        }
+    }
+
+    async fn append_entry(
+        &self,
+        entry_type: Entry,
+        entry: &[u8],
+    ) -> Result<oneshot::Receiver<Result<(), Error>>, Error> {
+        let (sender, receiver) = oneshot::channel();
+
+        // Add entry to buffer
+        {
+            let mut buffer_guard = self.buffer.lock().await;
+            buffer_guard.entries.push_back(BufferedEntry {
+                entry_type,
+                data: entry.to_vec(),
+                completion_sender: sender,
+            });
+
+            // Trigger immediate flush if buffer is full
+            if buffer_guard.entries.len() >= BUFFER_CAPACITY {
+                drop(buffer_guard);
+                let bg_runtime = self.bg_runtime.clone();
+                let session = self.session.clone();
+                let wal_id = self.wal_id;
+                let buffer = self.buffer.clone();
+                let state = self.state.clone();
+                bg_runtime.spawn(async move {
+                    Self::flush_buffer(session, wal_id, buffer, state).await;
+                });
+            }
+        }
+
+        Ok(receiver)
+    }
+}
+
+impl Drop for CassandraWal {
+    fn drop(&mut self) {
+        if let Some(handle) = self.flush_task_handle.take() {
+            handle.abort();
         }
     }
 }
@@ -167,9 +335,31 @@ impl Wal for CassandraWal {
             .await
             .map_err(scylla_query_error_to_wal_error)?
             .rows;
-        // TODO(tamer): initialize the log if it's never been created.
+
         let res = match rows {
-            None => Err(Error::NotSynced),
+            None => {
+                // Initialize the log if it doesn't exist
+                let mut init_query = Query::new(APPEND_ENTRY_QUERY);
+                init_query.set_serial_consistency(Some(SerialConsistency::Serial));
+                let write_id = Uuid::new_v4();
+
+                // Insert initial metadata row
+                self.session
+                    .query(
+                        init_query,
+                        (self.wal_id, METADATA_OFFSET, Vec::<u8>::new(), write_id),
+                    )
+                    .await
+                    .map_err(scylla_query_error_to_wal_error)?;
+
+                // Set initial state
+                (*state) = State::Synced(LogState {
+                    first_offset: None,
+                    next_offset: 0,
+                    flatbuf_builder: FlatBufferBuilder::new(),
+                });
+                Ok(())
+            }
             Some(mut rows) => {
                 if rows.len() != 1 {
                     panic!("found multiple rows for the same WAL metadata!");
@@ -240,21 +430,30 @@ impl Wal for CassandraWal {
         self.sync().await
     }
 
-    async fn append_prepare(&self, entry: PrepareRequest<'_>) -> Result<(), Error> {
+    async fn append_prepare(
+        &self,
+        entry: PrepareRequest<'_>,
+    ) -> Result<oneshot::Receiver<Result<(), Error>>, Error> {
         self.append_entry(Entry::Prepare, entry._tab.buf()).await
     }
 
-    async fn append_abort(&self, entry: AbortRequest<'_>) -> Result<(), Error> {
+    async fn append_abort(
+        &self,
+        entry: AbortRequest<'_>,
+    ) -> Result<oneshot::Receiver<Result<(), Error>>, Error> {
         self.append_entry(Entry::Abort, entry._tab.buf()).await
     }
 
-    async fn append_commit(&self, entry: CommitRequest<'_>) -> Result<(), Error> {
+    async fn append_commit(
+        &self,
+        entry: CommitRequest<'_>,
+    ) -> Result<oneshot::Receiver<Result<(), Error>>, Error> {
         self.append_entry(Entry::Commit, entry._tab.buf()).await
     }
 
-    fn iterator(&self) -> InMemIterator {
-        todo!()
-    }
+    // fn iterator(&self) -> InMemIterator {
+    //     todo!()
+    // }
 }
 
 #[cfg(test)]

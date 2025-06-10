@@ -5,6 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 use thiserror::Error;
+use tokio::sync::oneshot;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -33,10 +34,19 @@ pub trait Wal: Send + Sync + 'static {
     /// Returns the offset at which a new entry in the log would be inserted.
     async fn next_offset(&self) -> Result<u64, Error>;
 
-    async fn append_prepare(&self, entry: PrepareRequest<'_>) -> Result<(), Error>;
-    async fn append_commit(&self, entry: CommitRequest<'_>) -> Result<(), Error>;
-    async fn append_abort(&self, entry: AbortRequest<'_>) -> Result<(), Error>;
+    async fn append_prepare(
+        &self,
+        entry: PrepareRequest<'_>,
+    ) -> Result<oneshot::Receiver<Result<(), Error>>, Error>;
+    async fn append_commit(
+        &self,
+        entry: CommitRequest<'_>,
+    ) -> Result<oneshot::Receiver<Result<(), Error>>, Error>;
+    async fn append_abort(
+        &self,
+        entry: AbortRequest<'_>,
+    ) -> Result<oneshot::Receiver<Result<(), Error>>, Error>;
     async fn trim_before_offset(&self, offset: u64) -> Result<(), Error>;
 
-    fn iterator(&self) -> impl Iterator + Send;
+    // fn iterator(&self) -> impl Iterator + Send;
 }

@@ -321,7 +321,7 @@ where
                 self.acquire_range_lock(state, tx.clone()).await?;
 
                 let mut dependencies = HashSet::new();
-                {
+                let receiver = {
                     // Decide whether we should release the lock early for each key based on the commit strategy and the heuristic
                     let mut early_lock_release_per_key = HashMap::new();
                     for key in prepare_record.changes.keys() {
@@ -377,7 +377,14 @@ where
                         tx.id, dependencies
                     );
 
-                    // 5) Maybe Release the range lock
+                    // 5) Append prepare record to WAL's buffer while still holding the lock
+                    let receiver = self
+                        .wal
+                        .append_prepare(prepare)
+                        .await
+                        .map_err(Error::from_wal_error)?;
+
+                    // 6) Maybe Release the range lock
                     // NOTE: This is for when we have per-key locking.
                     // for (key, early_lock_release) in early_lock_release_per_key {
                     //     if early_lock_release {
@@ -393,13 +400,11 @@ where
                         );
                         state.lock_table.release().await;
                     }
-                }
+                    receiver
+                };
 
-                // 6) Log prepare record to WAL
-                self.wal
-                    .append_prepare(prepare)
-                    .await
-                    .map_err(Error::from_wal_error)?;
+                // 7) Wait for the prepare record to be flushed to the database
+                receiver.await.unwrap().unwrap();
 
                 // let highest_known_epoch = state.highest_known_epoch.read().await;
                 Ok(PrepareResult {
@@ -459,11 +464,13 @@ where
                 // }
                 // state.highest_known_epoch.maybe_update(commit.epoch()).await;
 
-                // Write commit record to WAL
-                self.wal
+                // write commit to the WAL
+                let receiver = self
+                    .wal
                     .append_commit(commit)
                     .await
                     .map_err(Error::from_wal_error)?;
+                receiver.await.unwrap().unwrap();
 
                 // Collect all pending prepare records for the transactions to be committed
                 let mut pending_prepare_record_per_tx = HashMap::new();
@@ -739,7 +746,7 @@ where
         }
     }
 
-    async fn do_early_lock_release(&self, state: &LoadedState, key: Bytes) -> bool {
+    async fn do_early_lock_release(&self, state: &LoadedState, _key: Bytes) -> bool {
         match self.config.commit_strategy {
             CommitStrategy::Pipelined => true,
             CommitStrategy::Traditional => false,

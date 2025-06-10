@@ -21,11 +21,10 @@ use uuid::Uuid;
 
 use crate::range_manager::r#impl::RangeManager;
 use crate::range_manager::RangeManager as RangeManagerTrait;
+use crate::wal::cassandra::CassandraWal;
+
 use crate::warden_handler::WardenHandler;
-use crate::{
-    epoch_supplier::EpochSupplier, error::Error, for_testing::in_memory_wal::InMemoryWal,
-    storage::Storage,
-};
+use crate::{epoch_supplier::EpochSupplier, error::Error, storage::Storage};
 use flatbuf::rangeserver_flatbuffers::range_server::TransactionInfo as FlatbufTransactionInfo;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 
@@ -105,7 +104,7 @@ where
     warden_handler: WardenHandler,
     bg_runtime: tokio::runtime::Handle,
     // TODO: parameterize the WAL implementation too.
-    loaded_ranges: RwLock<HashMap<Uuid, Arc<RangeManager<S, InMemoryWal>>>>,
+    loaded_ranges: RwLock<HashMap<Uuid, Arc<RangeManager<S, CassandraWal>>>>,
     transaction_table: RwLock<HashMap<Uuid, Arc<TransactionInfo>>>,
     // prefetching_buffer: Arc<PrefetchingBuffer>,
 }
@@ -183,7 +182,7 @@ where
     async fn maybe_load_and_get_range_inner(
         &self,
         id: &FullRangeId,
-    ) -> Result<Arc<RangeManager<S, InMemoryWal>>, Error> {
+    ) -> Result<Arc<RangeManager<S, CassandraWal>>, Error> {
         {
             // Fast path when range has already been loaded.
             let range_table = self.loaded_ranges.read().await;
@@ -210,7 +209,12 @@ where
                         self.config.clone(),
                         self.storage.clone(),
                         self.epoch_supplier.clone(),
-                        InMemoryWal::new(),
+                        CassandraWal::new(
+                            self.config.cassandra.cql_addr.to_string(),
+                            id.range_id,
+                            self.bg_runtime.clone(),
+                        )
+                        .await,
                         self.bg_runtime.clone(),
                     );
                     (range_table).insert(id.range_id, rm.clone());
@@ -235,7 +239,7 @@ where
     async fn maybe_load_and_get_range(
         &self,
         id: &FullRangeId,
-    ) -> Result<Arc<RangeManager<S, InMemoryWal>>, Error> {
+    ) -> Result<Arc<RangeManager<S, CassandraWal>>, Error> {
         let res = self.maybe_load_and_get_range_inner(id).await;
         match res {
             Ok(_) => (),
