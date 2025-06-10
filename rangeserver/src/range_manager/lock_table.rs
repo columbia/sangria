@@ -169,11 +169,11 @@ impl LockTable {
         }
     }
 
-    pub async fn is_currently_holding(&self, tx: Arc<TransactionInfo>) -> bool {
+    pub async fn is_currently_holding(&self, tx_id: Uuid) -> bool {
         let state = self.state.read().await;
         match &state.current_holder {
             None => false,
-            Some(current) => current.transaction.id == tx.id,
+            Some(current) => current.transaction.id == tx_id,
         }
     }
 }
