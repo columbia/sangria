@@ -6,6 +6,7 @@ use std::sync::Arc;
 use super::*;
 use crate::wal::Wal;
 use async_trait::async_trait;
+use colored::Colorize;
 use flatbuffers::FlatBufferBuilder;
 use scylla::batch::Batch;
 use scylla::query::Query;
@@ -16,12 +17,14 @@ use scylla::Session;
 use scylla::SessionBuilder;
 use tokio::sync::{oneshot, Mutex, RwLock};
 use tokio::time::{sleep, Duration, Instant};
+use tracing::info;
 use uuid::Uuid;
 
 // Buffer configuration constants
 const BUFFER_CAPACITY: usize = 32;
 const FLUSH_INTERVAL: Duration = Duration::from_micros(200);
 
+#[derive(Debug)]
 struct BufferedEntry {
     entry_type: Entry,
     data: Vec<u8>,
@@ -76,6 +79,11 @@ static UPDATE_FIRST_OFFSET_QUERY: &str = r#"
 static TRIM_LOG_QUERY: &str = r#"
     DELETE FROM atomix.wal
       WHERE wal_id = ? and offset < ?
+"#;
+
+static INIT_METADATA_QUERY: &str = r#"
+    INSERT INTO atomix.wal (wal_id, offset, content, first_offset, next_offset, write_id)
+    VALUES (?, ?, ?, ?, ?, ?)
 "#;
 
 static UPDATE_METADATA_QUERY: &str = r#"
@@ -215,6 +223,11 @@ impl CassandraWal {
                 let mut offsets = Vec::new();
 
                 // Prepare all entries
+                info!(
+                    "{}",
+                    format!("Number of WAL entries flushed: {}", entries.len()).purple()
+                );
+
                 for entry in entries {
                     let bytes = log_state.flatbuf_builder.create_vector(&entry.data);
                     let fb_root = LogEntry::create(
@@ -337,31 +350,38 @@ impl Wal for CassandraWal {
             .rows;
 
         let res = match rows {
-            None => {
-                // Initialize the log if it doesn't exist
-                let mut init_query = Query::new(APPEND_ENTRY_QUERY);
-                init_query.set_serial_consistency(Some(SerialConsistency::Serial));
-                let write_id = Uuid::new_v4();
-
-                // Insert initial metadata row
-                self.session
-                    .query(
-                        init_query,
-                        (self.wal_id, METADATA_OFFSET, Vec::<u8>::new(), write_id),
-                    )
-                    .await
-                    .map_err(scylla_query_error_to_wal_error)?;
-
-                // Set initial state
-                (*state) = State::Synced(LogState {
-                    first_offset: None,
-                    next_offset: 0,
-                    flatbuf_builder: FlatBufferBuilder::new(),
-                });
-                Ok(())
-            }
+            None => Err(Error::NotSynced),
             Some(mut rows) => {
-                if rows.len() != 1 {
+                if rows.len() == 0 {
+                    // Log doesn't exist, initialize it
+                    let mut init_query = Query::new(INIT_METADATA_QUERY);
+                    init_query.set_serial_consistency(Some(SerialConsistency::Serial));
+                    let write_id = Uuid::new_v4();
+
+                    // Insert initial metadata row
+                    self.session
+                        .query(
+                            init_query,
+                            (
+                                self.wal_id,
+                                METADATA_OFFSET,
+                                Vec::<u8>::new(),
+                                None::<i64>,
+                                0 as i64,
+                                write_id,
+                            ),
+                        )
+                        .await
+                        .map_err(scylla_query_error_to_wal_error)?;
+
+                    // Set initial state
+                    (*state) = State::Synced(LogState {
+                        first_offset: None,
+                        next_offset: 0,
+                        flatbuf_builder: FlatBufferBuilder::new(),
+                    });
+                    Ok(())
+                } else if rows.len() > 1 {
                     panic!("found multiple rows for the same WAL metadata!");
                 } else {
                     let row = rows.pop().unwrap();
