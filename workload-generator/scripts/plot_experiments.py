@@ -29,6 +29,7 @@ class Plotter:
         if not self.plots_path.exists():
             self.plots_path.mkdir(parents=True, exist_ok=True)
         self.results = pd.read_csv(self.experiments_path / "results.csv")
+        # self.results = self.results.drop(columns=["baseline"])
         self.results.columns = self.results.columns.str.replace("config/", "")
 
         self.latency_max = (
@@ -36,6 +37,9 @@ class Plotter:
             if "avg_latency" in self.results.columns
             else None
         )
+        # drop rows where iteration is 0
+        self.results = self.results[self.results["iteration"] != 0]
+        print(self.results.columns)
         self.results = self.results.groupby(CONFIG_PARAMS)[METRICS].mean().reset_index()
 
     def plot_metrics_vs_x_vs_z(

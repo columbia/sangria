@@ -15,7 +15,6 @@ import random
 from termcolor import colored
 from typing import Dict, Optional, List, Any
 import itertools
-import uuid
 from ray.tune.search import Searcher
 from ray.tune.schedulers import FIFOScheduler
 from copy import deepcopy
@@ -198,9 +197,11 @@ class AtomixSetup:
 
 def run_workload(config):
     global atomix_setup
-    first_iteration = config["iteration"] == 0
+    iteration = config["iteration"]
+    baseline = config["baseline"]
+
     del config["iteration"]
-    del config["baseline"]
+
     cmd = [
         TARGET_RUN_CMD + "workload-generator",
         "--workload-config",
@@ -209,7 +210,7 @@ def run_workload(config):
         str(RAY_SERVERS_CONFIG_PATH),
     ]
 
-    if first_iteration:
+    if iteration == 0:
         atomix_setup.kill_servers()
         atomix_setup.reset_cassandra()
         atomix_setup.start_servers()
@@ -233,21 +234,19 @@ def run_workload(config):
             text=True,
             env={**os.environ, "RUST_LOG": "error"},
         )
-
         try:
             stdout, stderr = process.communicate(timeout=60 * 10)  # 10 minutes timeout
             print(stderr)
             metrics = parse_metrics(stdout)
-
         except subprocess.TimeoutExpired:
             process.kill()
             print(f"Timeout exceeded for config: {config}")
             metrics = {"throughput": 0.0}
-
     except Exception as e:
         print(f"Error running workload: {e}")
         metrics = {"throughput": 0.0}
 
+    config["iteration"] = iteration
     # tune.report(metrics)
     return metrics
 
@@ -255,7 +254,7 @@ def run_workload(config):
 def varying_contention_experiment(ray_logs_dir):
     global atomix_setup
     namespace, name = generate_slug(2).split("-")
-    experiment_name = f"{namespace}_{name}_{uuid.uuid4().hex[:8]}"
+    experiment_name = f"{namespace}_{name}"
 
     resolver_modes = [REMOTE]
     baselines = [TRADITIONAL, PIPELINED, ADAPTIVE]
