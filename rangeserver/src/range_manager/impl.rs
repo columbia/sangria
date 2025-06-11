@@ -371,7 +371,7 @@ where
                                 pending_state.pending_commit_table.remove(key);
                             }
                         }
-                    }
+                    }   
                     drop(pending_state);
                     info!(
                         "Dependencies for transaction {:?}: {:?}",
@@ -404,6 +404,12 @@ where
                     receiver
                 };
 
+                // Flush the WAL buffer
+                let wal = self.wal.clone();
+                self.bg_runtime.spawn(async move {
+                    wal.flush_buffer().await.map_err(Error::from_wal_error);
+                });
+
                 // 7) Wait for the prepare record to be flushed to the database
                 receiver.await.unwrap().unwrap();
 
@@ -431,10 +437,18 @@ where
                     // TODO: We can skip aborting to the log if we never appended a prepare record.
                     // TODO: It's possible the WAL already contains this record in case this is a retry
                     // so avoid re-inserting in that case.
-                    self.wal
+                    let receiver = self
+                        .wal
                         .append_abort(abort)
                         .await
                         .map_err(Error::from_wal_error)?;
+                    
+                    // Flush the WAL buffer
+                    let wal = self.wal.clone();
+                    self.bg_runtime.spawn(async move {
+                        wal.flush_buffer().await.map_err(Error::from_wal_error);
+                    });
+                    receiver.await.unwrap().unwrap();
                 }
                 state.lock_table.release().await;
 
@@ -471,6 +485,12 @@ where
                     .append_commit(commit)
                     .await
                     .map_err(Error::from_wal_error)?;
+                
+                // Flush the WAL buffer
+                let wal = self.wal.clone();
+                self.bg_runtime.spawn(async move {
+                    wal.flush_buffer().await.map_err(Error::from_wal_error);
+                });
                 receiver.await.unwrap().unwrap();
 
                 // Collect all pending prepare records for the transactions to be committed

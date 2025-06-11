@@ -34,6 +34,8 @@ pub trait Wal: Send + Sync + 'static {
     /// Returns the offset at which a new entry in the log would be inserted.
     async fn next_offset(&self) -> Result<u64, Error>;
 
+    async fn flush_buffer(&self) -> Result<(), Error>;
+    
     async fn append_prepare(
         &self,
         entry: PrepareRequest<'_>,

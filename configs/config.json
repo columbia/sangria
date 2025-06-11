@@ -3,10 +3,10 @@
     "heuristic": "LockContention",
     "print_lock_table_state": false,
     "range_server": {
-        "wal_buffer_capacity": 32,
+        "wal_buffer_capacity": 10,
         "wal_buffer_flush_interval": {
             "secs": 0,
-            "nanos": 100000
+            "nanos": 1000
         },
         "range_maintenance_duration": {
             "secs": 1,
