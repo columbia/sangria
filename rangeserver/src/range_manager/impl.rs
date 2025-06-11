@@ -259,7 +259,7 @@ where
                 if !has_writes {
                     // If transaction has reads, verify lock and release it
                     if prepare.has_reads() {
-                        if !state.lock_table.is_currently_holding(tx.id).await {
+                        if !state.lock_table.is_currently_holding(&vec![tx.id]).await {
                             return Err(Error::TransactionAborted(
                                 TransactionAbortReason::TransactionLockLost,
                             ));
@@ -312,7 +312,7 @@ where
                 };
                 // Validate the transaction lock is not lost, this is essential to ensure 2PL
                 // invariants still hold.
-                if prepare.has_reads() && !state.lock_table.is_currently_holding(tx.id).await {
+                if prepare.has_reads() && !state.lock_table.is_currently_holding(&vec![tx.id]).await {
                     return Err(Error::TransactionAborted(
                         TransactionAbortReason::TransactionLockLost,
                     ));
@@ -321,6 +321,7 @@ where
                 // 2) Acquire the range lock if it hasn't already been acquired by previous Gets
                 self.acquire_range_lock(state, tx.clone()).await?;
 
+                let mut flush = true;
                 let mut dependencies = HashSet::new();
                 let receiver = {
                     // Decide whether we should release the lock early for each key based on the commit strategy and the heuristic
@@ -353,6 +354,7 @@ where
                     // so it could bypass the rest of this codeblock for efficiency.
 
                     if self.config.commit_strategy != CommitStrategy::Traditional {
+                        flush = false;
                         // 4) Get any Write-Write dependencies for the transaction and update the pending_commit_table if ran in "early-lock-release" mode
                         info!("Checking dependencies for transaction {:?}", tx.id);
                         for (key, early_lock_release) in early_lock_release_per_key.iter() {
@@ -368,6 +370,8 @@ where
                                     .pending_commit_table
                                     .insert(key.clone(), tx.id);
                             } else {
+                                // If at least one key does not release the lock early, we flush the WAL buffer immediately to avoid delaying while holding the lock
+                                flush = true;
                                 pending_state.pending_commit_table.remove(key);
                             }
                         }
@@ -405,10 +409,12 @@ where
                 };
 
                 // Flush the WAL buffer
-                let wal = self.wal.clone();
-                self.bg_runtime.spawn(async move {
-                    wal.flush_buffer().await.map_err(Error::from_wal_error);
-                });
+                if flush {
+                    let wal = self.wal.clone();
+                    self.bg_runtime.spawn(async move {
+                        wal.flush_buffer().await.map_err(Error::from_wal_error);
+                    });
+                }
 
                 // 7) Wait for the prepare record to be flushed to the database
                 receiver.await.unwrap().unwrap();
@@ -430,7 +436,7 @@ where
                 return Err(Error::RangeIsNotLoaded)
             }
             State::Loaded(state) => {
-                if !state.lock_table.is_currently_holding(tx.id).await {
+                if !state.lock_table.is_currently_holding(&vec![tx.id]).await {
                     return Ok(());
                 }
                 {
@@ -479,18 +485,20 @@ where
                 // }
                 // state.highest_known_epoch.maybe_update(commit.epoch()).await;
 
-                // write commit to the WAL
+                // Append the commit to the WAL buffer
                 let receiver = self
                     .wal
                     .append_commit(commit)
                     .await
                     .map_err(Error::from_wal_error)?;
                 
-                // Flush the WAL buffer
-                let wal = self.wal.clone();
-                self.bg_runtime.spawn(async move {
-                    wal.flush_buffer().await.map_err(Error::from_wal_error);
-                });
+                // Flush the WAL buffer if we are in traditional mode or more generally if there is at least one transaction that is holding the lock
+                if self.config.commit_strategy == CommitStrategy::Traditional || state.lock_table.is_currently_holding(&transactions).await {
+                    let wal = self.wal.clone();
+                    self.bg_runtime.spawn(async move {
+                        wal.flush_buffer().await.map_err(Error::from_wal_error);
+                    });
+                }
                 receiver.await.unwrap().unwrap();
 
                 // Collect all pending prepare records for the transactions to be committed

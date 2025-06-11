@@ -1,5 +1,5 @@
 # Experiment logs
-workload-generator/experiments/ray_logs/
+workload-generator/experiments/
 workload-generator/experiments/*.log
 
 # Rust specific
