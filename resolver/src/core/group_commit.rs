@@ -172,6 +172,7 @@ impl GroupCommit {
                     let mut group_clone = group_guard_clone.write().await;
                     // info!("Acquired write lock");
                     let transactions = std::mem::take(&mut *group_clone);
+                    drop(group_clone);
 
                     // TODO: Handle cascading aborts
                     // TODO: Does order of tx_ids matter in the tx_state_store?
