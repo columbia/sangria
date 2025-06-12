@@ -3,6 +3,7 @@ use common::config::Config;
 use common::util::core_affinity::restrict_to_cores;
 use core_affinity;
 use proto::frontend::frontend_client::FrontendClient;
+use proto::resolver::resolver_client::ResolverClient;
 use serde_json;
 use std::fs;
 use std::sync::Arc;
@@ -42,7 +43,16 @@ async fn run_workload(
         .await
         .unwrap();
 
-    let workload_generator = Arc::new(WorkloadGenerator::new(workload_config, client));
+    let resolver_addr = config.resolver.proto_server_addr.to_string();
+    let resolver_client = ResolverClient::connect(format!("http://{}", resolver_addr))
+        .await
+        .unwrap();
+
+    let workload_generator = Arc::new(WorkloadGenerator::new(
+        workload_config,
+        client,
+        resolver_client,
+    ));
     if create_keyspace {
         workload_generator.create_keyspace().await;
         sleep(Duration::from_millis(2000)).await;
@@ -98,6 +108,7 @@ fn main() {
         P99 Latency: {:?}\n\
         Total Duration: {:?}\n\
         Total Transactions: {}\n\
+        Resolver stats: {:?}\n\
         METRICS_END",
         metrics.throughput,
         metrics.avg_latency,
@@ -106,5 +117,6 @@ fn main() {
         metrics.p99_latency,
         metrics.total_duration,
         metrics.total_transactions,
+        metrics.resolver_stats,
     )
 }

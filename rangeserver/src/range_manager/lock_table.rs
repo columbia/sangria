@@ -169,11 +169,11 @@ impl LockTable {
         }
     }
 
-    pub async fn is_currently_holding(&self, tx_id: Uuid) -> bool {
+    pub async fn is_currently_holding(&self, tx_ids: &Vec<Uuid>) -> bool {
         let state = self.state.read().await;
         match &state.current_holder {
             None => false,
-            Some(current) => current.transaction.id == tx_id,
+            Some(current) => tx_ids.contains(&current.transaction.id),
         }
     }
 }

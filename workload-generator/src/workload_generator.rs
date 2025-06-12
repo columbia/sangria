@@ -6,6 +6,8 @@ use common::{
 };
 use proto::{
     frontend::frontend_client::FrontendClient,
+    resolver::resolver_client::ResolverClient,
+    resolver::GetStatsRequest,
     universe::{CreateKeyspaceRequest, KeyRangeRequest, Zone as ProtoZone},
 };
 use rand::{distributions::WeightedIndex, prelude::*, rngs::StdRng, SeedableRng};
@@ -32,6 +34,7 @@ pub struct Metrics {
     pub p95_latency: Duration,
     pub p99_latency: Duration,
     pub throughput: f64,
+    pub resolver_stats: HashMap<String, usize>,
 }
 
 // Add a struct to hold our metrics
@@ -45,6 +48,7 @@ struct InternalMetrics {
 pub struct WorkloadGenerator {
     workload_config: WorkloadConfig,
     client: FrontendClient<tonic::transport::Channel>,
+    resolver_client: ResolverClient<tonic::transport::Channel>,
     metrics: Arc<Mutex<InternalMetrics>>,
     value_per_key: Arc<Mutex<HashMap<usize, u64>>>, // For verification
     rng: Arc<Mutex<StdRng>>,
@@ -54,6 +58,7 @@ impl WorkloadGenerator {
     pub fn new(
         workload_config: WorkloadConfig,
         client: FrontendClient<tonic::transport::Channel>,
+        resolver_client: ResolverClient<tonic::transport::Channel>,
     ) -> Self {
         let seed = workload_config
             .seed
@@ -63,6 +68,7 @@ impl WorkloadGenerator {
         Self {
             workload_config,
             client,
+            resolver_client,
             metrics: Arc::new(Mutex::new(InternalMetrics::default())),
             value_per_key: Arc::new(Mutex::new(HashMap::new())),
             rng,
@@ -245,6 +251,18 @@ impl WorkloadGenerator {
         info!("Total Duration: {:?}", total_duration);
         info!("Total Transactions: {}", total_transactions);
 
+        let mut resolver_client_clone = self.resolver_client.clone();
+        let response = resolver_client_clone
+            .get_stats(GetStatsRequest {})
+            .await
+            .unwrap();
+        let response = response.into_inner();
+        let mut stats_map = HashMap::new();
+        for (group_size, count) in response.stats {
+            stats_map.insert(group_size, count as usize);
+        }
+        info!("Resolver stats: {:?}", stats_map);
+
         Metrics {
             total_duration,
             total_transactions,
@@ -253,6 +271,7 @@ impl WorkloadGenerator {
             p95_latency,
             p99_latency,
             throughput,
+            resolver_stats: stats_map,
         }
     }
 }

@@ -3,10 +3,11 @@ use coordinator_rangeclient::error::Error;
 use std::collections::HashSet;
 use uuid::Uuid;
 
-use crate::participant_range_info::ParticipantRangeInfo;
+use crate::{core::group_commit::Stats, participant_range_info::ParticipantRangeInfo};
 
 #[async_trait]
 pub trait ResolverClient: Send + Sync + 'static {
+    async fn get_stats(&self) -> Stats;
     async fn commit(
         &self,
         transaction_id: Uuid,

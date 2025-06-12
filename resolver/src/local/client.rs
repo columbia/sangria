@@ -2,7 +2,10 @@ use std::{collections::HashSet, sync::Arc};
 use uuid::Uuid;
 
 use crate::{
-    core::{group_commit::GroupCommit, resolver::Resolver},
+    core::{
+        group_commit::{GroupCommit, Stats},
+        resolver::Resolver,
+    },
     participant_range_info::ParticipantRangeInfo,
     resolver_client::ResolverClient as ResolverClientTrait,
 };
@@ -32,6 +35,10 @@ impl ResolverClient {
 
 #[async_trait]
 impl ResolverClientTrait for ResolverClient {
+    async fn get_stats(&self) -> Stats {
+        Resolver::get_stats(self.resolver.clone()).await
+    }
+
     async fn commit(
         &self,
         transaction_id: Uuid,

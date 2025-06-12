@@ -259,7 +259,7 @@ where
                 if !has_writes {
                     // If transaction has reads, verify lock and release it
                     if prepare.has_reads() {
-                        if !state.lock_table.is_currently_holding(tx.id).await {
+                        if !state.lock_table.is_currently_holding(&vec![tx.id]).await {
                             return Err(Error::TransactionAborted(
                                 TransactionAbortReason::TransactionLockLost,
                             ));
@@ -312,7 +312,8 @@ where
                 };
                 // Validate the transaction lock is not lost, this is essential to ensure 2PL
                 // invariants still hold.
-                if prepare.has_reads() && !state.lock_table.is_currently_holding(tx.id).await {
+                if prepare.has_reads() && !state.lock_table.is_currently_holding(&vec![tx.id]).await
+                {
                     return Err(Error::TransactionAborted(
                         TransactionAbortReason::TransactionLockLost,
                     ));
@@ -419,7 +420,7 @@ where
                 return Err(Error::RangeIsNotLoaded)
             }
             State::Loaded(state) => {
-                if !state.lock_table.is_currently_holding(tx.id).await {
+                if !state.lock_table.is_currently_holding(&vec![tx.id]).await {
                     return Ok(());
                 }
                 {
@@ -752,7 +753,7 @@ where
         }
     }
 
-    async fn do_early_lock_release(&self, state: &LoadedState, key: Bytes) -> bool {
+    async fn do_early_lock_release(&self, state: &LoadedState, _key: Bytes) -> bool {
         match self.config.commit_strategy {
             CommitStrategy::Pipelined => true,
             CommitStrategy::Traditional => false,

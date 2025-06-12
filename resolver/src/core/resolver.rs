@@ -7,7 +7,10 @@ use tokio::sync::{RwLock, oneshot};
 use tracing::info;
 use uuid::Uuid;
 
-use crate::{core::group_commit::GroupCommit, participant_range_info::ParticipantRangeInfo};
+use crate::{
+    core::group_commit::{GroupCommit, Stats},
+    participant_range_info::ParticipantRangeInfo,
+};
 use coordinator_rangeclient::error::Error;
 
 #[derive(Clone, Debug)]
@@ -52,6 +55,10 @@ impl Resolver {
             waiting_transactions: RwLock::new(HashMap::new()),
             bg_runtime,
         }
+    }
+
+    pub async fn get_stats(resolver: Arc<Self>) -> Stats {
+        resolver.group_commit.get_stats().await
     }
 
     pub async fn commit(

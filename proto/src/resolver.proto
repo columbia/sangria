@@ -4,6 +4,7 @@ package resolver;
 service Resolver {
     rpc Commit(CommitRequest) returns (CommitResponse) {}
     rpc RegisterCommittedTransactions(RegisterCommittedTransactionsRequest) returns (RegisterCommittedTransactionsResponse) {}
+    rpc GetStats(GetStatsRequest) returns (GetStatsResponse) {}
 }
 
 message RegisterCommittedTransactionsRequest {
@@ -32,4 +33,11 @@ message CommitRequest {
 
 message CommitResponse {
     string status = 1;
+}
+
+message GetStatsRequest {
+}
+
+message GetStatsResponse {
+  map<string, int32> stats = 1;
 }
