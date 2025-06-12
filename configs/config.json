@@ -1,12 +1,12 @@
 {
-    "commit_strategy": "Pipelined",
+    "commit_strategy": "Traditional",
     "heuristic": "LockContention",
     "print_lock_table_state": false,
     "range_server": {
-        "wal_buffer_capacity": 10,
+        "wal_buffer_capacity": 1000,
         "wal_buffer_flush_interval": {
             "secs": 0,
-            "nanos": 1000
+            "nanos": 100
         },
         "range_maintenance_duration": {
             "secs": 1,
