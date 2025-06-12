@@ -312,7 +312,8 @@ where
                 };
                 // Validate the transaction lock is not lost, this is essential to ensure 2PL
                 // invariants still hold.
-                if prepare.has_reads() && !state.lock_table.is_currently_holding(&vec![tx.id]).await {
+                if prepare.has_reads() && !state.lock_table.is_currently_holding(&vec![tx.id]).await
+                {
                     return Err(Error::TransactionAborted(
                         TransactionAbortReason::TransactionLockLost,
                     ));
@@ -375,7 +376,7 @@ where
                                 pending_state.pending_commit_table.remove(key);
                             }
                         }
-                    }   
+                    }
                     drop(pending_state);
                     info!(
                         "Dependencies for transaction {:?}: {:?}",
@@ -448,7 +449,7 @@ where
                         .append_abort(abort)
                         .await
                         .map_err(Error::from_wal_error)?;
-                    
+
                     // Flush the WAL buffer
                     let wal = self.wal.clone();
                     self.bg_runtime.spawn(async move {
@@ -491,9 +492,11 @@ where
                     .append_commit(commit)
                     .await
                     .map_err(Error::from_wal_error)?;
-                
+
                 // Flush the WAL buffer if we are in traditional mode or more generally if there is at least one transaction that is holding the lock
-                if self.config.commit_strategy == CommitStrategy::Traditional || state.lock_table.is_currently_holding(&transactions).await {
+                if self.config.commit_strategy == CommitStrategy::Traditional
+                    || state.lock_table.is_currently_holding(&transactions).await
+                {
                     let wal = self.wal.clone();
                     self.bg_runtime.spawn(async move {
                         wal.flush_buffer().await.map_err(Error::from_wal_error);

@@ -3,10 +3,10 @@ use proto::resolver::resolver_server::{
     Resolver as ProtoResolver, ResolverServer as ProtoResolverServer,
 };
 use proto::resolver::{
-    CommitRequest, CommitResponse, RegisterCommittedTransactionsRequest,
-    RegisterCommittedTransactionsResponse,
+    CommitRequest, CommitResponse, GetStatsRequest, GetStatsResponse,
+    RegisterCommittedTransactionsRequest, RegisterCommittedTransactionsResponse,
 };
-use std::{net::ToSocketAddrs, str::FromStr, sync::Arc};
+use std::{collections::HashMap, net::ToSocketAddrs, str::FromStr, sync::Arc};
 use tonic::{Request, Response, Status as TStatus, transport::Server as TServer};
 use tracing::{info, instrument};
 use uuid::Uuid;
@@ -73,6 +73,23 @@ impl ProtoResolver for ProtoServer {
 
         Ok(Response::new(RegisterCommittedTransactionsResponse {
             status: "Register committed transactions ok".to_string(),
+        }))
+    }
+
+    #[instrument(skip(self))]
+    async fn get_stats(
+        &self,
+        request: Request<GetStatsRequest>,
+    ) -> Result<Response<GetStatsResponse>, TStatus> {
+        info!("Got a request: {:?}", request);
+        let resolver_server = self.resolver_server.clone();
+        let stats = Resolver::get_stats(resolver_server.resolver.clone()).await;
+        let mut response_stats = HashMap::new();
+        for (group_size, count) in stats.committed_group_sizes {
+            response_stats.insert(group_size, count as i32);
+        }
+        Ok(Response::new(GetStatsResponse {
+            stats: response_stats,
         }))
     }
 }

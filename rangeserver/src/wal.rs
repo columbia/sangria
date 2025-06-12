@@ -35,7 +35,7 @@ pub trait Wal: Send + Sync + 'static {
     async fn next_offset(&self) -> Result<u64, Error>;
 
     async fn flush_buffer(&self) -> Result<(), Error>;
-    
+
     async fn append_prepare(
         &self,
         entry: PrepareRequest<'_>,

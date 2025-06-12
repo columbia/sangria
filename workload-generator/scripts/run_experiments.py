@@ -62,6 +62,7 @@ def parse_metrics(output):
         "p99_latency": r"P99 Latency: ([\d\.]+[µnm]?s)",
         "total_duration": r"Total Duration: ([\d\.]+[µnm]?s)",
         "total_transactions": r"Total Transactions: (\d+)",
+        "resolver_stats": r"Resolver stats: (.*)",
     }
 
     for metric, pattern in patterns.items():
@@ -69,7 +70,9 @@ def parse_metrics(output):
         if match:
             value = match.group(1)
             # Convert duration strings to seconds
-            if "s" in value:
+            if metric == "resolver_stats":
+                metrics[metric] = value
+            elif "s" in value:
                 if "µs" in value:
                     metrics[metric] = float(value.replace("µs", "")) / 1_000_000
                 elif "ms" in value:
@@ -104,16 +107,8 @@ class AtomixSetup:
         self.pids = {}
 
     def get_servers(self, start_order=True, servers=None):
-        if servers:
-            return servers
-        mode = self.servers_config["resolver"]["mode"]
-        servers = self.servers_start_order if start_order else self.servers_kill_order
-        if mode == LOCAL:
-            return [server for server in servers if server != "resolver"]
-        elif mode == REMOTE:
-            return servers
-        else:
-            raise ValueError(f"Invalid mode: {mode}")
+        main_servers = self.servers_start_order if start_order else self.servers_kill_order
+        return main_servers if servers is None else servers
 
     def build_servers(self):
         print("Building Atomix servers...")
@@ -128,11 +123,6 @@ class AtomixSetup:
             return servers
         servers = self.get_servers(start_order=False, servers=servers)
         for server in servers:
-            if (
-                server == "resolver"
-                and self.servers_config["resolver"]["mode"] != REMOTE
-            ):
-                continue
             try:
                 if server in self.pids:
                     subprocess.run(["kill", "-9", str(self.pids[server])])
@@ -169,11 +159,6 @@ class AtomixSetup:
     def start_servers(self, servers=None):
         servers = self.get_servers(start_order=True, servers=servers)
         for server in servers:
-            if (
-                server == "resolver"
-                and self.servers_config["resolver"]["mode"] != REMOTE
-            ):
-                continue
             try:
                 print(f"- Spinning up {server}")
                 p = subprocess.Popen(
@@ -258,6 +243,7 @@ def varying_contention_experiment(ray_logs_dir):
 
     resolver_modes = [REMOTE]
     baselines = [TRADITIONAL, PIPELINED, ADAPTIVE]
+    # baselines = [PIPELINED]
 
     NUM_KEYS = [1, 5, 10, 25, 50, 75, 100]
     NUM_ITERATIONS = 4
@@ -316,11 +302,9 @@ def varying_contention_experiment(ray_logs_dir):
                 verbose=1,
                 progress_reporter=reporter,
             )
-            # ray.shutdown()
-            # ray.init(ignore_reinit_error=True)
             results = analysis.results_df
 
-            results["baseline"] = baseline_name
+            results["config/baseline"] = baseline_name
             baseline_names.append(baseline_name)
             results.to_csv(
                 ray_logs_dir / experiment_name / f"{baseline_name}_results.csv"

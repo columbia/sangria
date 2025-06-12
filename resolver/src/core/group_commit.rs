@@ -15,6 +15,11 @@ use uuid::Uuid;
 // The entire hashmap is also protected by a read-write lock. We acquire the write lock only when
 // we need to add new participant ranges to the hashmap.
 
+#[derive(Default)]
+pub struct Stats {
+    pub committed_group_sizes: HashMap<String, usize>,
+}
+
 struct State {
     // Transactions ready to commit grouped by participant range
     group_per_participant: HashMap<FullRangeId, Arc<RwLock<Vec<TransactionInfo>>>>,
@@ -26,6 +31,7 @@ pub struct GroupCommit {
     num_pending_participant_commits_per_transaction: Arc<RwLock<HashMap<Uuid, u32>>>,
     range_client: Arc<RangeClient>,
     tx_state_store: Arc<TxStateStoreClient>,
+    stats: Arc<RwLock<Stats>>,
 }
 
 impl GroupCommit {
@@ -37,7 +43,14 @@ impl GroupCommit {
             num_pending_participant_commits_per_transaction: Arc::new(RwLock::new(HashMap::new())),
             range_client,
             tx_state_store,
+            stats: Arc::new(RwLock::new(Stats::default())),
         }
+    }
+
+    pub async fn get_stats(&self) -> Stats {
+        let mut stats = self.stats.write().await;
+        let stats = std::mem::take(&mut *stats);
+        stats
     }
 
     async fn maybe_insert_new_participant_ranges(
@@ -128,6 +141,7 @@ impl GroupCommit {
 
     pub async fn commit(&self) -> Result<Vec<TransactionInfo>, Error> {
         // Commit all groups in parallel
+        let mut group_sizes = Vec::new();
         let mut commit_join_set = {
             let state = self.state.read().await;
             let mut commit_join_set = JoinSet::<Result<Vec<TransactionInfo>, Error>>::new();
@@ -139,11 +153,13 @@ impl GroupCommit {
                     if group.is_empty() {
                         continue;
                     }
-                    info!("Group size: {}", group.len());
+                    let group_size = group.len();
+                    info!("Group size: {}", group_size);
                     info!(
                         "Group: {:?}",
                         group.iter().map(|tx| tx.id).collect::<Vec<_>>()
                     );
+                    group_sizes.push(group_size);
                 }
 
                 let range_client = self.range_client.clone();
@@ -194,6 +210,17 @@ impl GroupCommit {
             }
             commit_join_set
         };
+
+        {
+            let mut stats = self.stats.write().await;
+            for group_size in group_sizes {
+                stats
+                    .committed_group_sizes
+                    .entry(format!("Group size: {}", group_size))
+                    .and_modify(|count| *count += 1)
+                    .or_insert(1);
+            }
+        }
 
         let mut returned_transactions = Vec::new();
         while let Some(res) = commit_join_set.join_next().await {

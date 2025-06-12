@@ -150,7 +150,15 @@ impl CassandraWal {
         let buffer_capacity = self.buffer_capacity;
         let flush_interval = self.flush_interval;
         let handle = bg_runtime.spawn(async move {
-            Self::flush_task(session, wal_id, buffer, state, buffer_capacity, flush_interval).await;
+            Self::flush_task(
+                session,
+                wal_id,
+                buffer,
+                state,
+                buffer_capacity,
+                flush_interval,
+            )
+            .await;
         });
 
         self.flush_task_handle = Some(handle);
@@ -175,7 +183,8 @@ impl CassandraWal {
             };
 
             if should_flush {
-                Self::flush_buffer_inner(session.clone(), wal_id, buffer.clone(), state.clone()).await;
+                Self::flush_buffer_inner(session.clone(), wal_id, buffer.clone(), state.clone())
+                    .await;
             }
         }
     }
@@ -462,7 +471,13 @@ impl Wal for CassandraWal {
     }
 
     async fn flush_buffer(&self) -> Result<(), Error> {
-        Self::flush_buffer_inner(self.session.clone(), self.wal_id, self.buffer.clone(), self.state.clone()).await;
+        Self::flush_buffer_inner(
+            self.session.clone(),
+            self.wal_id,
+            self.buffer.clone(),
+            self.state.clone(),
+        )
+        .await;
         Ok(())
     }
 

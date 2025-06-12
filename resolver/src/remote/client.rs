@@ -3,7 +3,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
-    participant_range_info::ParticipantRangeInfo,
+    core::group_commit::Stats, participant_range_info::ParticipantRangeInfo,
     resolver_client::ResolverClient as ResolverClientTrait,
 };
 use async_trait::async_trait;
@@ -11,9 +11,10 @@ use common::config::Config;
 use coordinator_rangeclient::error::Error;
 use proto::resolver::resolver_client::ResolverClient as ProtoResolverClient;
 use proto::resolver::{
-    CommitRequest, ParticipantRangeInfo as ProtoParticipantRangeInfo,
+    CommitRequest, GetStatsRequest, ParticipantRangeInfo as ProtoParticipantRangeInfo,
     RegisterCommittedTransactionsRequest,
 };
+use std::collections::HashMap;
 
 #[derive(Clone)]
 pub struct ResolverClient {
@@ -35,6 +36,19 @@ impl ResolverClient {
 
 #[async_trait]
 impl ResolverClientTrait for ResolverClient {
+    async fn get_stats(&self) -> Stats {
+        let mut client = self.client.clone();
+        let response = client.get_stats(GetStatsRequest {}).await.unwrap();
+        let stats = response.into_inner().stats;
+        let mut committed_group_sizes = HashMap::new();
+        for (group_size, count) in stats {
+            committed_group_sizes.insert(group_size, count as usize);
+        }
+        Stats {
+            committed_group_sizes,
+        }
+    }
+
     async fn commit(
         &self,
         transaction_id: Uuid,
