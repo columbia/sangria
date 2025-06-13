@@ -410,12 +410,12 @@ where
                 };
 
                 // Flush the WAL buffer
-                if flush {
+                // if flush {
                     let wal = self.wal.clone();
                     self.bg_runtime.spawn(async move {
                         wal.flush_buffer().await.map_err(Error::from_wal_error);
                     });
-                }
+                // }
 
                 // 7) Wait for the prepare record to be flushed to the database
                 receiver.await.unwrap().unwrap();
