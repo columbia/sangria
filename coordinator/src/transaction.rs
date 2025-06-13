@@ -321,28 +321,28 @@ impl Transaction {
                 }
                 while commit_join_set.join_next().await.is_some() {}
             }
-            CommitStrategy::Pipelined => {
-                // 2. --- COMMIT PHASE ---
-                info!(
-                    "{}",
-                    format!("Delegating commit to resolver for transaction {}", self.id)
-                        .italic()
-                        .bold()
-                        .yellow()
-                );
-                let participants_info = self
-                    .participant_ranges
-                    .iter()
-                    .map(|(range_id, info)| ParticipantRangeInfo {
-                        participant_range: *range_id,
-                        has_writes: !info.writeset.is_empty(),
-                    })
-                    .collect();
-                self.resolver
-                    .commit(self.id, self.dependencies.clone(), participants_info)
-                    .await?;
-            }
-            CommitStrategy::Adaptive => {
+            // CommitStrategy::Pipelined => {
+            //     // 2. --- COMMIT PHASE ---
+            //     info!(
+            //         "{}",
+            //         format!("Delegating commit to resolver for transaction {}", self.id)
+            //             .italic()
+            //             .bold()
+            //             .yellow()
+            //     );
+            //     let participants_info = self
+            //         .participant_ranges
+            //         .iter()
+            //         .map(|(range_id, info)| ParticipantRangeInfo {
+            //             participant_range: *range_id,
+            //             has_writes: !info.writeset.is_empty(),
+            //         })
+            //         .collect();
+            //     self.resolver
+            //         .commit(self.id, self.dependencies.clone(), participants_info)
+            //         .await?;
+            // }
+            CommitStrategy::Adaptive | CommitStrategy::Pipelined => {
                 if !self.dependencies.is_empty() {
                     info!(
                         "{}",
