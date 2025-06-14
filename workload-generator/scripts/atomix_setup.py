@@ -83,7 +83,7 @@ class AtomixSetup:
                 print(f"- Spinning up {server}")
                 p = subprocess.Popen(
                     [
-                        RUN_CMD + server,
+                        TARGET_RUN_CMD + server,
                         "--config",
                         str(RAY_SERVERS_CONFIG_PATH),
                     ],
@@ -98,3 +98,6 @@ class AtomixSetup:
                 print(f"Error spinning up {server}: {e}")
                 self.kill_servers(servers=servers)
                 exit(1)
+
+
+atomix_setup = AtomixSetup()

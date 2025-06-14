@@ -13,11 +13,10 @@ from atomix_setup import AtomixSetup
 from utils import *
 from math import prod
 
-atomix_setup = AtomixSetup()
+from atomix_setup import atomix_setup
 
 
 def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
-    global atomix_setup
     namespace, name = generate_slug(2).split("-")
     experiment_name = f"{namespace}_{name}"
 
@@ -27,7 +26,7 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
     NUM_ITERATIONS = 2
     NUM_QUERIES = [1500]
     # NUM_KEYS = [1, 5, 10, 25, 50, 75, 100]
-    NUM_KEYS = [200]
+    NUM_KEYS = [255]
     MAX_CONCURRENCY = [2]
 
     # Define the search space
@@ -35,7 +34,7 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
         "baseline": BASELINES,
         "num-keys": NUM_KEYS,
         "max-concurrency": MAX_CONCURRENCY,
-        "cpu_percentage": [0.1],
+        "cpu_percentage": [1],
         "num-queries": NUM_QUERIES,
         "zipf-exponent": [0],
         "namespace": [namespace],
@@ -54,11 +53,10 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
         ],
         max_report_frequency=20,
     )
-
     analysis = tune.run(
         tune.with_parameters(run_workload),
         config={},
-        num_samples=prod([len(v) for v in config.values()]),
+        num_samples=prod([len(v) for v in list(config.values())]) * NUM_ITERATIONS,
         resources_per_trial={"cpu": psutil.cpu_count()},
         storage_path=ray_logs_dir,
         name=experiment_name,
@@ -75,7 +73,6 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
 
 
 def varying_contention_experiment(ray_logs_dir):
-    global atomix_setup
     namespace, name = generate_slug(2).split("-")
     experiment_name = f"{namespace}_{name}"
 
@@ -177,7 +174,6 @@ def varying_contention_experiment(ray_logs_dir):
 
 def main():
     ray.init()
-    global atomix_setup
     ray_logs_dir = Path(RAY_LOGS_DIR)
     ray_logs_dir.mkdir(parents=True, exist_ok=True)
 

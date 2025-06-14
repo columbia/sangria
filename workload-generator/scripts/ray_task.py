@@ -4,6 +4,9 @@ import re
 import subprocess
 from utils import *
 
+# load atomix_setup from another script at runtime
+from atomix_setup import atomix_setup
+
 
 def parse_metrics(output):
     metrics = {}
