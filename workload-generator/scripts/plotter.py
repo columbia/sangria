@@ -11,25 +11,25 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 pio.kaleido.scope.mathjax = None
 
 colors = [
-            "red",  # "rgba(255, 0, 0, 0.4)",
-            "blue",  # "rgba(0, 0, 255, 0.4)",
-            "green",  # "rgba(0, 128, 0, 0.4)",
-            "orange",  # "rgba(255, 165, 0, 0.4)",
-            "purple",  # "rgba(128, 0, 128, 0.4)",
-            "brown",  # "rgba(165, 42, 42, 0.4)",
-            "pink",  # "rgba(255, 192, 203, 0.4)",
-            "gray",  # "rgba(128, 128, 128, 0.4)"
-        ]
+    "red",  # "rgba(255, 0, 0, 0.4)",
+    "blue",  # "rgba(0, 0, 255, 0.4)",
+    "green",  # "rgba(0, 128, 0, 0.4)",
+    "orange",  # "rgba(255, 165, 0, 0.4)",
+    "purple",  # "rgba(128, 0, 128, 0.4)",
+    "brown",  # "rgba(165, 42, 42, 0.4)",
+    "pink",  # "rgba(255, 192, 203, 0.4)",
+    "gray",  # "rgba(128, 128, 128, 0.4)"
+]
 markers = [
-            "circle",
-            "square",
-            "diamond",
-            "triangle-up",
-            "triangle-down",
-            "star",
-            "x",
-            "circle-open",
-        ]
+    "circle",
+    "square",
+    "diamond",
+    "triangle-up",
+    "triangle-down",
+    "star",
+    "x",
+    "circle-open",
+]
 
 
 def make_plots(
@@ -107,9 +107,7 @@ def get_unique_key_values(df, key):
     return df[key].unique()
 
 
-def line(
-    df, x, y, key=None, showlegend=True, **kwargs
-) -> List[go.Scatter]:
+def line(df, x, y, key=None, showlegend=True, **kwargs) -> List[go.Scatter]:
     """Create a line plot"""
 
     unique_keys = get_unique_key_values(df, key)
@@ -168,6 +166,7 @@ def bar(
         traces.append(trace)
     return traces
 
+
 def cdf(df, showlegend=True, **kwargs):
     """Create a CDF plot"""
 
@@ -176,7 +175,7 @@ def cdf(df, showlegend=True, **kwargs):
     color_map = {key: color for key, color in zip(baselines, colors)}
 
     traces = []
-    
+
     group_sizes = set()
     # Collect group_sizes per baseline
     resolver_stats_per_baseline = {}
@@ -195,11 +194,13 @@ def cdf(df, showlegend=True, **kwargs):
             if group_size not in resolver_stats:
                 resolver_stats[group_size] = 0
 
-
         sum_resolver_stats = sum(resolver_stats.values())
         resolver_stats = {k: v / sum_resolver_stats for k, v in resolver_stats.items()}
         resolver_stats = dict(sorted(resolver_stats.items()))
-        cumulative_values = [sum(list(resolver_stats.values())[:i+1]) for i in range(len(resolver_stats))]
+        cumulative_values = [
+            sum(list(resolver_stats.values())[: i + 1])
+            for i in range(len(resolver_stats))
+        ]
 
         traces.append(
             go.Scatter(

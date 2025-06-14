@@ -9,6 +9,7 @@ import argparse
 import json
 
 import warnings
+
 warnings.filterwarnings("ignore")
 
 METRICS = [
@@ -45,7 +46,6 @@ class Plotter:
     def aggregate_results(self):
         results = self.results.groupby(CONFIG_PARAMS)[METRICS].mean().reset_index()
         return results
-
 
     def plot_metrics_vs_x_vs_z(
         self, metrics: List[str], x: str, z: str, fixed_params: Dict[str, int]
@@ -95,7 +95,6 @@ class Plotter:
         }
         make_plots(figs, rows=rows, cols=cols, **figs_args)
 
-
     def plot_resolver_stats(self, fixed_params: Dict[str, int]):
         keys_fixed = list(fixed_params.keys())
         df = self.results[["resolver_stats", "baseline", "num-keys", *keys_fixed]]
@@ -104,15 +103,18 @@ class Plotter:
         df = df.dropna()
 
         df_traditional = df[df["baseline"] == "Traditional"]
-        df_traditional["resolver_stats"] = json.dumps({"Group size: 1": fixed_params["num-queries"]})
+        df_traditional["resolver_stats"] = json.dumps(
+            {"Group size: 1": fixed_params["num-queries"]}
+        )
         df = df[df["baseline"] != "Traditional"]
         df = pd.concat([df, df_traditional])
-        
+
         figs = []
 
-        for i, num_keys in enumerate(sorted(df["num-keys"].unique())):            
+        for i, num_keys in enumerate(sorted(df["num-keys"].unique())):
 
             df_num_keys = df[df["num-keys"] == num_keys]
+            # print(df_num_keys)
             arg = {
                 "df": df_num_keys,
                 "showlegend": True if i == 0 else False,
@@ -137,6 +139,7 @@ class Plotter:
         }
         make_plots(figs, rows=rows, cols=cols, **figs_args)
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Plot metrics for a given Ray Tune experiment"
@@ -155,23 +158,39 @@ def main():
         help="The number of queries to plot",
         default=1500,
     )
+    parser.add_argument(
+        "-c",
+        "--max-concurrency",
+        required=False,
+        type=int,
+        help="The max concurrency to plot",
+        default=28,
+    )
     args = parser.parse_args()
 
     plotter = Plotter(args.experiment_name)
 
-
-    # # plot throughput vs num-keys vs baseline
-    # plotter.plot_metrics_vs_x_vs_z(
-    #     METRICS,
-    #     "num-keys",
-    #     "baseline",
-    #     {"num-queries": args.num_queries, "zipf-exponent": 0.0, "max-concurrency": 28},
-    # )
-
-    # plot resolver stats
-    plotter.plot_resolver_stats(
-        {"num-queries": args.num_queries, "zipf-exponent": 0.0, "max-concurrency": 28},
+    # Plot throughput vs num-keys vs baseline
+    plotter.plot_metrics_vs_x_vs_z(
+        METRICS,
+        "num-keys",
+        "baseline",
+        {
+            "num-queries": args.num_queries,
+            "zipf-exponent": 0.0,
+            "max-concurrency": args.max_concurrency,
+        },
     )
+
+    # Plot resolver stats
+    plotter.plot_resolver_stats(
+        {
+            "num-queries": args.num_queries,
+            "zipf-exponent": 0.0,
+            "max-concurrency": args.max_concurrency,
+        },
+    )
+
 
 if __name__ == "__main__":
     main()
