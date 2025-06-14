@@ -21,8 +21,8 @@ use resolver::{
     core::{group_commit::GroupCommit, resolver::Resolver},
     remote::server::ResolverServer,
 };
+use std::fs::create_dir_all;
 use tx_state_store::client::Client as TxStateStoreClient;
-use std::fs::{create_dir_all, write};
 
 #[derive(Parser, Debug)]
 #[command(name = "resolver")]
@@ -75,11 +75,25 @@ fn main() {
         "Setting CPU limit to {}%",
         config.resolver.cpu_percentage * 100.0
     );
-    write(format!("{}/cpu.max", limited_cgroup_path), cpu_max_value).unwrap(); // 10% CPU
-    write(
-        format!("{}/cgroup.procs", limited_cgroup_path),
-        std::process::id().to_string(),
-    );
+    std::process::Command::new("sudo")
+        .arg("sh")
+        .arg("-c")
+        .arg(format!(
+            "echo {} > {}/cpu.max",
+            cpu_max_value, limited_cgroup_path
+        ))
+        .output()
+        .unwrap();
+    std::process::Command::new("sudo")
+        .arg("sh")
+        .arg("-c")
+        .arg(format!(
+            "echo {} > {}/cgroup.procs",
+            std::process::id(),
+            limited_cgroup_path
+        ))
+        .output()
+        .unwrap();
     // ------------------------------------- / Cores Configuration -------------------------------------
 
     let runtime = Builder::new_current_thread().enable_all().build().unwrap();
