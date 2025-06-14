@@ -1,7 +1,7 @@
 use crate::core::resolver::TransactionInfo;
 use common::full_range_id::FullRangeId;
 use coordinator_rangeclient::{error::Error, rangeclient::RangeClient};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::task::JoinSet;
@@ -23,10 +23,11 @@ pub struct Stats {
 struct State {
     // Transactions ready to commit grouped by participant range
     group_per_participant: HashMap<FullRangeId, Arc<RwLock<Vec<TransactionInfo>>>>,
+    // non_empty_groups: HashSet<FullRangeId>,
 }
 
 pub struct GroupCommit {
-    state: RwLock<State>,
+    state: Arc<RwLock<State>>,
     // Helps us keep track of the number of participant commits we need to wait for in order to register the transaction as committed
     num_pending_participant_commits_per_transaction: Arc<RwLock<HashMap<Uuid, u32>>>,
     range_client: Arc<RangeClient>,
@@ -37,9 +38,10 @@ pub struct GroupCommit {
 impl GroupCommit {
     pub fn new(range_client: Arc<RangeClient>, tx_state_store: Arc<TxStateStoreClient>) -> Self {
         GroupCommit {
-            state: RwLock::new(State {
+            state: Arc::new(RwLock::new(State {
                 group_per_participant: HashMap::new(),
-            }),
+                // non_empty_groups: HashSet::new(),
+            })),
             num_pending_participant_commits_per_transaction: Arc::new(RwLock::new(HashMap::new())),
             range_client,
             tx_state_store,
@@ -126,16 +128,36 @@ impl GroupCommit {
 
         // Update the participant ranges with the new transactions that are ready to commit
         // info!("Updating participant ranges with the new transactions that are ready to commit");
-        let state = self.state.read().await;
-        for (participant_range, transactions) in tmp_group_per_participant.iter() {
-            let mut group = state
-                .group_per_participant
-                .get(participant_range)
-                .unwrap()
-                .write()
-                .await;
-            group.extend(transactions.iter().cloned());
+        {
+            // let state = self.state.read().await;
+            let mut join_set = JoinSet::<()>::new();
+            for (participant_range, transactions) in tmp_group_per_participant.iter() {
+                let state_clone = self.state.clone();
+                let participant_range = participant_range.clone();
+                let transactions = transactions.clone();                    
+                // Spawning async tasks so that we try to acquire the locks for all groups in parallel
+                join_set.spawn(async move {
+                    let state = state_clone.read().await;
+                    let mut group = state
+                        .group_per_participant
+                        .get(&participant_range)
+                        .unwrap()
+                        .write()
+                        .await;
+                    group.extend(transactions.iter().cloned());
+                });
+            }
+            while let Some(_) = join_set.join_next().await {}
         }
+
+        // {
+        //     // Keep track of non-empty groups so that we know fast which groups to commit
+        //     let mut state = self.state.write().await;
+        //     for (participant_range, _) in tmp_group_per_participant.iter() {
+        //         state.non_empty_groups.insert(participant_range.clone());
+        //     }
+        // }
+
         Ok(())
     }
 
@@ -145,6 +167,30 @@ impl GroupCommit {
         let mut commit_join_set = {
             let state = self.state.read().await;
             let mut commit_join_set = JoinSet::<Result<Vec<TransactionInfo>, Error>>::new();
+
+            // // Collect all non-empty groups
+            // let mut non_empty_groups = Vec::new();
+            // let mut join_set = JoinSet::<Result<FullRangeId, Error>>::new();
+            // for (participant_range, group_guard) in state.group_per_participant.iter() {
+            //     let state_clone = self.state.clone();
+            //     let participant_range_clone = participant_range.clone();
+            //     let group_guard_clone = group_guard.clone();
+            //     join_set.spawn(async move {
+            //         let group = group_guard_clone.read().await;
+            //         if !group.is_empty() {
+            //             return Ok(participant_range_clone);
+            //         }
+            //     });
+            // }
+            // while let Some(result) = join_set.join_next().await {
+            //     if let Ok(Ok(participant_range)) = result {
+            //         non_empty_groups.push(participant_range);
+            //     } else {
+            //         panic!("Task failed while collecting non-empty groups");
+            //     }
+            // }
+            // for participant_range in non_empty_groups.iter() {
+            //     let group_guard = state.group_per_participant.get(participant_range).unwrap();
 
             info!("Committing groups in parallel");
             for (participant_range, group_guard) in state.group_per_participant.iter() {
