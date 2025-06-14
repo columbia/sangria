@@ -22,6 +22,7 @@ use resolver::{
     remote::server::ResolverServer,
 };
 use tx_state_store::client::Client as TxStateStoreClient;
+use std::fs::{create_dir_all, write};
 
 #[derive(Parser, Debug)]
 #[command(name = "resolver")]
