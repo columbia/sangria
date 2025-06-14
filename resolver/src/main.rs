@@ -51,6 +51,8 @@ fn main() {
         name: args.zone.into(),
     };
 
+    // ------------------------------------- Cores Configuration -------------------------------------
+    // Pin process to a specific set of cores.
     let mut background_runtime_cores = config.resolver.background_runtime_core_ids.clone();
     if background_runtime_cores.is_empty() {
         background_runtime_cores = core_affinity::get_core_ids()
@@ -60,6 +62,24 @@ fn main() {
             .collect();
     }
     restrict_to_cores(&background_runtime_cores);
+
+    // Set CPU limit for the process.
+    let limited_cgroup_path = "/sys/fs/cgroup/limited_cpu";
+    create_dir_all(limited_cgroup_path).unwrap();
+
+    let period = 100_000u32;
+    let quota = (config.resolver.cpu_percentage * period as f32).round() as u32;
+    let cpu_max_value = format!("{} {}", quota, period);
+    info!(
+        "Setting CPU limit to {}%",
+        config.resolver.cpu_percentage * 100.0
+    );
+    write(format!("{}/cpu.max", limited_cgroup_path), cpu_max_value).unwrap(); // 10% CPU
+    write(
+        format!("{}/cgroup.procs", limited_cgroup_path),
+        std::process::id().to_string(),
+    );
+    // ------------------------------------- / Cores Configuration -------------------------------------
 
     let runtime = Builder::new_current_thread().enable_all().build().unwrap();
     let fast_network_addr = config

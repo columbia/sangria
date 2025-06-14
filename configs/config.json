@@ -1,12 +1,12 @@
 {
-    "commit_strategy": "Traditional",
+    "commit_strategy": "Pipelined",
     "heuristic": "LockContention",
     "print_lock_table_state": false,
     "range_server": {
         "wal_buffer_capacity": 1000,
         "wal_buffer_flush_interval": {
             "secs": 0,
-            "nanos": 100
+            "nanos": 1
         },
         "range_maintenance_duration": {
             "secs": 1,
@@ -31,11 +31,12 @@
         }
     },
     "resolver": {
-        "mode": "Local",
+        "mode": "Remote",
         "proto_server_addr": "127.0.0.1:50059",
         "fast_network_addr": "127.0.0.1:50060",
         "fast_network_polling_core_id": 3,
-        "background_runtime_core_ids": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+        "background_runtime_core_ids": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
+        "cpu_percentage": 0.1
     },
     "epoch": {
         "proto_server_addr": "127.0.0.1:50050",
