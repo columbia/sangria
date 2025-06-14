@@ -53,7 +53,7 @@ impl Transaction {
                         namespace: self.keyspace.namespace.clone(),
                         name: self.keyspace.name.clone(),
                     }),
-                    key: vec![*key as u8],
+                    key: key.to_be_bytes().to_vec(),
                 })
                 .await
                 .unwrap();
@@ -91,7 +91,7 @@ impl Transaction {
                             namespace: self.keyspace.namespace.clone(),
                             name: self.keyspace.name.clone(),
                         }),
-                        key: vec![*key as u8],
+                        key: key.to_be_bytes().to_vec(),
                         value: value.to_string().as_bytes().to_vec(),
                     })
                     .await
