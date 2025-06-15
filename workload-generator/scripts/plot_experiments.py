@@ -7,6 +7,7 @@ from plotter import make_plots, line, bar, cdf
 import plotly.io as pio
 import argparse
 import json
+from utils import process_resolver_stats, get_unique_key_values
 
 import warnings
 
@@ -95,32 +96,34 @@ class Plotter:
         }
         make_plots(figs, rows=rows, cols=cols, **figs_args)
 
-    def plot_resolver_stats(self, fixed_params: Dict[str, int]):
+    def plot_resolver_stats(self, free_param: str, fixed_params: Dict[str, int]):
         keys_fixed = list(fixed_params.keys())
-        df = self.results[["resolver_stats", "baseline", "num-keys", *keys_fixed]]
+        df = self.results[["resolver_stats", "baseline", free_param, *keys_fixed]]
         for param, value in fixed_params.items():
             df = df[df[param] == value]
         df = df.dropna()
 
-        df_traditional = df[df["baseline"] == "Traditional"]
-        df_traditional["resolver_stats"] = json.dumps(
-            {"Group size: 1": fixed_params["num-queries"]}
+        df["resolver_stats"] = df["resolver_stats"].apply(
+            lambda x: (
+                json.dumps({"Group size: 1": fixed_params["num-queries"]})
+                if x == "{}"
+                else x
+            )
         )
-        df = df[df["baseline"] != "Traditional"]
-        df = pd.concat([df, df_traditional])
 
         figs = []
-
-        for i, num_keys in enumerate(sorted(df["num-keys"].unique())):
-
-            df_num_keys = df[df["num-keys"] == num_keys]
-            # print(df_num_keys)
+        cumvalues, group_sizes = process_resolver_stats(df, free_param)
+        for i, free_param_value in enumerate(
+            sorted(get_unique_key_values(df, free_param))
+        ):
             arg = {
-                "df": df_num_keys,
+                "df": df[df[free_param] == free_param_value],
+                "cumvalues": cumvalues[free_param_value],
+                "group_sizes": group_sizes,
                 "showlegend": True if i == 0 else False,
                 "legend_title": "baseline",
                 "x_axis_title": "Group Commit Sizes",
-                "y_axis_title": f"Num-Keys={num_keys}",
+                "y_axis_title": f"{free_param}={free_param_value}",
                 "y_range": (0, 1.1),
             }
             figs.append([(cdf, arg)])
@@ -151,44 +154,40 @@ def main():
         help="The Ray Tune experiment name (e.g. cooperative_giraffe_ba7b1a13)",
     )
     parser.add_argument(
-        "-m",
-        "--num-queries",
+        "-p",
+        "--fixed-params",
         required=False,
-        type=int,
-        help="The number of queries to plot",
-        default=1500,
+        type=str,
+        help="The fixed parameters to plot",
+        default="num-queries=1500,zipf-exponent=0.0,max-concurrency=28",
     )
-    parser.add_argument(
-        "-c",
-        "--max-concurrency",
-        required=False,
-        type=int,
-        help="The max concurrency to plot",
-        default=28,
-    )
+
     args = parser.parse_args()
 
     plotter = Plotter(args.experiment_name)
 
+    fixed_params = {
+        k: float(v)
+        for k, v in [param.split("=") for param in args.fixed_params.split(",")]
+    }
+    free_param = [
+        p for p in CONFIG_PARAMS if p not in fixed_params and p != "baseline"
+    ][0]
+    print(free_param)
+    print(fixed_params)
+
     # Plot throughput vs num-keys vs baseline
     plotter.plot_metrics_vs_x_vs_z(
         METRICS,
-        "num-keys",
+        free_param,
         "baseline",
-        {
-            "num-queries": args.num_queries,
-            "zipf-exponent": 0.0,
-            "max-concurrency": args.max_concurrency,
-        },
+        fixed_params,
     )
 
     # Plot resolver stats
     plotter.plot_resolver_stats(
-        {
-            "num-queries": args.num_queries,
-            "zipf-exponent": 0.0,
-            "max-concurrency": args.max_concurrency,
-        },
+        free_param,
+        fixed_params,
     )
 
 

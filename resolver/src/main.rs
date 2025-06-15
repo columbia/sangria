@@ -69,7 +69,9 @@ fn main() {
     create_dir_all(limited_cgroup_path).unwrap();
 
     let period = 100_000u32;
-    let quota = (config.resolver.cpu_percentage * period as f32 * background_runtime_cores.len() as f32).round() as u32;
+    let quota =
+        (config.resolver.cpu_percentage * period as f32 * background_runtime_cores.len() as f32)
+            .round() as u32;
     // let quota = (config.resolver.cpu_percentage * period as f32).round() as u32;
     let cpu_max_value = format!("{} {}", quota, period);
     info!(

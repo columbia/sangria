@@ -495,7 +495,7 @@ where
 
                 // Flush the WAL buffer if we are in traditional mode or more generally if there is at least one transaction that is holding the lock
                 // if self.config.commit_strategy == CommitStrategy::Traditional
-                    // || state.lock_table.is_currently_holding(&transactions).await
+                // || state.lock_table.is_currently_holding(&transactions).await
                 {
                     let wal = self.wal.clone();
                     self.bg_runtime.spawn(async move {

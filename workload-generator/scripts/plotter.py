@@ -167,7 +167,7 @@ def bar(
     return traces
 
 
-def cdf(df, showlegend=True, **kwargs):
+def cdf(df, cumvalues, group_sizes, showlegend=True, **kwargs):
     """Create a CDF plot"""
 
     baselines = get_unique_key_values(df, "baseline")
@@ -175,37 +175,11 @@ def cdf(df, showlegend=True, **kwargs):
     color_map = {key: color for key, color in zip(baselines, colors)}
 
     traces = []
-
-    group_sizes = set()
-    # Collect group_sizes per baseline
-    resolver_stats_per_baseline = {}
-    for baseline in baselines:
-        df_key = df[df["baseline"] == baseline]
-        resolver_stats = {}
-        for _, row in df_key.iterrows():
-            resolver_stats.update(json.loads(row["resolver_stats"]))
-        resolver_stats = {int(k.split(":")[1]): v for k, v in resolver_stats.items()}
-        group_sizes.update(resolver_stats.keys())
-        resolver_stats_per_baseline[baseline] = resolver_stats
-
     for i, baseline in enumerate(baselines):
-        resolver_stats = resolver_stats_per_baseline[baseline]
-        for group_size in group_sizes:
-            if group_size not in resolver_stats:
-                resolver_stats[group_size] = 0
-
-        sum_resolver_stats = sum(resolver_stats.values())
-        resolver_stats = {k: v / sum_resolver_stats for k, v in resolver_stats.items()}
-        resolver_stats = dict(sorted(resolver_stats.items()))
-        cumulative_values = [
-            sum(list(resolver_stats.values())[: i + 1])
-            for i in range(len(resolver_stats))
-        ]
-
         traces.append(
             go.Scatter(
-                x=list(resolver_stats.keys()),
-                y=cumulative_values,
+                x=list(group_sizes),
+                y=cumvalues[baseline],
                 name=baseline,
                 legendgroup=baseline,
                 legendgrouptitle=dict(text="baseline") if i == 0 else None,

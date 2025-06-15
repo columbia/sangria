@@ -24,10 +24,14 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
     BASELINES = [PIPELINED, TRADITIONAL]
 
     NUM_ITERATIONS = 2
-    NUM_QUERIES = [1500]
-    # NUM_KEYS = [1, 5, 10, 25, 50, 75, 100]
-    NUM_KEYS = [255]
-    MAX_CONCURRENCY = [2]
+    NUM_QUERIES = [2500]
+
+    # NUM_KEYS = [1, 5, 10, 25, 50, 100, 200, 400, 600]
+    NUM_KEYS = [200, 400, 600]
+    MAX_CONCURRENCY = [200]
+
+    # NUM_KEYS = [50]
+    # MAX_CONCURRENCY = [1, 5, 10, 25, 50, 100, 200]
 
     # Define the search space
     config = {
@@ -47,9 +51,10 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
         parameter_columns=[
             "baseline",
             "num-keys",
-            "num-queries",
+            "max-concurrency",
             "iteration",
             "cpu_percentage",
+            "num-queries",
         ],
         max_report_frequency=20,
     )
@@ -68,7 +73,14 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
         progress_reporter=reporter,
     )
     analysis.results_df.to_csv(ray_logs_dir / experiment_name / f"results.csv")
-    plot_results_df(experiment_name, MAX_CONCURRENCY[0], NUM_QUERIES[0])
+    # plot_results_df(experiment_name, MAX_CONCURRENCY[0], NUM_QUERIES[0])
+    fixed_params = {
+        "num-queries": NUM_QUERIES[0],
+        "zipf-exponent": 0.0,
+        "max-concurrency": MAX_CONCURRENCY[0],
+        # "num-keys": NUM_KEYS[0],
+    }
+    plot_results_df(experiment_name, fixed_params)
     ray.shutdown()
 
 

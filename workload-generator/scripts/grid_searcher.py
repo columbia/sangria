@@ -23,12 +23,12 @@ class GridSearcherInOrder(Searcher):
         self.param_keys.append("seed")
         self.param_keys.append("iteration")
 
+        # Each iteration should have a different seed
+        self.seeds = [random.randint(0, 1000000000) for _ in range(self.num_iterations)]
+
         self.grid = list(itertools.product(*self.param_values))
         self.grid = [
-            list(config) + [random.randint(0, 1000000000)] for config in self.grid
-        ]
-        self.grid = [
-            config + [iteration]
+            list(config) + [self.seeds[iteration], iteration]
             for config in self.grid
             for iteration in range(self.num_iterations)
         ]
