@@ -23,13 +23,14 @@ pub struct Stats {
 struct State {
     // Transactions ready to commit grouped by participant range
     group_per_participant: HashMap<FullRangeId, Arc<RwLock<Vec<TransactionInfo>>>>,
-    // non_empty_groups: HashSet<FullRangeId>,
 }
 
 pub struct GroupCommit {
     state: Arc<RwLock<State>>,
+    // state: RwLock<State>,
     // Helps us keep track of the number of participant commits we need to wait for in order to register the transaction as committed
     num_pending_participant_commits_per_transaction: Arc<RwLock<HashMap<Uuid, u32>>>,
+    non_empty_groups: Arc<RwLock<HashSet<FullRangeId>>>,
     range_client: Arc<RangeClient>,
     tx_state_store: Arc<TxStateStoreClient>,
     stats: Arc<RwLock<Stats>>,
@@ -38,11 +39,14 @@ pub struct GroupCommit {
 impl GroupCommit {
     pub fn new(range_client: Arc<RangeClient>, tx_state_store: Arc<TxStateStoreClient>) -> Self {
         GroupCommit {
+            // state: RwLock::new(State {
+            //     group_per_participant: HashMap::new(),
+            // }),
             state: Arc::new(RwLock::new(State {
                 group_per_participant: HashMap::new(),
-                // non_empty_groups: HashSet::new(),
             })),
             num_pending_participant_commits_per_transaction: Arc::new(RwLock::new(HashMap::new())),
+            non_empty_groups: Arc::new(RwLock::new(HashSet::new())),
             range_client,
             tx_state_store,
             stats: Arc::new(RwLock::new(Stats::default())),
@@ -126,10 +130,7 @@ impl GroupCommit {
             }
         }
 
-        // Update the participant ranges with the new transactions that are ready to commit
-        // info!("Updating participant ranges with the new transactions that are ready to commit");
         {
-            // let state = self.state.read().await;
             let mut join_set = JoinSet::<()>::new();
             for (participant_range, transactions) in tmp_group_per_participant.iter() {
                 let state_clone = self.state.clone();
@@ -150,75 +151,62 @@ impl GroupCommit {
             while let Some(_) = join_set.join_next().await {}
         }
 
-        // {
-        //     // Keep track of non-empty groups so that we know fast which groups to commit
-        //     let mut state = self.state.write().await;
-        //     for (participant_range, _) in tmp_group_per_participant.iter() {
-        //         state.non_empty_groups.insert(participant_range.clone());
-        //     }
-        // }
+        {
+            // Keep track of non-empty groups so that we know fast which groups to commit
+            let mut non_empty_groups = self.non_empty_groups.write().await;
+            for (participant_range, _) in tmp_group_per_participant.iter() {
+                non_empty_groups.insert(participant_range.clone());
+            }
+        }
 
         Ok(())
     }
 
     pub async fn commit(&self) -> Result<Vec<TransactionInfo>, Error> {
-        // Commit all groups in parallel
-        let mut group_sizes = Vec::new();
         let mut commit_join_set = {
-            let state = self.state.read().await;
-            let mut commit_join_set = JoinSet::<Result<Vec<TransactionInfo>, Error>>::new();
 
-            // // Collect all non-empty groups
-            // let mut non_empty_groups = Vec::new();
-            // let mut join_set = JoinSet::<Result<FullRangeId, Error>>::new();
-            // for (participant_range, group_guard) in state.group_per_participant.iter() {
-            //     let state_clone = self.state.clone();
-            //     let participant_range_clone = participant_range.clone();
-            //     let group_guard_clone = group_guard.clone();
-            //     join_set.spawn(async move {
-            //         let group = group_guard_clone.read().await;
-            //         if !group.is_empty() {
-            //             return Ok(participant_range_clone);
-            //         }
-            //     });
-            // }
-            // while let Some(result) = join_set.join_next().await {
-            //     if let Ok(Ok(participant_range)) = result {
-            //         non_empty_groups.push(participant_range);
-            //     } else {
-            //         panic!("Task failed while collecting non-empty groups");
-            //     }
-            // }
-            // for participant_range in non_empty_groups.iter() {
-            //     let group_guard = state.group_per_participant.get(participant_range).unwrap();
-
-            info!("Committing groups in parallel");
-            for (participant_range, group_guard) in state.group_per_participant.iter() {
-                {
-                    let group = group_guard.read().await;
-                    if group.is_empty() {
-                        continue;
-                    }
-                    let group_size = group.len();
-                    info!("Group size: {}", group_size);
-                    info!(
-                        "Group: {:?}",
-                        group.iter().map(|tx| tx.id).collect::<Vec<_>>()
-                    );
-                    group_sizes.push(group_size);
+            let mut non_empty_groups = HashSet::new();
+            {
+                let non_empty_groups_read = self.non_empty_groups.read().await;
+                for participant_range in non_empty_groups_read.iter() {
+                    non_empty_groups.insert(participant_range.clone());
                 }
+            }
+            
+            info!("Committing groups in parallel");
+            let mut commit_join_set = JoinSet::<Result<Vec<TransactionInfo>, Error>>::new();
+            let state = self.state.read().await;
+            for participant_range in non_empty_groups.iter() {
+                let group_guard = state
+                    .group_per_participant
+                    .get(participant_range)
+                    .unwrap();
 
                 let range_client = self.range_client.clone();
                 let participant_range_clone = participant_range.clone();
                 let tx_state_store_clone = self.tx_state_store.clone();
                 let group_guard_clone = group_guard.clone();
+                let non_empty_groups_clone = self.non_empty_groups.clone();
+                let stats_clone = self.stats.clone();
 
                 commit_join_set.spawn(async move {
-                    // Acquire the write lock to commit and clear the group -- release only after transactions are committed
+                    // Acquire the write lock to clear the group
                     let mut group_clone = group_guard_clone.write().await;
-                    // info!("Acquired write lock");
                     let transactions = std::mem::take(&mut *group_clone);
+                    {
+                        let mut non_empty_groups = non_empty_groups_clone.write().await;
+                        non_empty_groups.remove(&participant_range_clone);
+                    }
                     drop(group_clone);
+
+                    {
+                        let mut stats = stats_clone.write().await;
+                        stats
+                            .committed_group_sizes
+                            .entry(format!("Group size: {}", transactions.len()))
+                            .and_modify(|count| *count += 1)
+                            .or_insert(1);
+                    }
 
                     // TODO: Handle cascading aborts
                     // TODO: Does order of tx_ids matter in the tx_state_store?
@@ -229,15 +217,6 @@ impl GroupCommit {
                         .try_batch_commit_transactions(&tx_ids_vec, 0)
                         .await
                         .unwrap();
-                    // info!("Committed transactions in tx_state_store");
-                    // {
-                    //     OpResult::TransactionIsAborted => {
-                    //         // Somebody must have aborted the transaction (maybe due to timeout)
-                    //         // so unfortunately the commit was not successful.
-                    //         return Err(Error::TransactionAborted(TransactionAbortReason::Other));
-                    //     }
-                    // };
-                    // Transactions Committed!
 
                     // Notify participant so that:
                     // - it applies the TXs' PrepareRecords in storage
@@ -258,16 +237,6 @@ impl GroupCommit {
             commit_join_set
         };
 
-        {
-            let mut stats = self.stats.write().await;
-            for group_size in group_sizes {
-                stats
-                    .committed_group_sizes
-                    .entry(format!("Group size: {}", group_size))
-                    .and_modify(|count| *count += 1)
-                    .or_insert(1);
-            }
-        }
 
         let mut returned_transactions = Vec::new();
         while let Some(res) = commit_join_set.join_next().await {
