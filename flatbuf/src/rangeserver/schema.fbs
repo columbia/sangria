@@ -75,6 +75,7 @@ table PrepareResponse {
   highest_known_epoch:uint64;
   epoch_lease:EpochLease;
   dependencies:[Uuidu128];
+  released_lock_early: bool;
 }
 
 table CommitRequest {

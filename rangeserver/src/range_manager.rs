@@ -19,6 +19,7 @@ pub struct PrepareResult {
     pub highest_known_epoch: u64,
     pub epoch_lease: (u64, u64),
     pub dependencies: Vec<Uuid>,
+    pub released_lock_early: bool,
 }
 
 #[async_trait]

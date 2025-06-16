@@ -251,7 +251,7 @@ impl Transaction {
                 &self.runtime,
             );
         }
-
+        let mut any_early_lock_releases = false;
         while let Some(res) = prepare_join_set.join_next().await {
             let res = match res {
                 Err(_) => {
@@ -265,6 +265,9 @@ impl Transaction {
             let res = res.map_err(Self::error_from_rangeclient_error)?;
             // Update transaction's dependencies with those returned by the Prepare in each range.
             self.dependencies.extend(res.dependencies);
+            if res.released_lock_early {
+                any_early_lock_releases = true;
+            }
             // epoch_leases.push(res.epoch_lease);
             // if res.highest_known_epoch > epoch {
             //     epoch = res.highest_known_epoch;
@@ -409,12 +412,15 @@ impl Transaction {
                         self.id
                     );
 
-                    // Spawn async and don't wait for it to complete.
-                    let resolver = self.resolver.clone();
-                    let tx_id = self.id;
-                    self.runtime.spawn(async move {
-                        let _ = resolver.register_committed_transactions(vec![tx_id]).await;
-                    });
+                    if any_early_lock_releases {
+                        info!("At least one early lock release happened, registering transaction as committed in the resolver");
+                        // Spawn async and don't wait for it to complete.
+                        let resolver = self.resolver.clone();
+                        let tx_id = self.id;
+                        self.runtime.spawn(async move {
+                            let _ = resolver.register_committed_transactions(vec![tx_id]).await;
+                        });
+                    }
                 }
                 info!("COMMIT OF TRANSACTION {:?} DONE!", self.id);
             }

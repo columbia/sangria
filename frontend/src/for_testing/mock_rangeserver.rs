@@ -154,6 +154,7 @@ impl MockRangeServer {
                 epoch_lease: epoch_lease,
                 highest_known_epoch: epoch,
                 dependencies: None,
+                released_lock_early: false,
             },
         );
 

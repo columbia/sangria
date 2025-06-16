@@ -449,6 +449,7 @@ where
                     epoch_lease: None,
                     highest_known_epoch: 0,
                     dependencies: None,
+                    released_lock_early: false,
                 },
             ),
             Some(req_id) => {
@@ -457,9 +458,9 @@ where
                 let prepare_result = self.prepare_inner(request).await;
 
                 // Construct the response.
-                let (status, epoch_lease, highest_known_epoch, dependencies) = match prepare_result
+                let (status, epoch_lease, highest_known_epoch, dependencies, released_lock_early) = match prepare_result
                 {
-                    Err(e) => (e.to_flatbuf_status(), None, 0, Vec::new()),
+                    Err(e) => (e.to_flatbuf_status(), None, 0, Vec::new(), false),
                     Ok(prepare_result) => {
                         let epoch_lease = Some(EpochLease::create(
                             &mut fbb,
@@ -473,6 +474,7 @@ where
                             epoch_lease,
                             prepare_result.highest_known_epoch,
                             prepare_result.dependencies,
+                            prepare_result.released_lock_early,
                         )
                     }
                 };
@@ -493,6 +495,7 @@ where
                         epoch_lease,
                         highest_known_epoch,
                         dependencies,
+                        released_lock_early,
                     },
                 )
             }

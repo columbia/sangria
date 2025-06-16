@@ -27,6 +27,7 @@ pub struct PrepareOk {
     pub highest_known_epoch: u64,
     pub epoch_lease: EpochLease,
     pub dependencies: Vec<Uuid>,
+    pub released_lock_early: bool,
 }
 
 #[derive(Debug)]
@@ -296,6 +297,7 @@ impl RangeClient {
                         upper_bound_inclusive: epoch_lease.upper_bound_inclusive(),
                     },
                     dependencies,
+                    released_lock_early: response_msg.released_lock_early(),
                 });
             }
             _ => return Err(RangeServerError::InvalidRequestFormat),

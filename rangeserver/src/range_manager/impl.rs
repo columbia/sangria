@@ -276,6 +276,7 @@ where
                         highest_known_epoch: state.highest_known_epoch.read().await,
                         epoch_lease: state.range_info.epoch_lease,
                         dependencies: vec![],
+                        released_lock_early: false,
                     });
                 }
 
@@ -324,6 +325,7 @@ where
 
                 let mut flush = true;
                 let mut dependencies = HashSet::new();
+                let mut released_lock_early = false;
                 let receiver = {
                     // Decide whether we should release the lock early for each key based on the commit strategy and the heuristic
                     let mut early_lock_release_per_key = HashMap::new();
@@ -405,6 +407,7 @@ where
                             tx.id, self.range_id.range_id
                         );
                         state.lock_table.release().await;
+                        released_lock_early = true;
                     }
                     receiver
                 };
@@ -425,6 +428,7 @@ where
                     highest_known_epoch: 0,
                     epoch_lease: state.range_info.epoch_lease,
                     dependencies: dependencies.into_iter().collect(),
+                    released_lock_early,
                 })
             }
         }
