@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import time
+import socket
 from utils import *
 
 
@@ -16,13 +17,40 @@ class AtomixSetup:
             "frontend",
         ]
         self.servers_kill_order = [
-            "warden",
             "rangeserver",
+            "warden",
             "frontend",
             "resolver",
             "universe",
         ]
         self.pids = {}
+
+    def wait_for_port_release(self, server, timeout=5):
+
+        print(f"Waiting for {server} to release port...")
+        match server:
+            case "warden":
+                server_address = self.servers_config["regions"]["test-region"][
+                    "warden_address"
+                ]
+            case "rangeserver":
+                server_address = self.servers_config["range_server"][
+                    "proto_server_addr"
+                ]
+            case _:
+                server_address = self.servers_config[server]["proto_server_addr"]
+
+        ip, port = server_address.split(":")
+        start = time.time()
+        while time.time() - start < timeout:
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    if s.connect_ex((ip, int(port))) != 0:
+                        return True
+            except Exception as e:
+                print(f"Error waiting for {server} to release port: {e}")
+            time.sleep(0.5)
+        return False
 
     def get_servers(self, start_order=True, servers=None):
         main_servers = (
@@ -45,7 +73,15 @@ class AtomixSetup:
         for server in servers:
             try:
                 if server in self.pids:
-                    subprocess.run(["kill", "-9", str(self.pids[server])])
+                    result = subprocess.run(
+                        ["kill", "-9", str(self.pids[server])],
+                        capture_output=True,
+                        text=True,
+                    )
+                    if result.returncode != 0:
+                        print(
+                            f"Warning: Failed to kill {server} (PID {self.pids[server]}): {result.stderr}"
+                        )
                     del self.pids[server]
                     print(f"Killed '{server}'")
             except Exception as e:
@@ -80,6 +116,7 @@ class AtomixSetup:
         servers = self.get_servers(start_order=True, servers=servers)
         for server in servers:
             try:
+                self.wait_for_port_release(server)
                 print(f"- Spinning up {server}")
                 p = subprocess.Popen(
                     [

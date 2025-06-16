@@ -408,10 +408,13 @@ impl Transaction {
                         "Registering transaction {:?} as committed in the resolver",
                         self.id
                     );
-                    let _ = self
-                        .resolver
-                        .register_committed_transactions(vec![self.id])
-                        .await;
+
+                    // Spawn async and don't wait for it to complete.
+                    let resolver = self.resolver.clone();
+                    let tx_id = self.id;
+                    self.runtime.spawn(async move {
+                        let _ = resolver.register_committed_transactions(vec![tx_id]).await;
+                    });
                 }
                 info!("COMMIT OF TRANSACTION {:?} DONE!", self.id);
             }

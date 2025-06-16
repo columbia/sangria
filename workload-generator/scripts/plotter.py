@@ -10,26 +10,50 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 pio.kaleido.scope.mathjax = None
 
-colors = [
-    "red",  # "rgba(255, 0, 0, 0.4)",
-    "blue",  # "rgba(0, 0, 255, 0.4)",
-    "green",  # "rgba(0, 128, 0, 0.4)",
-    "orange",  # "rgba(255, 165, 0, 0.4)",
-    "purple",  # "rgba(128, 0, 128, 0.4)",
-    "brown",  # "rgba(165, 42, 42, 0.4)",
-    "pink",  # "rgba(255, 192, 203, 0.4)",
-    "gray",  # "rgba(128, 128, 128, 0.4)"
-]
-markers = [
-    "circle",
-    "square",
-    "diamond",
-    "triangle-up",
-    "triangle-down",
-    "star",
-    "x",
-    "circle-open",
-]
+
+def create_color_map(df, key):
+    unique_keys = get_unique_key_values(df, key)
+    unique_keys = sorted(unique_keys)
+
+    colors = {
+        "Traditional": "blue",
+        "Pipelined": [
+            # "rgba(255, 0, 0, 0.2)",
+            # "rgba(255, 0, 0, 0.4)",
+            # "rgba(255, 0, 0, 0.6)",
+            # "rgba(255, 0, 0, 0.8)",
+            "red",
+        ],
+        "Adaptive": [
+            # "rgba(0, 128, 0, 0.2)",
+            # "rgba(0, 128, 0, 0.4)",
+            # "rgba(0, 128, 0, 0.6)",
+            # "rgba(0, 128, 0, 0.8)",
+            "green",
+        ],
+    }
+
+    color_map = {}
+    for key in unique_keys:
+        if key.endswith("Pipelined"):
+            color_map[key] = colors["Pipelined"].pop(0)
+        elif key.endswith("Adaptive"):
+            color_map[key] = colors["Adaptive"].pop(0)
+        else:
+            color_map[key] = colors["Traditional"]
+    return color_map
+
+
+# markers = [
+#     "circle",
+#     "square",
+#     "diamond",
+#     "triangle-up",
+#     "triangle-down",
+#     "star",
+#     "x",
+#     "circle-open",
+# ]
 
 
 def make_plots(
@@ -80,6 +104,20 @@ def make_plots(
                 row=i + 1,
                 col=j + 1,
             )
+            fig.add_annotation(
+                text=f"<b>{args.get('title')}</b>" if args.get("title") else "",
+                xref="paper",
+                yref="paper",
+                x=0,
+                y=args.get("y_range")[1],
+                showarrow=False,
+                font=dict(size=20),
+                # align="center",
+                xanchor="left",
+                yanchor="top",
+                row=i + 1,
+                col=j + 1,
+            )
 
     fig.update_layout(
         legend={
@@ -113,8 +151,8 @@ def line(df, x, y, key=None, showlegend=True, **kwargs) -> List[go.Scatter]:
     unique_keys = get_unique_key_values(df, key)
     unique_keys = sorted(unique_keys)
 
-    color_map = {key: color for key, color in zip(unique_keys, colors)}
-    marker_map = {key: marker for key, marker in zip(unique_keys, markers)}
+    color_map = create_color_map(df, key)
+    # marker_map = {key: marker for key, marker in zip(unique_keys, markers)}
 
     traces = []
     for i, unique_key in enumerate(unique_keys):
@@ -128,7 +166,7 @@ def line(df, x, y, key=None, showlegend=True, **kwargs) -> List[go.Scatter]:
             legendgrouptitle=dict(text=key) if i == 0 else None,
             mode="lines+markers",
             marker_color=color_map[unique_key],
-            marker_symbol=marker_map[unique_key],
+            # marker_symbol=marker_map[unique_key],
             marker_size=10,
         )
         traces.append(trace)
@@ -148,7 +186,7 @@ def bar(
     unique_keys = get_unique_key_values(df, key)
     unique_keys = sorted(unique_keys)
 
-    color_map = {key: color for key, color in zip(unique_keys, colors)}
+    color_map = create_color_map(df, key)
 
     traces = []
     for i, unique_key in enumerate(unique_keys):
@@ -172,7 +210,7 @@ def cdf(df, cumvalues, group_sizes, showlegend=True, **kwargs):
 
     baselines = get_unique_key_values(df, "baseline")
     baselines = sorted(baselines)
-    color_map = {key: color for key, color in zip(baselines, colors)}
+    color_map = create_color_map(df, "baseline")
 
     traces = []
     for i, baseline in enumerate(baselines):

@@ -1,10 +1,10 @@
 {
-    "num-keys": 3, 
-    "max-concurrency": 28,
-    "num-queries": 10,
-    "zipf-exponent": 0.0, 
-    "namespace": "mr"    , 
+    "num_keys": 50, 
+    "max_concurrency": 20,
+    "num_queries": 10,
+    "zipf_exponent": 0.0, 
+    "namespace": "holy", 
     "name": "avocado",
-    "background-runtime-core-ids": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
+    "background_runtime_core_ids": [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
     "seed": 1234567890
 }

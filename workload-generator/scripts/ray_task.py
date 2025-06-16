@@ -56,11 +56,17 @@ def run_workload(config):
     global atomix_setup
 
     iteration = config["iteration"]
-    cpu_percentage = config["cpu_percentage"]
     baseline = config["baseline"]
+    resolver_background_runtime_core_ids = config["resolver_capacity"][
+        "background_runtime_core_ids"
+    ]
+    resolver_cpu_percentage = config["resolver_capacity"]["cpu_percentage"]
+    resolver_cores = config["resolver_cores"]
+
     del config["iteration"]
     del config["baseline"]
-    del config["cpu_percentage"]
+    del config["resolver_capacity"]
+    del config["resolver_cores"]
 
     cmd = [
         TARGET_RUN_CMD + "workload-generator",
@@ -72,7 +78,12 @@ def run_workload(config):
 
     if iteration == 0:
         atomix_setup.servers_config["commit_strategy"] = baseline
-        atomix_setup.servers_config["resolver"]["cpu_percentage"] = cpu_percentage
+        atomix_setup.servers_config["resolver"][
+            "cpu_percentage"
+        ] = resolver_cpu_percentage
+        atomix_setup.servers_config["resolver"][
+            "background_runtime_core_ids"
+        ] = resolver_background_runtime_core_ids
         atomix_setup.dump_servers_config()
         atomix_setup.kill_servers()
         atomix_setup.reset_cassandra()
@@ -88,7 +99,7 @@ def run_workload(config):
     # Add back the config params so that they are reported by ray
     config["iteration"] = iteration
     config["baseline"] = baseline
-    config["cpu_percentage"] = cpu_percentage
+    config["resolver_cores"] = resolver_cores
 
     print(cmd)
     # Run the workload generator with timeout
@@ -102,7 +113,7 @@ def run_workload(config):
             env={**os.environ, "RUST_LOG": "error"},
         )
         try:
-            stdout, stderr = process.communicate(timeout=60 * 10)  # 10 minutes timeout
+            stdout, stderr = process.communicate(timeout=60 * 60)  # 60 minutes timeout
             print(stderr)
             metrics = parse_metrics(stdout)
         except subprocess.TimeoutExpired:

@@ -25,7 +25,7 @@ ADAPTIVE = "Adaptive"
 os.environ["RAY_AIR_NEW_OUTPUT"] = "0"
 
 
-def plot_results_df(experiment_name, fixed_params):
+def plot_results_df(experiment_name, fixed_params, free_params):
     cmd = [
         "python",
         str(WORKLOAD_GENERATOR_DIR / "scripts" / "plot_experiments.py"),
@@ -33,6 +33,8 @@ def plot_results_df(experiment_name, fixed_params):
         experiment_name,
         "--fixed-params",
         ",".join([f"{k}={v}" for k, v in fixed_params.items()]),
+        "--free-params",
+        free_params,
     ]
     print(" ".join(cmd))
     subprocess.run(cmd)

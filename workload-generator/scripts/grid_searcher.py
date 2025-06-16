@@ -20,11 +20,12 @@ class GridSearcherInOrder(Searcher):
         self.atomix_setup = atomix_setup
         self.param_keys = list(param_grid.keys())
         self.param_values = list(param_grid.values())
-        self.param_keys.append("seed")
-        self.param_keys.append("iteration")
+        self.param_keys += ["seed", "iteration"]
 
         # Each iteration should have a different seed
-        self.seeds = [random.randint(0, 1000000000) for _ in range(self.num_iterations)]
+        # self.seeds = [random.randint(0, 1000000000) for _ in range(self.num_iterations)]
+        start_seed = 1234567890
+        self.seeds = [start_seed + i * 10 for i in range(self.num_iterations)]
 
         self.grid = list(itertools.product(*self.param_values))
         self.grid = [
@@ -41,6 +42,11 @@ class GridSearcherInOrder(Searcher):
             return None
         values = self.trial_queue.pop(0)
         config = dict(zip(self.param_keys, values))
+        resolver_capacity = config["resolver_capacity"]
+        config["resolver_cores"] = (
+            len(resolver_capacity["background_runtime_core_ids"])
+            * resolver_capacity["cpu_percentage"]
+        )
         print(colored(f"Config: {config}", "blue"))
         self.trial_map[trial_id] = config
         return config

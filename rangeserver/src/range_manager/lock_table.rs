@@ -93,7 +93,7 @@ impl LockTable {
         r
     }
 
-    pub async fn is_contended(&self) -> bool {
+    pub async fn get_num_waiters(&self) -> u32 {
         let state = self.state.read().await;
         info!(
             "{}",
@@ -103,7 +103,7 @@ impl LockTable {
             )
             .purple()
         );
-        !state.waiting_to_acquire.is_empty()
+        state.waiting_to_acquire.len() as u32
     }
 
     pub async fn acquire(&self, tx: Arc<TransactionInfo>) -> Result<oneshot::Receiver<()>, Error> {
