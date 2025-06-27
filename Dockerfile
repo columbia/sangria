@@ -162,6 +162,16 @@ COPY --from=builder /atomix_build/target/release/frontend /usr/bin/frontend
 COPY --from=builder /atomix_build/target/release/frontend /usr/bin/atomix
 
 ###############################################################################
+# resolver ####################################################################
+###############################################################################
+
+FROM node AS resolver
+
+# Copy the built executable from the builder stage
+COPY --from=builder /atomix_build/target/release/resolver /usr/bin/resolver
+COPY --from=builder /atomix_build/target/release/resolver /usr/bin/atomix
+
+###############################################################################
 # cassandra ###################################################################
 ###############################################################################
 FROM cassandra:5.0 AS cassandra-client
