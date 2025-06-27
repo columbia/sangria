@@ -20,8 +20,8 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
     namespace, name = generate_slug(2).split("-")
     experiment_name = f"{namespace}_{name}"
 
-    BASELINES = [TRADITIONAL, PIPELINED]
-    # BASELINES = [PIPELINED]
+    # BASELINES = [ADAPTIVE, TRADITIONAL, PIPELINED]
+    BASELINES = [PIPELINED]
 
     NUM_ITERATIONS = 2
     NUM_QUERIES = [2500]
@@ -31,25 +31,39 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
     # MAX_CONCURRENCY = [200]
 
     NUM_KEYS = [50]
-    MAX_CONCURRENCY = [1, 5, 10, 25, 50, 100, 200]
+    # MAX_CONCURRENCY = [1, 5, 10, 25, 50, 100, 200]
+    MAX_CONCURRENCY = [5]
 
     RESOLVER_CAPACITY = [
+        # {
+        #     "cpu_percentage": 1,
+        #     "background_runtime_core_ids": list(range(5, 32)),
+        # },
         {
             "cpu_percentage": 1,
-            "background_runtime_core_ids": list(range(5, 32)),
-        },
-        {
-            "cpu_percentage": 1,
             "background_runtime_core_ids": [4],
         },
+        # {
+        #     "cpu_percentage": 0.5,
+        #     "background_runtime_core_ids": [4],
+        # },
+        # {
+        #     "cpu_percentage": 0.1,
+        #     "background_runtime_core_ids": [4],
+        # },
+    ]
+
+    # Second workload generator with configurable tx load
+    RESOLVER_TX_LOAD = [
         {
-            "cpu_percentage": 0.5,
-            "background_runtime_core_ids": [4],
+            "max_concurrency": 0,   # 0 extra load
+            "num_queries": None,
+            "num_keys": 50,
         },
-        {
-            "cpu_percentage": 0.1,
-            "background_runtime_core_ids": [4],
-        },
+        # {
+        #     "max_concurrency": 100000,   # super extra load
+        #     "num_queries": None,
+        # }
     ]
 
     config = {
@@ -57,6 +71,7 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
         "num_keys": NUM_KEYS,
         "max_concurrency": MAX_CONCURRENCY,
         "resolver_capacity": RESOLVER_CAPACITY,
+        "resolver_tx_load": RESOLVER_TX_LOAD,
         "num_queries": NUM_QUERIES,
         "zipf_exponent": [0],
         "namespace": [namespace],
@@ -72,6 +87,7 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
             "max_concurrency",
             "iteration",
             "resolver_cores",
+            "resolver_tx_load_concurrency",
             "num_queries",
         ],
         max_report_frequency=20,
@@ -80,8 +96,10 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
         config["baseline"] = [baseline]
         if baseline == TRADITIONAL:
             config["resolver_capacity"] = [RESOLVER_CAPACITY[0]]
+            config["resolver_tx_load"] = [RESOLVER_TX_LOAD[0]]
         elif baseline == PIPELINED or baseline == ADAPTIVE:
             config["resolver_capacity"] = RESOLVER_CAPACITY
+            config["resolver_tx_load"] = RESOLVER_TX_LOAD
 
         analysis = tune.run(
             tune.with_parameters(run_workload),
@@ -107,7 +125,7 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
         # "max_concurrency": MAX_CONCURRENCY[0],
         "num_keys": NUM_KEYS[0],
     }
-    free_params = "resolver_cores,max_concurrency"
+    free_params = "resolver_tx_load_concurrency, max_concurrency"
     plot_results_df(experiment_name, fixed_params, free_params)
     ray.shutdown()
 

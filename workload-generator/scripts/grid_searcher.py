@@ -47,6 +47,7 @@ class GridSearcherInOrder(Searcher):
             len(resolver_capacity["background_runtime_core_ids"])
             * resolver_capacity["cpu_percentage"]
         )
+        config["resolver_tx_load_concurrency"] = config["resolver_tx_load"]["max_concurrency"]
         print(colored(f"Config: {config}", "blue"))
         self.trial_map[trial_id] = config
         return config

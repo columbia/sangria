@@ -62,16 +62,35 @@ def run_workload(config):
     ]
     resolver_cpu_percentage = config["resolver_capacity"]["cpu_percentage"]
     resolver_cores = config["resolver_cores"]
+    resolver_tx_load_concurrency = config["resolver_tx_load_concurrency"]
+    resolver_tx_load_num_queries = config["resolver_tx_load"]["num_queries"]
+    resolver_tx_load_num_keys = config["resolver_tx_load"]["num_keys"]
+    main_num_keys = config["num_keys"]
+    main_max_concurrency = config["max_concurrency"]
+    main_num_queries = config["num_queries"]
+    main_name = config["name"]
 
     del config["iteration"]
     del config["baseline"]
     del config["resolver_capacity"]
     del config["resolver_cores"]
+    del config["resolver_tx_load_concurrency"]
+    del config["resolver_tx_load_num_queries"]
+    del config["resolver_tx_load_num_keys"]
 
-    cmd = [
+    # Main workload generator -- used to collect performance metrics
+    cmd1 = [
         TARGET_RUN_CMD + "workload-generator",
         "--workload-config",
-        str(RAY_WORKLOAD_CONFIG_PATH),
+        str(MAIN_RAY_WORKLOAD_CONFIG_PATH),
+        "--config",
+        str(RAY_SERVERS_CONFIG_PATH),
+    ]
+    # Secondary workload generator -- used to overload the resolver with txs
+    cmd2 = [
+        TARGET_RUN_CMD + "workload-generator",
+        "--workload-config",
+        str(SECONDARY_RAY_WORKLOAD_CONFIG_PATH),
         "--config",
         str(RAY_SERVERS_CONFIG_PATH),
     ]
@@ -89,39 +108,83 @@ def run_workload(config):
         atomix_setup.reset_cassandra()
         atomix_setup.start_servers()
 
-        # Create a temporary config file with the current parameters
-        os.makedirs(os.path.dirname(RAY_WORKLOAD_CONFIG_PATH), exist_ok=True)
-        with open(RAY_WORKLOAD_CONFIG_PATH, "w") as f:
+        # Create a temporary config file with the parameters of the main workload generator
+        os.makedirs(os.path.dirname(MAIN_RAY_WORKLOAD_CONFIG_PATH), exist_ok=True)
+        with open(MAIN_RAY_WORKLOAD_CONFIG_PATH, "w") as f:
             json.dump(config, f)
+        cmd1.append("--create-keyspace")
 
-        cmd.append("--create-keyspace")
+        # Create a temporary config file with the parameters of the secondary workload generator
+        config["max_concurrency"] = resolver_tx_load_concurrency
+        config["num_queries"] = resolver_tx_load_num_queries
+        config["num_keys"] = resolver_tx_load_num_keys
+        config["name"] = f"{main_name}-2"
+        os.makedirs(os.path.dirname(SECONDARY_RAY_WORKLOAD_CONFIG_PATH), exist_ok=True)
+        with open(SECONDARY_RAY_WORKLOAD_CONFIG_PATH, "w") as f:
+            json.dump(config, f)
+        cmd2.append("--create-keyspace")
+        config["max_concurrency"] = main_max_concurrency
+        config["num_queries"] = main_num_queries
+        config["num_keys"] = main_num_keys
+        config["name"] = main_name
 
     # Add back the config params so that they are reported by ray
     config["iteration"] = iteration
     config["baseline"] = baseline
     config["resolver_cores"] = resolver_cores
+    config["resolver_tx_load_concurrency"] = resolver_tx_load_concurrency
+    print("cmd1: ", cmd1)
+    print("cmd2: ", cmd2)
 
-    print(cmd)
-    # Run the workload generator with timeout
     try:
-        process = subprocess.Popen(
-            cmd,
+        process2 = None
+        if resolver_tx_load_concurrency > 0:
+            process2 = subprocess.Popen(
+                cmd2,
+                cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env={**os.environ, "RUST_LOG": "error"},
+            )
+        
+        process1 = subprocess.Popen(
+            cmd1,
             cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             env={**os.environ, "RUST_LOG": "error"},
         )
+        
         try:
-            stdout, stderr = process.communicate(timeout=60 * 60)  # 60 minutes timeout
-            print(stderr)
-            metrics = parse_metrics(stdout)
+            # Wait for the main workload generator to finish
+            stdout1, stderr1 = process1.communicate(timeout=60 * 60)  # 60 minutes timeout
+            print(stderr1)
+            metrics = parse_metrics(stdout1)
+            
+            # Send interrupt signal to the secondary workload generator
+            if process2:
+                process2.send_signal(subprocess.signal.SIGINT)
+            
+            # Wait a bit for graceful shutdown, then force kill if needed
+            try:
+                if process2:
+                    process2.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                if process2:
+                    process2.kill()
+                print("Force killed secondary workload generator")
+                
         except subprocess.TimeoutExpired:
-            process.kill()
+            process1.kill()
+            if process2:
+                process2.kill()
             print(f"Timeout exceeded for config: {config}")
             metrics = {"throughput": 0.0}
+            
     except Exception as e:
-        print(f"Error running workload: {e}")
+        print(f"Error running workloads: {e}")
         metrics = {"throughput": 0.0}
 
     # tune.report(metrics)

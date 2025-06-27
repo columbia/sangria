@@ -264,10 +264,8 @@ where
                                 TransactionAbortReason::TransactionLockLost,
                             ));
                         }
-                        // TODO: Should I leave an entry in the PendingCommitTable for this transaction here?
-                        // Probably not, since this is a read-only transaction and future reads or writes should not depend on its success.
+                        // TODO: I should leave an entry in the PendingCommitTable for this transaction too - it needs to wait for its dependencies to be resolved too.
                         // state.pending_commit_table.write().await.insert(key, tx.id);
-                        // TODO: Make sure somehow we don't call the commit method for read-only transactions.
                         state.lock_table.release().await;
                     }
 

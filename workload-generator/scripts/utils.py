@@ -8,8 +8,11 @@ SERVERS_CONFIG_PATH = ROOT_DIR / "configs" / "config.json"
 WORKLOAD_GENERATOR_DIR = ROOT_DIR / "workload-generator"
 RAY_LOGS_DIR = WORKLOAD_GENERATOR_DIR / "experiments" / "ray_logs"
 RAY_SERVERS_CONFIG_PATH = WORKLOAD_GENERATOR_DIR / "configs" / "config-ray.json"
-RAY_WORKLOAD_CONFIG_PATH = (
-    WORKLOAD_GENERATOR_DIR / "configs" / "workload-config-ray.json"
+MAIN_RAY_WORKLOAD_CONFIG_PATH = (
+    WORKLOAD_GENERATOR_DIR / "configs" / "workload-config-ray-main.json"
+)
+SECONDARY_RAY_WORKLOAD_CONFIG_PATH = (
+    WORKLOAD_GENERATOR_DIR / "configs" / "workload-config-ray-secondary.json"
 )
 
 TARGET_RUN_CMD = str(ROOT_DIR) + "/target/release/"

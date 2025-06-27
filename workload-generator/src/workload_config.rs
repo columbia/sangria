@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Deserialize, Serialize)]
 pub struct WorkloadConfig {
     #[serde(rename = "num_queries")]
-    pub num_queries: u64,
+    pub num_queries: Option<u64>,
     #[serde(rename = "num_keys")]
     pub num_keys: u64,
     #[serde(rename = "zipf_exponent")]

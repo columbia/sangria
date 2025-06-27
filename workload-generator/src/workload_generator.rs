@@ -165,7 +165,7 @@ impl WorkloadGenerator {
         info!("Starting workload");
         let max_concurrency = min(
             self.workload_config.max_concurrency,
-            self.workload_config.num_queries,
+            self.workload_config.num_queries.unwrap_or(u64::MAX),
         );
         let semaphore = Arc::new(Semaphore::new(max_concurrency as usize));
 
@@ -180,7 +180,7 @@ impl WorkloadGenerator {
             tokio::select! {
                 Ok(permit) = semaphore.clone().acquire_owned() => {
                     task_counter += 1;
-                    if task_counter > self.workload_config.num_queries {
+                    if task_counter > self.workload_config.num_queries.unwrap_or(u64::MAX) {
                         drop(permit);
                         break;
                     }
