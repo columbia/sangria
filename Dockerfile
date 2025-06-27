@@ -1,6 +1,6 @@
 
 # Configuration variables
-ARG RUST_VERSION=1.81
+ARG RUST_VERSION=1.86.0
 ARG FLATBUFFERS_VERSION=23.5.26
 # Set BUILD_TYPE to 'jepsen' to build the jepsen-specific version of Atomix.
 ARG BUILD_TYPE=release
