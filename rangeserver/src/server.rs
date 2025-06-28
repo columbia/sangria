@@ -458,26 +458,26 @@ where
                 let prepare_result = self.prepare_inner(request).await;
 
                 // Construct the response.
-                let (status, epoch_lease, highest_known_epoch, dependencies, released_lock_early) = match prepare_result
-                {
-                    Err(e) => (e.to_flatbuf_status(), None, 0, Vec::new(), false),
-                    Ok(prepare_result) => {
-                        let epoch_lease = Some(EpochLease::create(
-                            &mut fbb,
-                            &EpochLeaseArgs {
-                                lower_bound_inclusive: prepare_result.epoch_lease.0,
-                                upper_bound_inclusive: prepare_result.epoch_lease.1,
-                            },
-                        ));
-                        (
-                            Status::Ok,
-                            epoch_lease,
-                            prepare_result.highest_known_epoch,
-                            prepare_result.dependencies,
-                            prepare_result.released_lock_early,
-                        )
-                    }
-                };
+                let (status, epoch_lease, highest_known_epoch, dependencies, released_lock_early) =
+                    match prepare_result {
+                        Err(e) => (e.to_flatbuf_status(), None, 0, Vec::new(), false),
+                        Ok(prepare_result) => {
+                            let epoch_lease = Some(EpochLease::create(
+                                &mut fbb,
+                                &EpochLeaseArgs {
+                                    lower_bound_inclusive: prepare_result.epoch_lease.0,
+                                    upper_bound_inclusive: prepare_result.epoch_lease.1,
+                                },
+                            ));
+                            (
+                                Status::Ok,
+                                epoch_lease,
+                                prepare_result.highest_known_epoch,
+                                prepare_result.dependencies,
+                                prepare_result.released_lock_early,
+                            )
+                        }
+                    };
                 let dependencies_vector: Vec<_> = dependencies
                     .into_iter()
                     .map(|dep| Uuidu128::create(&mut fbb, &util::flatbuf::serialize_uuid(dep)))

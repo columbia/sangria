@@ -9,6 +9,15 @@ pub struct ParticipantRangeInfo {
     pub has_writes: bool,
 }
 
+impl ParticipantRangeInfo {
+    pub fn new(participant_range: FullRangeId, has_writes: bool) -> Self {
+        ParticipantRangeInfo {
+            participant_range,
+            has_writes,
+        }
+    }
+}
+
 impl From<ParticipantRangeInfo> for ProtoParticipantRangeInfo {
     fn from(info: ParticipantRangeInfo) -> Self {
         ProtoParticipantRangeInfo {

@@ -62,6 +62,7 @@ impl ResolverClientTrait for ResolverClient {
                 .iter()
                 .map(|info| ProtoParticipantRangeInfo::from(info.clone()))
                 .collect(),
+            fake: false,
         };
         let mut client = self.client.clone();
         let response = client.commit(request).await.unwrap();

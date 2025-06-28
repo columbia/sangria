@@ -19,15 +19,17 @@ pub struct TransactionInfo {
     pub num_dependencies: u32,
     pub dependents: HashSet<Uuid>,
     pub participant_ranges_info: Vec<ParticipantRangeInfo>,
+    pub fake: bool,
 }
 
 impl TransactionInfo {
-    pub fn default(id: Uuid) -> Self {
+    pub fn default(id: Uuid, fake: bool) -> Self {
         TransactionInfo {
             id,
             num_dependencies: 0,
             dependents: HashSet::new(),
             participant_ranges_info: Vec::new(),
+            fake,
         }
     }
 }
@@ -66,6 +68,7 @@ impl Resolver {
         transaction_id: Uuid,
         dependencies: HashSet<Uuid>,
         participant_ranges_info: Vec<ParticipantRangeInfo>,
+        fake: bool,
     ) -> Result<(), Error> {
         // A transaction that is read-only across all participant ranges will
         // not have a commit phase and so we also ignore any dependencies it may have
@@ -88,7 +91,7 @@ impl Resolver {
                     state
                         .info_per_transaction
                         .entry(dependency)
-                        .or_insert(TransactionInfo::default(dependency))
+                        .or_insert(TransactionInfo::default(dependency, fake))
                         .dependents
                         .insert(transaction_id);
                 } else {
@@ -102,7 +105,7 @@ impl Resolver {
             let transaction_info = state
                 .info_per_transaction
                 .entry(transaction_id)
-                .or_insert(TransactionInfo::default(transaction_id));
+                .or_insert(TransactionInfo::default(transaction_id, fake));
 
             transaction_info.num_dependencies = num_pending_dependencies;
             transaction_info.participant_ranges_info = participant_ranges_info;

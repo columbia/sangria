@@ -192,8 +192,8 @@ def main():
     df_traditional = plotter.results[plotter.results["baseline"] == "Traditional"]
     df = plotter.results[plotter.results["baseline"] != "Traditional"]
 
-    for resolver_cores in get_unique_key_values(df, "resolver_cores"):
-        df_traditional["resolver_cores"] = resolver_cores
+    for resolver_cores in get_unique_key_values(df, "resolver_tx_load_concurrency"):
+        df_traditional["resolver_tx_load_concurrency"] = resolver_cores
         df = pd.concat([df, copy.deepcopy(df_traditional)])
     plotter.results = df
 

@@ -31,3 +31,5 @@ clap = { version = "4.5", features = ["derive"] }
 core_affinity = "0.7.0"
 hex = "0.4"
 tx_state_store = { version = "0.1.0", path = "../tx_state_store" }
+affinity = "0.1.2"
+nix = { version = "0.27.1", features = ["sched"] }

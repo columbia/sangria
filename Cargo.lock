@@ -1603,6 +1603,7 @@ checksum = "7a66a03ae7c801facd77a29370b4faec201768915ac14a721ba36f20bc9c209b"
 name = "resolver"
 version = "0.1.0"
 dependencies = [
+ "affinity",
  "async-trait",
  "bytes",
  "chrono",
@@ -1612,6 +1613,7 @@ dependencies = [
  "core_affinity",
  "flatbuffers",
  "hex",
+ "nix",
  "num_cpus",
  "once_cell",
  "portpicker",
@@ -2584,6 +2586,8 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 name = "workload-generator"
 version = "0.1.0"
 dependencies = [
+ "affinity",
+ "async-trait",
  "bytes",
  "clap",
  "colored",
@@ -2591,9 +2595,11 @@ dependencies = [
  "core_affinity",
  "frontend",
  "futures",
+ "nix",
  "num_cpus",
  "proto",
  "rand",
+ "resolver",
  "serde",
  "serde_json",
  "tokio",

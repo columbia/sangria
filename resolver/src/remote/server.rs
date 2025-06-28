@@ -45,6 +45,7 @@ impl ProtoResolver for ProtoServer {
             transaction_id,
             dependencies,
             participant_ranges_info,
+            request.fake,
         )
         .await;
 

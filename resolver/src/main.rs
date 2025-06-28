@@ -64,39 +64,39 @@ fn main() {
     }
     restrict_to_cores(&background_runtime_cores);
 
-    // Set CPU limit for the process.
-    let limited_cgroup_path = "/sys/fs/cgroup/limited_cpu";
-    create_dir_all(limited_cgroup_path).unwrap();
+    // // Set CPU limit for the process.
+    // let limited_cgroup_path = "/sys/fs/cgroup/limited_cpu";
+    // create_dir_all(limited_cgroup_path).unwrap();
 
-    let period = 100_000u32;
-    let quota =
-        (config.resolver.cpu_percentage * period as f32 * background_runtime_cores.len() as f32)
-            .round() as u32;
-    // let quota = (config.resolver.cpu_percentage * period as f32).round() as u32;
-    let cpu_max_value = format!("{} {}", quota, period);
-    info!(
-        "Setting CPU limit to {}%",
-        config.resolver.cpu_percentage * 100.0
-    );
-    std::process::Command::new("sudo")
-        .arg("sh")
-        .arg("-c")
-        .arg(format!(
-            "echo {} > {}/cpu.max",
-            cpu_max_value, limited_cgroup_path
-        ))
-        .output()
-        .unwrap();
-    std::process::Command::new("sudo")
-        .arg("sh")
-        .arg("-c")
-        .arg(format!(
-            "echo {} > {}/cgroup.procs",
-            std::process::id(),
-            limited_cgroup_path
-        ))
-        .output()
-        .unwrap();
+    // let period = 100_000u32;
+    // let quota =
+    //     (config.resolver.cpu_percentage * period as f32 * background_runtime_cores.len() as f32)
+    //         .round() as u32;
+    // // let quota = (config.resolver.cpu_percentage * period as f32).round() as u32;
+    // let cpu_max_value = format!("{} {}", quota, period);
+    // info!(
+    //     "Setting CPU limit to {}%",
+    //     config.resolver.cpu_percentage * 100.0
+    // );
+    // std::process::Command::new("sudo")
+    //     .arg("sh")
+    //     .arg("-c")
+    //     .arg(format!(
+    //         "echo {} > {}/cpu.max",
+    //         cpu_max_value, limited_cgroup_path
+    //     ))
+    //     .output()
+    //     .unwrap();
+    // std::process::Command::new("sudo")
+    //     .arg("sh")
+    //     .arg("-c")
+    //     .arg(format!(
+    //         "echo {} > {}/cgroup.procs",
+    //         std::process::id(),
+    //         limited_cgroup_path
+    //     ))
+    //     .output()
+    //     .unwrap();
     // ------------------------------------- / Cores Configuration -------------------------------------
 
     let runtime = Builder::new_current_thread().enable_all().build().unwrap();

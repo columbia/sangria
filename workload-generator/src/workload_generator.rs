@@ -1,4 +1,7 @@
-use crate::{transaction::Transaction, workload_config::WorkloadConfig};
+use crate::{
+    transaction::Transaction, transaction_impl::fake_transaction::FakeTransaction,
+    transaction_impl::rw_transaction::RwTransaction, workload_config::WorkloadConfig,
+};
 use colored::Colorize;
 use common::{
     keyspace::Keyspace,
@@ -19,10 +22,11 @@ use std::{
 };
 use tokio::{
     runtime::Handle,
-    sync::{Mutex, Semaphore},
+    sync::{Mutex, RwLock, Semaphore},
     task::JoinSet,
 };
 use tracing::{error, info};
+use uuid::Uuid;
 
 // Add a struct to hold our metrics
 #[derive(Default, Debug)]
@@ -52,6 +56,7 @@ pub struct WorkloadGenerator {
     metrics: Arc<Mutex<InternalMetrics>>,
     value_per_key: Arc<Mutex<HashMap<usize, u64>>>, // For verification
     rng: Arc<Mutex<StdRng>>,
+    pending_commit_table: Arc<RwLock<HashMap<usize, Uuid>>>,
 }
 
 impl WorkloadGenerator {
@@ -72,6 +77,7 @@ impl WorkloadGenerator {
             metrics: Arc::new(Mutex::new(InternalMetrics::default())),
             value_per_key: Arc::new(Mutex::new(HashMap::new())),
             rng,
+            pending_commit_table: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -108,7 +114,7 @@ impl WorkloadGenerator {
         chosen_keys
     }
 
-    pub async fn generate_transaction(&self) -> Transaction {
+    pub async fn generate_transaction(&self) -> Arc<dyn Transaction + Send + Sync> {
         //  sample num_keys uniformly from {1, 2}
         let mut rng = self.rng.lock().await;
         let num_keys = rng.gen_range(1..3);
@@ -121,15 +127,26 @@ impl WorkloadGenerator {
         //     .map(|k| k as usize)
         //     .collect();
         // keys.sort();
-
-        Transaction::new(
-            Keyspace {
-                namespace: self.workload_config.namespace.clone(),
-                name: self.workload_config.name.clone(),
-            },
-            keys.clone(),
-            Some(keys),
-        )
+        let keyspace = Keyspace {
+            namespace: self.workload_config.namespace.clone(),
+            name: self.workload_config.name.clone(),
+        };
+        let transaction: Arc<dyn Transaction + Send + Sync> = match self
+            .workload_config
+            .fake_transactions
+        {
+            true => {
+                FakeTransaction::new(
+                    self.resolver_client.clone(),
+                    keyspace,
+                    keys.clone(),
+                    self.pending_commit_table.clone(),
+                )
+                .await
+            }
+            false => RwTransaction::new(self.client.clone(), keyspace, keys.clone(), Some(keys)),
+        };
+        transaction
     }
 
     pub async fn create_keyspace(&self) {
@@ -185,13 +202,11 @@ impl WorkloadGenerator {
                         break;
                     }
                     let next_task = self.generate_transaction().await;
-                    let mut client_clone = self.client.clone();
                     let metrics = self.metrics.clone();
                     let value_per_key = self.value_per_key.clone();
-
                     let join_handle = runtime_handle.spawn(async move {
                         let start_time = Instant::now();
-                        let result = next_task.execute(&mut client_clone, value_per_key).await;
+                        let result = next_task.execute(value_per_key).await;
                         let latency = start_time.elapsed();
 
                         // Record metrics
@@ -254,9 +269,7 @@ impl WorkloadGenerator {
             .unwrap();
         let response = response.into_inner();
         let mut stats_map = HashMap::new();
-        for (group_size, count) in response.stats {
-            stats_map.insert(group_size, count as usize);
-        }
+        for (group_size, count) in response.stats {}
         info!("Resolver stats: {:?}", stats_map);
 
         Metrics {

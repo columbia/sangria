@@ -802,7 +802,9 @@ where
                 // But for now, we just check the contention for the entire range based on how many transactions are currently waiting for the lock and return the same decision for all keys in the range.
                 match self.config.heuristic {
                     Heuristic::LockContention => {
-                        let resolver_cores = self.config.resolver.background_runtime_core_ids.len() as f32 * self.config.resolver.cpu_percentage;
+                        let resolver_cores = self.config.resolver.background_runtime_core_ids.len()
+                            as f32
+                            * self.config.resolver.cpu_percentage;
                         let waiters = state.lock_table.get_num_waiters().await;
                         if 0.0 <= resolver_cores && resolver_cores < 0.5 {
                             // avoid resolver
@@ -823,8 +825,7 @@ where
                             // Always go to Resolver
                             return true;
                         }
-                    }
-                    // Heuristic::Static => map(state.range_info.range_id) -> Yes or No,
+                    } // Heuristic::Static => map(state.range_info.range_id) -> Yes or No,
                 }
             }
         }

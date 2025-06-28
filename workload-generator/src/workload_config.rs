@@ -16,4 +16,6 @@ pub struct WorkloadConfig {
     pub seed: Option<u64>,
     #[serde(rename = "background_runtime_core_ids")]
     pub background_runtime_core_ids: Vec<u32>,
+    #[serde(rename = "fake_transactions")]
+    pub fake_transactions: bool,
 }

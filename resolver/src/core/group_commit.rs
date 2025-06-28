@@ -194,36 +194,39 @@ impl GroupCommit {
                     }
                     drop(group_clone);
 
-                    // TODO: Handle cascading aborts
-                    // TODO: Does order of tx_ids matter in the tx_state_store?
-                    // NOTE: A transaction will be recorded as committed in the tx_state_store once per every participant range it is part of.
-                    // Log all transactions of the group that are ready to commit as committed in the tx_state_store
-                    let tx_ids_vec = transactions.iter().map(|tx| tx.id).collect();
-                    tx_state_store_clone
-                        .try_batch_commit_transactions(&tx_ids_vec, 0)
-                        .await
-                        .unwrap();
+                    let fake = transactions.first().map(|tx| tx.fake).unwrap_or(false);
+                    if !fake {
+                        // TODO: Handle cascading aborts
+                        // TODO: Does order of tx_ids matter in the tx_state_store?
+                        // NOTE: A transaction will be recorded as committed in the tx_state_store once per every participant range it is part of.
+                        // Log all transactions of the group that are ready to commit as committed in the tx_state_store
+                        let tx_ids_vec = transactions.iter().map(|tx| tx.id).collect();
+                        tx_state_store_clone
+                            .try_batch_commit_transactions(&tx_ids_vec, 0)
+                            .await
+                            .unwrap();
 
-                    // Notify participant so that:
-                    // - it applies the TXs' PrepareRecords in storage
-                    // - and then quickly updates its PendingCommitTable to stop treating these transactions as dependencies for other transactions
-                    // info!("Committing transactions {:?} in range {:?}", participant_range_clone, participant_range_clone);
-                    if let Err(e) = range_client
-                        .commit_transactions(tx_ids_vec, &participant_range_clone, 0)
-                        .await
-                    {
-                        panic!(
-                            "Error committing transactions {:?}: {:?}",
-                            participant_range_clone, e
-                        );
-                    }
-                    {
-                        let mut stats = stats_clone.write().await;
-                        stats
-                            .committed_group_sizes
-                            .entry(format!("Group size: {}", transactions.len()))
-                            .and_modify(|count| *count += 1)
-                            .or_insert(1);
+                        // Notify participant so that:
+                        // - it applies the TXs' PrepareRecords in storage
+                        // - and then quickly updates its PendingCommitTable to stop treating these transactions as dependencies for other transactions
+                        // info!("Committing transactions {:?} in range {:?}", participant_range_clone, participant_range_clone);
+                        if let Err(e) = range_client
+                            .commit_transactions(tx_ids_vec, &participant_range_clone, 0)
+                            .await
+                        {
+                            panic!(
+                                "Error committing transactions {:?}: {:?}",
+                                participant_range_clone, e
+                            );
+                        }
+                        {
+                            let mut stats = stats_clone.write().await;
+                            stats
+                                .committed_group_sizes
+                                .entry(format!("Group size: {}", transactions.len()))
+                                .and_modify(|count| *count += 1)
+                                .or_insert(1);
+                        }
                     }
                     {
                         let mut returned_transactions = returned_transactions_clone.write().await;

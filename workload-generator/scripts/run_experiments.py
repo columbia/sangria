@@ -29,7 +29,6 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
     # NUM_KEYS = [1, 5, 10, 25, 50, 100, 200, 400, 600]
     # NUM_KEYS = [200, 400, 600]
     # MAX_CONCURRENCY = [200]
-
     NUM_KEYS = [50]
     # MAX_CONCURRENCY = [1, 5, 10, 25, 50, 100, 200]
     MAX_CONCURRENCY = [5]
@@ -56,15 +55,16 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
     # Second workload generator with configurable tx load
     RESOLVER_TX_LOAD = [
         {
-            "max_concurrency": 0,   # 0 extra load
+            "max_concurrency": 1,   # 0 extra load
             "num_queries": None,
-            "num_keys": 50,
+            "num_keys": 10,
+            "background_runtime_core_ids": [5],
         },
         # {
         #     "max_concurrency": 100000,   # super extra load
         #     "num_queries": None,
         # }
-    ]
+    ]   
 
     config = {
         "baseline": BASELINES,
@@ -76,7 +76,7 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
         "zipf_exponent": [0],
         "namespace": [namespace],
         "name": [name],
-        "background_runtime_core_ids": [list(range(5, 32))],
+        "background_runtime_core_ids": [list(range(6, 32))],
     }
 
     reporter = tune.CLIReporter(

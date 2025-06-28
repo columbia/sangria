@@ -62,21 +62,22 @@ def run_workload(config):
     ]
     resolver_cpu_percentage = config["resolver_capacity"]["cpu_percentage"]
     resolver_cores = config["resolver_cores"]
-    resolver_tx_load_concurrency = config["resolver_tx_load_concurrency"]
-    resolver_tx_load_num_queries = config["resolver_tx_load"]["num_queries"]
-    resolver_tx_load_num_keys = config["resolver_tx_load"]["num_keys"]
+    resolver_tx_load = config["resolver_tx_load"]
+    # resolver_tx_load_concurrency = config["resolver_tx_load_concurrency"]
+    # resolver_tx_load_num_queries = config["resolver_tx_load"]["num_queries"]
+    # resolver_tx_load_num_keys = config["resolver_tx_load"]["num_keys"]
     main_num_keys = config["num_keys"]
     main_max_concurrency = config["max_concurrency"]
     main_num_queries = config["num_queries"]
     main_name = config["name"]
+    main_background_runtime_core_ids = config["background_runtime_core_ids"]
 
     del config["iteration"]
     del config["baseline"]
     del config["resolver_capacity"]
     del config["resolver_cores"]
+    del config["resolver_tx_load"]
     del config["resolver_tx_load_concurrency"]
-    del config["resolver_tx_load_num_queries"]
-    del config["resolver_tx_load_num_keys"]
 
     # Main workload generator -- used to collect performance metrics
     cmd1 = [
@@ -109,38 +110,42 @@ def run_workload(config):
         atomix_setup.start_servers()
 
         # Create a temporary config file with the parameters of the main workload generator
+        config["fake_transactions"] = False
         os.makedirs(os.path.dirname(MAIN_RAY_WORKLOAD_CONFIG_PATH), exist_ok=True)
         with open(MAIN_RAY_WORKLOAD_CONFIG_PATH, "w") as f:
             json.dump(config, f)
         cmd1.append("--create-keyspace")
 
         # Create a temporary config file with the parameters of the secondary workload generator
-        config["max_concurrency"] = resolver_tx_load_concurrency
-        config["num_queries"] = resolver_tx_load_num_queries
-        config["num_keys"] = resolver_tx_load_num_keys
+        config["fake_transactions"] = True
+        config["max_concurrency"] = resolver_tx_load["max_concurrency"]
+        config["num_queries"] = resolver_tx_load["num_queries"]
+        config["num_keys"] = resolver_tx_load["num_keys"]
         config["name"] = f"{main_name}-2"
+        config["background_runtime_core_ids"] = resolver_tx_load["background_runtime_core_ids"]
         os.makedirs(os.path.dirname(SECONDARY_RAY_WORKLOAD_CONFIG_PATH), exist_ok=True)
         with open(SECONDARY_RAY_WORKLOAD_CONFIG_PATH, "w") as f:
             json.dump(config, f)
-        cmd2.append("--create-keyspace")
+        # cmd2.append("--create-keyspace")
         config["max_concurrency"] = main_max_concurrency
         config["num_queries"] = main_num_queries
         config["num_keys"] = main_num_keys
         config["name"] = main_name
+        config["background_runtime_core_ids"] = main_background_runtime_core_ids
 
     # Add back the config params so that they are reported by ray
     config["iteration"] = iteration
     config["baseline"] = baseline
     config["resolver_cores"] = resolver_cores
-    config["resolver_tx_load_concurrency"] = resolver_tx_load_concurrency
+    config["resolver_tx_load_concurrency"] = resolver_tx_load["max_concurrency"]
     print("cmd1: ", cmd1)
     print("cmd2: ", cmd2)
 
     try:
         process2 = None
-        if resolver_tx_load_concurrency > 0:
+        if resolver_tx_load["max_concurrency"] > 0:
             process2 = subprocess.Popen(
-                cmd2,
+                cmd2,   
                 cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

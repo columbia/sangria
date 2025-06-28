@@ -50,6 +50,7 @@ impl ResolverClientTrait for ResolverClient {
             transaction_id,
             dependencies,
             participant_ranges,
+            false,
         )
         .await
     }

@@ -357,9 +357,8 @@ impl Transaction {
                     let participants_info = self
                         .participant_ranges
                         .iter()
-                        .map(|(range_id, info)| ParticipantRangeInfo {
-                            participant_range: *range_id,
-                            has_writes: !info.writeset.is_empty(),
+                        .map(|(range_id, info)| {
+                            ParticipantRangeInfo::new(*range_id, !info.writeset.is_empty())
                         })
                         .collect();
                     self.resolver

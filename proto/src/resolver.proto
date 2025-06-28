@@ -29,6 +29,7 @@ message CommitRequest {
     string transaction_id = 1;
     repeated string dependencies = 2;
     repeated ParticipantRangeInfo participant_ranges = 3;
+    bool fake = 4;
 }
 
 message CommitResponse {
