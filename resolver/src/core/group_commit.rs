@@ -194,7 +194,11 @@ impl GroupCommit {
                     }
                     drop(group_clone);
 
-                    let fake = transactions.first().map(|tx| tx.fake).unwrap_or(false);
+                    if transactions.is_empty() {
+                        return Ok(());
+                    }
+
+                    let fake = transactions.first().map(|tx| tx.fake).unwrap();
                     if !fake {
                         // TODO: Handle cascading aborts
                         // TODO: Does order of tx_ids matter in the tx_state_store?

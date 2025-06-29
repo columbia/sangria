@@ -126,6 +126,7 @@ def run_workload(config):
         os.makedirs(os.path.dirname(SECONDARY_RAY_WORKLOAD_CONFIG_PATH), exist_ok=True)
         with open(SECONDARY_RAY_WORKLOAD_CONFIG_PATH, "w") as f:
             json.dump(config, f)
+        del config["fake_transactions"]
         # cmd2.append("--create-keyspace")
         config["max_concurrency"] = main_max_concurrency
         config["num_queries"] = main_num_queries
@@ -170,12 +171,12 @@ def run_workload(config):
             
             # Send interrupt signal to the secondary workload generator
             if process2:
-                process2.send_signal(subprocess.signal.SIGINT)
+                process2.send_signal(subprocess.signal.SIGUSR1)
             
             # Wait a bit for graceful shutdown, then force kill if needed
             try:
                 if process2:
-                    process2.wait(timeout=5)
+                    process2.wait(timeout=500)
             except subprocess.TimeoutExpired:
                 if process2:
                     process2.kill()

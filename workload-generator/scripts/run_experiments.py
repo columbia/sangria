@@ -31,7 +31,7 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
     # MAX_CONCURRENCY = [200]
     NUM_KEYS = [50]
     # MAX_CONCURRENCY = [1, 5, 10, 25, 50, 100, 200]
-    MAX_CONCURRENCY = [5]
+    MAX_CONCURRENCY = [100]
 
     RESOLVER_CAPACITY = [
         # {
@@ -55,14 +55,16 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
     # Second workload generator with configurable tx load
     RESOLVER_TX_LOAD = [
         {
-            "max_concurrency": 1,   # 0 extra load
+            "max_concurrency": 100,   # zero extra load
             "num_queries": None,
             "num_keys": 10,
             "background_runtime_core_ids": [5],
         },
         # {
-        #     "max_concurrency": 100000,   # super extra load
+        #     "max_concurrency": 1000000,   # super extra load
         #     "num_queries": None,
+        #     "num_keys": 10,
+        #     "background_runtime_core_ids": [5],
         # }
     ]   
 
@@ -125,7 +127,7 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
         # "max_concurrency": MAX_CONCURRENCY[0],
         "num_keys": NUM_KEYS[0],
     }
-    free_params = "resolver_tx_load_concurrency, max_concurrency"
+    free_params = "resolver_tx_load_concurrency,max_concurrency"
     plot_results_df(experiment_name, fixed_params, free_params)
     ray.shutdown()
 

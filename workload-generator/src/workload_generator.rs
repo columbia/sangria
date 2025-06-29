@@ -2,6 +2,8 @@ use crate::{
     transaction::Transaction, transaction_impl::fake_transaction::FakeTransaction,
     transaction_impl::rw_transaction::RwTransaction, workload_config::WorkloadConfig,
 };
+use tokio::signal;
+
 use colored::Colorize;
 use common::{
     keyspace::Keyspace,
@@ -27,6 +29,9 @@ use tokio::{
 };
 use tracing::{error, info};
 use uuid::Uuid;
+
+use tokio::signal::unix::{signal, SignalKind};
+
 
 // Add a struct to hold our metrics
 #[derive(Default, Debug)]
@@ -191,6 +196,8 @@ impl WorkloadGenerator {
             metrics.start_time = Some(Instant::now());
         }
 
+        let mut sigusr1_stream = signal(SignalKind::user_defined1()).unwrap();
+
         let mut task_counter = 0;
         let mut join_set = JoinSet::new();
         loop {
@@ -226,6 +233,11 @@ impl WorkloadGenerator {
                         error!("Task panicked: {:?}", e);
                     }
                 }
+                _ = sigusr1_stream.recv() => {
+                    println!("Received SIGUSR1, initiating shutdown");
+                    break;
+                }
+        
                 else => break,
             }
         }

@@ -27,6 +27,7 @@ CONFIG_PARAMS = [
     "zipf_exponent",
     "num_keys",
     "resolver_cores",
+    "resolver_tx_load_concurrency",
 ]
 
 
@@ -51,7 +52,6 @@ class Plotter:
         self, y: str, x: str, facet_row: str, fixed_params: Dict[str, int]
     ):
         results = self.process_results()
-
         keys_fixed = list(fixed_params.keys())
         df = results[[y, x, facet_row, "baseline", *keys_fixed]]
         for param, value in fixed_params.items():
@@ -192,8 +192,9 @@ def main():
     df_traditional = plotter.results[plotter.results["baseline"] == "Traditional"]
     df = plotter.results[plotter.results["baseline"] != "Traditional"]
 
-    for resolver_cores in get_unique_key_values(df, "resolver_tx_load_concurrency"):
-        df_traditional["resolver_tx_load_concurrency"] = resolver_cores
+    #  Didn't rerun traditional experiments for each value of resolver_tx_load_concurrency because it's invariant to it
+    for resolver_tx_load_concurrency in get_unique_key_values(df, "resolver_tx_load_concurrency"):
+        df_traditional["resolver_tx_load_concurrency"] = resolver_tx_load_concurrency
         df = pd.concat([df, copy.deepcopy(df_traditional)])
     plotter.results = df
 
