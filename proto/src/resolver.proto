@@ -5,6 +5,11 @@ service Resolver {
     rpc Commit(CommitRequest) returns (CommitResponse) {}
     rpc RegisterCommittedTransactions(RegisterCommittedTransactionsRequest) returns (RegisterCommittedTransactionsResponse) {}
     rpc GetStats(GetStatsRequest) returns (GetStatsResponse) {}
+    rpc GetStatus(GetStatusRequest) returns (GetStatusResponse) {}
+    rpc GetTransactionInfoStatus(GetTransactionInfoStatusRequest) returns (GetTransactionInfoStatusResponse) {}
+    rpc GetResolvedTransactionsStatus(GetResolvedTransactionsStatusRequest) returns (GetResolvedTransactionsStatusResponse) {}
+    rpc GetWaitingTransactionsStatus(GetWaitingTransactionsStatusRequest) returns (GetWaitingTransactionsStatusResponse) {}
+    rpc GetGroupCommitStatus(GetGroupCommitStatusRequest) returns (GetGroupCommitStatusResponse) {}
 }
 
 message RegisterCommittedTransactionsRequest {
@@ -41,4 +46,39 @@ message GetStatsRequest {
 
 message GetStatsResponse {
   map<string, int32> stats = 1;
+}
+
+message GetStatusRequest {
+}
+
+message GetStatusResponse {
+  string status = 1;
+}
+
+message GetTransactionInfoStatusRequest {
+}
+
+message GetTransactionInfoStatusResponse {
+  string status = 1;
+}
+
+message GetResolvedTransactionsStatusRequest {
+}
+
+message GetResolvedTransactionsStatusResponse {
+  string status = 1;
+}
+
+message GetWaitingTransactionsStatusRequest {
+}
+
+message GetWaitingTransactionsStatusResponse {
+  string status = 1;
+}
+
+message GetGroupCommitStatusRequest {
+}
+
+message GetGroupCommitStatusResponse {
+  string status = 1;
 }

@@ -39,6 +39,26 @@ impl ResolverClientTrait for ResolverClient {
         Resolver::get_stats(self.resolver.clone()).await
     }
 
+    async fn get_status(&self) -> String {
+        Resolver::get_status(self.resolver.clone()).await
+    }
+
+    async fn get_transaction_info_status(&self) -> String {
+        self.resolver.get_transaction_info_status().await
+    }
+
+    async fn get_resolved_transactions_status(&self) -> String {
+        self.resolver.get_resolved_transactions_status().await
+    }
+
+    async fn get_waiting_transactions_status(&self) -> String {
+        self.resolver.get_waiting_transactions_status().await
+    }
+
+    async fn get_group_commit_status(&self) -> String {
+        self.resolver.get_group_commit_status().await
+    }
+
     async fn commit(
         &self,
         transaction_id: Uuid,

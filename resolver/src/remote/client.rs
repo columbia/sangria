@@ -11,8 +11,11 @@ use common::config::Config;
 use coordinator_rangeclient::error::Error;
 use proto::resolver::resolver_client::ResolverClient as ProtoResolverClient;
 use proto::resolver::{
-    CommitRequest, GetStatsRequest, ParticipantRangeInfo as ProtoParticipantRangeInfo,
-    RegisterCommittedTransactionsRequest,
+    CommitRequest, GetGroupCommitStatusRequest, GetGroupCommitStatusResponse,
+    GetResolvedTransactionsStatusRequest, GetResolvedTransactionsStatusResponse, GetStatsRequest,
+    GetStatusRequest, GetTransactionInfoStatusRequest, GetTransactionInfoStatusResponse,
+    GetWaitingTransactionsStatusRequest, GetWaitingTransactionsStatusResponse,
+    ParticipantRangeInfo as ProtoParticipantRangeInfo, RegisterCommittedTransactionsRequest,
 };
 use std::collections::HashMap;
 
@@ -47,6 +50,48 @@ impl ResolverClientTrait for ResolverClient {
         Stats {
             committed_group_sizes,
         }
+    }
+
+    async fn get_status(&self) -> String {
+        let mut client = self.client.clone();
+        let response = client.get_status(GetStatusRequest {}).await.unwrap();
+        response.into_inner().status
+    }
+
+    async fn get_transaction_info_status(&self) -> String {
+        let mut client = self.client.clone();
+        let response = client
+            .get_transaction_info_status(GetTransactionInfoStatusRequest {})
+            .await
+            .unwrap();
+        response.into_inner().status
+    }
+
+    async fn get_resolved_transactions_status(&self) -> String {
+        let mut client = self.client.clone();
+        let response = client
+            .get_resolved_transactions_status(GetResolvedTransactionsStatusRequest {})
+            .await
+            .unwrap();
+        response.into_inner().status
+    }
+
+    async fn get_waiting_transactions_status(&self) -> String {
+        let mut client = self.client.clone();
+        let response = client
+            .get_waiting_transactions_status(GetWaitingTransactionsStatusRequest {})
+            .await
+            .unwrap();
+        response.into_inner().status
+    }
+
+    async fn get_group_commit_status(&self) -> String {
+        let mut client = self.client.clone();
+        let response = client
+            .get_group_commit_status(GetGroupCommitStatusRequest {})
+            .await
+            .unwrap();
+        response.into_inner().status
     }
 
     async fn commit(

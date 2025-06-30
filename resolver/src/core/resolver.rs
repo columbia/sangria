@@ -63,6 +63,51 @@ impl Resolver {
         resolver.group_commit.get_stats().await
     }
 
+    pub async fn get_status(resolver: Arc<Self>) -> String {
+        let mut status = String::new();
+        status.push_str("=== Resolver Status ===\n");
+
+        // Get each component's status
+        status.push_str(&resolver.get_transaction_info_status().await);
+        status.push_str(&resolver.get_resolved_transactions_status().await);
+        status.push_str(&resolver.get_waiting_transactions_status().await);
+        status.push_str(&resolver.get_group_commit_status().await);
+
+        status
+    }
+
+    pub async fn get_transaction_info_status(&self) -> String {
+        let mut status = String::new();
+        status.push_str("Info per transaction:\n");
+
+        let state = self.state.read().await;
+        for (tx_id, tx_info) in &state.info_per_transaction {
+            status.push_str(&format!(
+                "  Transaction {}: dependencies={}, dependents={:?}, fake={}\n",
+                tx_id, tx_info.num_dependencies, tx_info.dependents, tx_info.fake
+            ));
+        }
+
+        status
+    }
+
+    pub async fn get_resolved_transactions_status(&self) -> String {
+        let state = self.state.read().await;
+        format!("Resolved transactions: {:?}\n", state.resolved_transactions)
+    }
+
+    pub async fn get_waiting_transactions_status(&self) -> String {
+        let waiting = self.waiting_transactions.read().await;
+        format!(
+            "Waiting transactions: {:?}\n",
+            waiting.keys().collect::<Vec<_>>()
+        )
+    }
+
+    pub async fn get_group_commit_status(&self) -> String {
+        self.group_commit.get_status().await
+    }
+
     pub async fn commit(
         resolver: Arc<Self>,
         transaction_id: Uuid,

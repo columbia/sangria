@@ -2,6 +2,9 @@ use crate::core::resolver::TransactionInfo;
 use common::full_range_id::FullRangeId;
 use coordinator_rangeclient::{error::Error, rangeclient::RangeClient};
 use std::collections::{HashMap, HashSet};
+// use std::fs::File;
+// use std::fs::OpenOptions;
+// use std::io::Write;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::task::JoinSet;
@@ -55,6 +58,69 @@ impl GroupCommit {
         let mut stats = self.stats.write().await;
         let stats = std::mem::take(&mut *stats);
         stats
+    }
+
+    pub async fn get_status(&self) -> String {
+        let mut status = String::new();
+        status.push_str("=== Group Commit Status ===\n");
+
+        // Collect non-empty groups
+        {
+            let non_empty_groups = self.non_empty_groups.read().await;
+            status.push_str(&format!(
+                "Non-empty groups: {:?}\n",
+                non_empty_groups
+                    .iter()
+                    .map(|range_id| range_id.range_id)
+                    .collect::<Vec<_>>()
+            ));
+        }
+
+        // Collect group per participant information
+        {
+            let state = self.state.read().await;
+            status.push_str("Groups per participant:\n");
+            for (participant_range, group) in &state.group_per_participant {
+                let group_read = group.read().await;
+                status.push_str(&format!(
+                    "  {}: {} transactions\n",
+                    participant_range.range_id,
+                    group_read.len()
+                ));
+                for (i, tx) in group_read.iter().enumerate() {
+                    status.push_str(&format!(
+                        "    [{}] Transaction {} (fake={})\n",
+                        i, tx.id, tx.fake
+                    ));
+                }
+            }
+        }
+
+        // Collect pending participant commits per transaction
+        {
+            let pending_commits = self
+                .num_pending_participant_commits_per_transaction
+                .read()
+                .await;
+            status.push_str("Pending participant commits per transaction:\n");
+            for (tx_id, num_pending) in pending_commits.iter() {
+                status.push_str(&format!(
+                    "  Transaction {}: {} pending commits\n",
+                    tx_id, num_pending
+                ));
+            }
+        }
+
+        // Collect returned transactions
+        {
+            let returned = self.returned_transactions.read().await;
+            status.push_str(&format!(
+                "Returned transactions: {:?}\n",
+                returned.iter().map(|tx| tx.id).collect::<Vec<_>>()
+            ));
+        }
+
+        status
     }
 
     async fn maybe_insert_new_participant_ranges(
@@ -137,13 +203,25 @@ impl GroupCommit {
                 // Spawning async tasks so that we try to acquire the locks for all groups in parallel
                 join_set.spawn(async move {
                     let state = state_clone.read().await;
-                    let mut group = state
-                        .group_per_participant
-                        .get(&participant_range)
-                        .unwrap()
-                        .write()
-                        .await;
-                    group.extend(transactions.iter().cloned());
+                    let mut group = state.group_per_participant.get(&participant_range);
+                    match group {
+                        Some(group) => {
+                            let mut group = group.write().await;
+                            group.extend(transactions.iter().cloned());
+                            // let mut file = OpenOptions::new()
+                            //     .create(true)
+                            //     .append(true)
+                            //     .open("group-status.txt")
+                            //     .unwrap();
+                            // write!(file, "\nGroup {:?} has:\n {:?}\n", participant_range.range_id, group.iter().map(|tx| tx.id).collect::<Vec<_>>()).unwrap();
+                        }
+                        None => {
+                            panic!(
+                                "Error acquiring write lock for group {:?}",
+                                participant_range
+                            );
+                        }
+                    }
                 });
             }
             while let Some(_) = join_set.join_next().await {}
@@ -198,18 +276,51 @@ impl GroupCommit {
                         return Ok(());
                     }
 
-                    let fake = transactions.first().map(|tx| tx.fake).unwrap();
+                    let fake = match transactions.first().map(|tx| tx.fake) {
+                        Some(fake) => fake,
+                        None => {
+                            panic!(
+                                "Error getting fake flag for transaction {:?}",
+                                transactions.first().unwrap().id
+                            );
+                        }
+                    };
+
+                    // {
+                    //     let mut file = OpenOptions::new()
+                    //     .create(true)
+                    //     .append(true)
+                    //     .open("committing-transactions-status.txt")
+                    //     .unwrap();
+                    //     write!(file, "\nCommitting transactions:\n {:?}\n", transactions.iter().map(|tx| tx.id).collect::<Vec<_>>()).unwrap();
+                    // }
+
                     if !fake {
                         // TODO: Handle cascading aborts
                         // TODO: Does order of tx_ids matter in the tx_state_store?
                         // NOTE: A transaction will be recorded as committed in the tx_state_store once per every participant range it is part of.
                         // Log all transactions of the group that are ready to commit as committed in the tx_state_store
                         let tx_ids_vec = transactions.iter().map(|tx| tx.id).collect();
-                        tx_state_store_clone
+
+                        if let Err(e) = tx_state_store_clone
                             .try_batch_commit_transactions(&tx_ids_vec, 0)
                             .await
-                            .unwrap();
-
+                        {
+                            // let mut file = File::create("error-commit-tx-state-store.txt").unwrap();
+                            // write!(file, "Error committing transactions {:?}: {:?}", participant_range_clone, e).unwrap();
+                            panic!(
+                                "Error committing transactions to tx_state_store {:?}: {:?}",
+                                participant_range_clone, e
+                            );
+                        }
+                        // {
+                        //     let mut file = OpenOptions::new()
+                        //     .create(true)
+                        //     .append(true)
+                        //     .open("committed-transactions-tx-state-store-status.txt")
+                        //     .unwrap();
+                        //     write!(file, "\nCommitted transactions to tx_state_store:\n {:?}\n", transactions.iter().map(|tx| tx.id).collect::<Vec<_>>()).unwrap();
+                        // }
                         // Notify participant so that:
                         // - it applies the TXs' PrepareRecords in storage
                         // - and then quickly updates its PendingCommitTable to stop treating these transactions as dependencies for other transactions
@@ -218,11 +329,21 @@ impl GroupCommit {
                             .commit_transactions(tx_ids_vec, &participant_range_clone, 0)
                             .await
                         {
+                            // let mut file = File::create("error-commit-range-client.txt").unwrap();
+                            // write!(file, "Error committing transactions {:?}: {:?}", participant_range_clone, e).unwrap();
                             panic!(
-                                "Error committing transactions {:?}: {:?}",
+                                "Error committing transactions to range client {:?}: {:?}",
                                 participant_range_clone, e
                             );
                         }
+                        // {
+                        // let mut file = OpenOptions::new()
+                        // .create(true)
+                        // .append(true)
+                        // .open("committed-transactions-status.txt")
+                        // .unwrap();
+                        // write!(file, "\nCommitted transactions:\n {:?}\n", transactions.iter().map(|tx| tx.id).collect::<Vec<_>>()).unwrap();
+                        // }
                         {
                             let mut stats = stats_clone.write().await;
                             stats
@@ -234,6 +355,12 @@ impl GroupCommit {
                     }
                     {
                         let mut returned_transactions = returned_transactions_clone.write().await;
+                        // let mut file = OpenOptions::new()
+                        // .create(true)
+                        // .append(true)
+                        // .open("returned-transactions-status.txt")
+                        // .unwrap();
+                        // write!(file, "\nReturned transactions:\n {:?}\n", transactions.iter().map(|tx| tx.id).collect::<Vec<_>>()).unwrap();
                         returned_transactions.extend(transactions);
                     }
                     Ok(())
@@ -244,7 +371,8 @@ impl GroupCommit {
 
         while let Some(res) = commit_join_set.join_next().await {}
 
-        let returned_transactions = std::mem::take(&mut *self.returned_transactions.write().await);
+        let mut returned_transactions =
+            std::mem::take(&mut *self.returned_transactions.write().await);
         info!("Returned transactions: {:?}", returned_transactions);
 
         // A cycle of group commits has just finished. Check which transactions have finished committing and send them back to the resolver.

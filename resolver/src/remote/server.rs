@@ -3,8 +3,12 @@ use proto::resolver::resolver_server::{
     Resolver as ProtoResolver, ResolverServer as ProtoResolverServer,
 };
 use proto::resolver::{
-    CommitRequest, CommitResponse, GetStatsRequest, GetStatsResponse,
-    RegisterCommittedTransactionsRequest, RegisterCommittedTransactionsResponse,
+    CommitRequest, CommitResponse, GetGroupCommitStatusRequest, GetGroupCommitStatusResponse,
+    GetResolvedTransactionsStatusRequest, GetResolvedTransactionsStatusResponse, GetStatsRequest,
+    GetStatsResponse, GetStatusRequest, GetStatusResponse, GetTransactionInfoStatusRequest,
+    GetTransactionInfoStatusResponse, GetWaitingTransactionsStatusRequest,
+    GetWaitingTransactionsStatusResponse, RegisterCommittedTransactionsRequest,
+    RegisterCommittedTransactionsResponse,
 };
 use std::{collections::HashMap, net::ToSocketAddrs, str::FromStr, sync::Arc};
 use tonic::{Request, Response, Status as TStatus, transport::Server as TServer};
@@ -92,6 +96,71 @@ impl ProtoResolver for ProtoServer {
         Ok(Response::new(GetStatsResponse {
             stats: response_stats,
         }))
+    }
+
+    #[instrument(skip(self))]
+    async fn get_status(
+        &self,
+        request: Request<GetStatusRequest>,
+    ) -> Result<Response<GetStatusResponse>, TStatus> {
+        info!("Got a request: {:?}", request);
+        let resolver_server = self.resolver_server.clone();
+        let status = Resolver::get_status(resolver_server.resolver.clone()).await;
+        Ok(Response::new(GetStatusResponse { status }))
+    }
+
+    #[instrument(skip(self))]
+    async fn get_transaction_info_status(
+        &self,
+        request: Request<GetTransactionInfoStatusRequest>,
+    ) -> Result<Response<GetTransactionInfoStatusResponse>, TStatus> {
+        info!("Got a request: {:?}", request);
+        let resolver_server = self.resolver_server.clone();
+        let status = resolver_server.resolver.get_transaction_info_status().await;
+        Ok(Response::new(GetTransactionInfoStatusResponse { status }))
+    }
+
+    #[instrument(skip(self))]
+    async fn get_resolved_transactions_status(
+        &self,
+        request: Request<GetResolvedTransactionsStatusRequest>,
+    ) -> Result<Response<GetResolvedTransactionsStatusResponse>, TStatus> {
+        info!("Got a request: {:?}", request);
+        let resolver_server = self.resolver_server.clone();
+        let status = resolver_server
+            .resolver
+            .get_resolved_transactions_status()
+            .await;
+        Ok(Response::new(GetResolvedTransactionsStatusResponse {
+            status,
+        }))
+    }
+
+    #[instrument(skip(self))]
+    async fn get_waiting_transactions_status(
+        &self,
+        request: Request<GetWaitingTransactionsStatusRequest>,
+    ) -> Result<Response<GetWaitingTransactionsStatusResponse>, TStatus> {
+        info!("Got a request: {:?}", request);
+        let resolver_server = self.resolver_server.clone();
+        let status = resolver_server
+            .resolver
+            .get_waiting_transactions_status()
+            .await;
+        Ok(Response::new(GetWaitingTransactionsStatusResponse {
+            status,
+        }))
+    }
+
+    #[instrument(skip(self))]
+    async fn get_group_commit_status(
+        &self,
+        request: Request<GetGroupCommitStatusRequest>,
+    ) -> Result<Response<GetGroupCommitStatusResponse>, TStatus> {
+        info!("Got a request: {:?}", request);
+        let resolver_server = self.resolver_server.clone();
+        let status = resolver_server.resolver.get_group_commit_status().await;
+        Ok(Response::new(GetGroupCommitStatusResponse { status }))
     }
 }
 
