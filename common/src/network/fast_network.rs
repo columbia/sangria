@@ -1,5 +1,6 @@
 use crate::network::for_testing::udp_fast_network::UdpFastNetwork;
 use affinity;
+use async_trait::async_trait;
 use bytes::Bytes;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -8,8 +9,9 @@ use tokio::runtime::Builder;
 use tokio::sync::mpsc;
 
 // Busy-polled network endpoint.
+#[async_trait]
 pub trait FastNetwork: Send + Sync + 'static {
-    fn send(&self, to: SocketAddr, payload: Bytes) -> Result<(), std::io::Error>;
+    async fn send(&self, to: SocketAddr, payload: Bytes) -> Result<(), std::io::Error>;
     fn listen_default(&self) -> mpsc::UnboundedReceiver<(SocketAddr, Bytes)>;
     // Listen for messages sent from a specific SocketAddr.
     fn register(&self, from: SocketAddr) -> mpsc::UnboundedReceiver<Bytes>;

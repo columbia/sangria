@@ -1,5 +1,5 @@
 use clap::Parser;
-use common::network::fast_network::spawn_tokio_polling_thread;
+// use common::network::fast_network::spawn_tokio_polling_thread;
 use common::region::Zone;
 use common::{config::Config, region::Region, util::core_affinity::restrict_to_cores};
 use core_affinity;
@@ -12,7 +12,8 @@ use tokio::runtime::Builder;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-use common::network::for_testing::udp_fast_network::UdpFastNetwork;
+// use common::network::for_testing::udp_fast_network::UdpFastNetwork;
+use common::network::for_testing::tcp_fast_network::TcpFastNetwork;
 use coordinator_rangeclient::{
     range_assignment_oracle::RangeAssignmentOracle, rangeclient::RangeClient,
 };
@@ -107,18 +108,23 @@ fn main() {
         .unwrap()
         .next()
         .unwrap();
-    let fast_network = Arc::new(UdpFastNetwork::new(
-        UdpSocket::bind(fast_network_addr).unwrap(),
-    ));
+    let fast_network =
+        Arc::new(runtime.block_on(async { TcpFastNetwork::new(fast_network_addr).await.unwrap() }));
+    // let fast_network = Arc::new(UdpFastNetwork::new(
+    //     UdpSocket::bind(fast_network_addr).unwrap(),
+    // ));
     let fast_network_clone = fast_network.clone();
     runtime.spawn(async move {
-        spawn_tokio_polling_thread(
-            "fast-network-poller-resolver",
-            fast_network_clone,
-            config.resolver.fast_network_polling_core_id as usize,
-        )
-        .await;
+        fast_network_clone.run().await.unwrap();
     });
+    // runtime.spawn(async move {
+    //     spawn_tokio_polling_thread(
+    //         "fast-network-poller-resolver",
+    //         fast_network_clone,
+    //         config.resolver.fast_network_polling_core_id as usize,
+    //     )
+    //     .await;
+    // });
 
     let cancellation_token = CancellationToken::new();
 

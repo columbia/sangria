@@ -72,11 +72,11 @@ impl MockEpochPublisher {
         };
 
         fbb.finish(fbb_root, None);
-        self.send_response(network, sender, MessageType::ReadEpoch, fbb.finished_data())?;
+        self.send_response(network, sender, MessageType::ReadEpoch, fbb.finished_data()).await?;
         Ok(())
     }
 
-    fn send_response(
+    async fn send_response(
         &self,
         fast_network: Arc<dyn FastNetwork>,
         sender: SocketAddr,
@@ -95,7 +95,8 @@ impl MockEpochPublisher {
         );
         fbb.finish(fb_root, None);
         let response = Bytes::copy_from_slice(fbb.finished_data());
-        fast_network.send(sender, response)
+        fast_network.send(sender, response).await?;
+        Ok(())
     }
 
     async fn handle_message(

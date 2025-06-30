@@ -1,16 +1,14 @@
 use clap::Parser;
 use std::{
     fs::read_to_string,
-    net::{ToSocketAddrs, UdpSocket},
+    net::{TcpListener as StdTcpListener, ToSocketAddrs},
     sync::Arc,
 };
 
 use common::{
     config::Config,
     host_info::{HostIdentity, HostInfo},
-    network::{
-        fast_network::spawn_tokio_polling_thread, for_testing::udp_fast_network::UdpFastNetwork,
-    },
+    network::for_testing::tcp_fast_network::TcpFastNetwork,
     region::{Region, Zone},
     util::core_affinity::restrict_to_cores,
 };
@@ -65,18 +63,23 @@ fn main() {
         .unwrap()
         .next()
         .unwrap();
-    let fast_network = Arc::new(UdpFastNetwork::new(
-        UdpSocket::bind(fast_network_addr).unwrap(),
-    ));
+
+    let fast_network =
+        Arc::new(runtime.block_on(async { TcpFastNetwork::new(fast_network_addr).await.unwrap() }));
+
     let fast_network_clone = fast_network.clone();
     runtime.spawn(async move {
-        spawn_tokio_polling_thread(
-            "fast-network-poller-rangeserver",
-            fast_network_clone,
-            config.range_server.fast_network_polling_core_id as usize,
-        )
-        .await;
+        fast_network_clone.run().await.unwrap();
     });
+    // let fast_network_clone = fast_network.clone();
+    // runtime.spawn(async move {
+    //     spawn_tokio_polling_thread(
+    //         "fast-network-poller-rangeserver",
+    //         fast_network_clone,
+    //         config.range_server.fast_network_polling_core_id as usize,
+    //     )
+    //     .await;
+    // });
     let server_handle = runtime.spawn(async move {
         let cancellation_token = CancellationToken::new();
         let host_info = HostInfo {

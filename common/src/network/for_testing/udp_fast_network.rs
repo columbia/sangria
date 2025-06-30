@@ -5,6 +5,7 @@ use std::{
     sync::RwLock,
 };
 
+use async_trait::async_trait;
 use bytes::Bytes;
 use tokio::sync::mpsc;
 use tracing::trace;
@@ -30,8 +31,9 @@ impl UdpFastNetwork {
     }
 }
 
+#[async_trait]
 impl Trait for UdpFastNetwork {
-    fn send(&self, to: SocketAddr, payload: Bytes) -> Result<(), std::io::Error> {
+    async fn send(&self, to: SocketAddr, payload: Bytes) -> Result<(), std::io::Error> {
         trace!("Sending to: {:?}", to);
         self.socket.send_to(payload.to_vec().as_slice(), to)?;
         trace!("Send finished");

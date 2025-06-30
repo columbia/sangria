@@ -85,7 +85,7 @@ impl MockRangeServer {
         );
 
         fbb.finish(response, None);
-        self.send_response(network, sender, MessageType::Get, fbb.finished_data())?;
+        self.send_response(network, sender, MessageType::Get, fbb.finished_data()).await?;
         Ok(())
     }
 
@@ -116,7 +116,7 @@ impl MockRangeServer {
             },
         );
         fbb.finish(abort_response, None);
-        self.send_response(network, sender, MessageType::Abort, fbb.finished_data())?;
+        self.send_response(network, sender, MessageType::Abort, fbb.finished_data()).await?;
         Ok(())
     }
 
@@ -162,7 +162,7 @@ impl MockRangeServer {
         pending_prepare_records.insert(transaction_id, Bytes::copy_from_slice(request._tab.buf()));
 
         fbb.finish(prepare_response, None);
-        self.send_response(network, sender, MessageType::Prepare, fbb.finished_data())?;
+        self.send_response(network, sender, MessageType::Prepare, fbb.finished_data()).await?;
         Ok(())
     }
 
@@ -226,7 +226,7 @@ impl MockRangeServer {
             },
         );
         fbb.finish(commit_response, None);
-        self.send_response(network, sender, MessageType::Commit, fbb.finished_data())?;
+        self.send_response(network, sender, MessageType::Commit, fbb.finished_data()).await?;
         Ok(())
     }
 
@@ -262,7 +262,7 @@ impl MockRangeServer {
         Ok(())
     }
 
-    fn send_response(
+    async fn send_response(
         &self,
         fast_network: Arc<dyn FastNetwork>,
         sender: SocketAddr,
@@ -279,7 +279,8 @@ impl MockRangeServer {
             },
         );
         fbb.finish(response, None);
-        fast_network.send(sender, Bytes::copy_from_slice(fbb.finished_data()))
+        fast_network.send(sender, Bytes::copy_from_slice(fbb.finished_data())).await?;
+        Ok(())
     }
 
     pub async fn start(
@@ -310,14 +311,15 @@ impl MockRangeServer {
             }),
         });
 
+        fast_network.run().await.unwrap();
         //  Start polling the fast network
-        let fast_network_clone = fast_network.clone();
-        RUNTIME.spawn(async move {
-            loop {
-                fast_network_clone.poll();
-                tokio::task::yield_now().await
-            }
-        });
+        // let fast_network_clone = fast_network.clone();
+        // RUNTIME.spawn(async move {
+        //     loop {
+        //         fast_network_clone.poll();
+        //         tokio::task::yield_now().await
+        //     }
+        // });
 
         //  Start listening for messages
         let (listener_tx, listener_rx) = oneshot::channel();

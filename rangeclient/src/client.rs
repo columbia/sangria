@@ -167,6 +167,7 @@ impl RangeClient {
                 self.range_server_info.address,
                 Bytes::copy_from_slice(request_bytes),
             )
+            .await
             .unwrap();
         let response = rx.await.unwrap()?;
         let msg = response.to_vec();
@@ -272,6 +273,7 @@ impl RangeClient {
                 self.range_server_info.address,
                 Bytes::copy_from_slice(request_bytes),
             )
+            .await
             .unwrap();
         let response = rx.await.unwrap()?;
         let msg = response.to_vec();
@@ -342,6 +344,7 @@ impl RangeClient {
                 self.range_server_info.address,
                 Bytes::copy_from_slice(request_bytes),
             )
+            .await
             .unwrap();
         let response = rx.await.unwrap()?;
         let msg = response.to_vec();
@@ -402,6 +405,7 @@ impl RangeClient {
                 self.range_server_info.address,
                 Bytes::copy_from_slice(request_bytes),
             )
+            .await
             .unwrap();
         let response = rx.await.unwrap()?;
         let msg = response.to_vec();

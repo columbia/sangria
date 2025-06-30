@@ -99,6 +99,7 @@ impl EpochPublisherClient {
         let request_bytes = self.create_and_serialize_read_epoch_request(&req_id);
         self.fast_network
             .send(self.publisher_host_info.address, request_bytes)
+            .await
             .unwrap();
 
         // Wait for response.

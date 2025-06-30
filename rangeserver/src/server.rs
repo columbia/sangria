@@ -262,7 +262,7 @@ where
         res
     }
 
-    fn send_response(
+    async fn send_response(
         &self,
         fast_network: Arc<dyn FastNetwork>,
         sender: SocketAddr,
@@ -281,7 +281,8 @@ where
         );
         fbb.finish(fb_root, None);
         let response = Bytes::copy_from_slice(fbb.finished_data());
-        fast_network.send(sender, response)
+        fast_network.send(sender, response).await?;
+        Ok(())
     }
 
     async fn get_inner(
@@ -408,7 +409,8 @@ where
         };
 
         fbb.finish(fbb_root, None);
-        self.send_response(network, sender, MessageType::Get, fbb.finished_data())?;
+        self.send_response(network, sender, MessageType::Get, fbb.finished_data())
+            .await?;
         Ok(())
     }
 
@@ -502,7 +504,8 @@ where
         };
 
         fbb.finish(fbb_root, None);
-        self.send_response(network, sender, MessageType::Prepare, fbb.finished_data())?;
+        self.send_response(network, sender, MessageType::Prepare, fbb.finished_data())
+            .await?;
         Ok(())
     }
 
@@ -613,7 +616,8 @@ where
             }
         };
         fbb.finish(fbb_root, None);
-        self.send_response(network, sender, MessageType::Abort, fbb.finished_data())?;
+        self.send_response(network, sender, MessageType::Abort, fbb.finished_data())
+            .await?;
         Ok(())
     }
 
