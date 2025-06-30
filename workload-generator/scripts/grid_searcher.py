@@ -4,7 +4,7 @@ import itertools
 import random
 from termcolor import colored
 from atomix_setup import AtomixSetup
-
+import pandas as pd
 
 class GridSearcherInOrder(Searcher):
     def __init__(
@@ -12,11 +12,15 @@ class GridSearcherInOrder(Searcher):
         atomix_setup: AtomixSetup,
         num_iterations: int,
         param_grid: Dict[str, List[Any]],
+        experiment_name: str,
+        ray_logs_dir: str,
         metric: Optional[str] = None,
         mode: Optional[str] = None,
     ):
         super().__init__(metric=metric, mode=mode)
         self.num_iterations = num_iterations
+        self.ray_logs_dir = ray_logs_dir
+        self.experiment_name = experiment_name
         self.atomix_setup = atomix_setup
         self.param_keys = list(param_grid.keys())
         self.param_values = list(param_grid.values())
@@ -55,6 +59,10 @@ class GridSearcherInOrder(Searcher):
     def on_trial_complete(
         self, trial_id: str, result: Optional[Dict], error: bool = False
     ):
+        # result_df = pd.DataFrame([result])
+        # path = self.ray_logs_dir / self.experiment_name / "partial_results" / f"{trial_id}.csv"
+        # path.parent.mkdir(parents=True, exist_ok=True)
+        # result_df.to_csv(path)
         self.trial_map.pop(trial_id, None)
 
     def save(self, checkpoint_path: str):

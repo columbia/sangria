@@ -32,7 +32,6 @@ use uuid::Uuid;
 
 use tokio::signal::unix::{signal, SignalKind};
 
-
 // Add a struct to hold our metrics
 #[derive(Default, Debug)]
 pub struct Metrics {
@@ -237,7 +236,7 @@ impl WorkloadGenerator {
                     println!("Received SIGUSR1, initiating shutdown");
                     break;
                 }
-        
+
                 else => break,
             }
         }

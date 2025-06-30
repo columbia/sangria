@@ -63,9 +63,6 @@ def run_workload(config):
     resolver_cpu_percentage = config["resolver_capacity"]["cpu_percentage"]
     resolver_cores = config["resolver_cores"]
     resolver_tx_load = config["resolver_tx_load"]
-    # resolver_tx_load_concurrency = config["resolver_tx_load_concurrency"]
-    # resolver_tx_load_num_queries = config["resolver_tx_load"]["num_queries"]
-    # resolver_tx_load_num_keys = config["resolver_tx_load"]["num_keys"]
     main_num_keys = config["num_keys"]
     main_max_concurrency = config["max_concurrency"]
     main_num_queries = config["num_queries"]
@@ -168,11 +165,12 @@ def run_workload(config):
             stdout1, stderr1 = process1.communicate(timeout=60 * 60)  # 60 minutes timeout
             print(stderr1)
             metrics = parse_metrics(stdout1)
+            print("Finished main workload generator")
             
             # Send interrupt signal to the secondary workload generator
             if process2:
                 process2.send_signal(subprocess.signal.SIGUSR1)
-            
+                print("Sent SIGUSR1 to secondary workload generator")
             # Wait a bit for graceful shutdown, then force kill if needed
             try:
                 if process2:
@@ -193,5 +191,19 @@ def run_workload(config):
         print(f"Error running workloads: {e}")
         metrics = {"throughput": 0.0}
 
+    # if os.path.exists(ROOT_DIR / "group-status.txt"):
+    #     os.remove(ROOT_DIR / "group-status.txt")
+    # if os.path.exists(ROOT_DIR / "error-acquire-write-lock.txt"):
+    #     os.remove(ROOT_DIR / "error-acquire-write-lock.txt")
+    # if os.path.exists(ROOT_DIR / "error-commit-tx-state-store.txt"):
+    #     os.remove(ROOT_DIR / "error-commit-tx-state-store.txt")
+    # if os.path.exists(ROOT_DIR / "error-commit-range-client.txt"):
+    #     os.remove(ROOT_DIR / "error-commit-range-client.txt")
+    # if os.path.exists(ROOT_DIR / "error-fake-flag.txt"):
+    #     os.remove(ROOT_DIR / "error-fake-flag.txt")
+    # if os.path.exists(ROOT_DIR / "returned-transactions-status.txt"):
+    #     os.remove(ROOT_DIR / "returned-transactions-status.txt")
+    # if os.path.exists(ROOT_DIR / "committing-transactions-status.txt"):
+    #     os.remove(ROOT_DIR / "committing-transactions-status.txt")
     # tune.report(metrics)
     return metrics

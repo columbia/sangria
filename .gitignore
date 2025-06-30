@@ -2,6 +2,9 @@
 workload-generator/experiments/
 workload-generator/experiments/*.log
 
+workload-generator/configs/*
+log-*.txt
+
 # Rust specific
 proto/target/
 flatbuf

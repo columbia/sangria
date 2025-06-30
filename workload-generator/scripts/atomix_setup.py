@@ -4,7 +4,8 @@ import subprocess
 import time
 import socket
 from utils import *
-
+import psutil
+import signal
 
 class AtomixSetup:
     def __init__(self):
@@ -25,32 +26,36 @@ class AtomixSetup:
         ]
         self.pids = {}
 
-    def wait_for_port_release(self, server, timeout=5):
-
-        print(f"Waiting for {server} to release port...")
+    def get_server_addresses(self, server: str):
         match server:
             case "warden":
-                server_address = self.servers_config["regions"]["test-region"][
+                return [self.servers_config["regions"]["test-region"][
                     "warden_address"
-                ]
+                ]]
             case "rangeserver":
-                server_address = self.servers_config["range_server"][
+                return [self.servers_config["range_server"][
                     "proto_server_addr"
-                ]
+                ], self.servers_config["range_server"][
+                    "fast_network_addr"
+                ]]
+            case "frontend":
+                return [self.servers_config["frontend"][
+                    "proto_server_addr"
+                ], self.servers_config["frontend"][
+                    "fast_network_addr"
+                ]]
+            case "resolver":
+                return [self.servers_config["resolver"][
+                    "proto_server_addr"
+                ], self.servers_config["resolver"][
+                    "fast_network_addr"
+                ]]
+            case "universe":
+                return [self.servers_config["universe"][
+                    "proto_server_addr"
+                ]]
             case _:
-                server_address = self.servers_config[server]["proto_server_addr"]
-
-        ip, port = server_address.split(":")
-        start = time.time()
-        while time.time() - start < timeout:
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    if s.connect_ex((ip, int(port))) != 0:
-                        return True
-            except Exception as e:
-                print(f"Error waiting for {server} to release port: {e}")
-            time.sleep(0.5)
-        return False
+                return []
 
     def get_servers(self, start_order=True, servers=None):
         main_servers = (
@@ -67,8 +72,6 @@ class AtomixSetup:
             json.dump(self.servers_config, f)
 
     def kill_servers(self, servers=None):
-        if servers:
-            return servers
         servers = self.get_servers(start_order=False, servers=servers)
         for server in servers:
             try:
@@ -116,25 +119,63 @@ class AtomixSetup:
         servers = self.get_servers(start_order=True, servers=servers)
         for server in servers:
             try:
-                self.wait_for_port_release(server)
                 print(f"- Spinning up {server}")
-                p = subprocess.Popen(
-                    [
-                        TARGET_RUN_CMD + server,
-                        "--config",
-                        str(RAY_SERVERS_CONFIG_PATH),
-                    ],
-                    cwd=ROOT_DIR,
-                    start_new_session=True,
-                    text=True,
-                    env={**os.environ, "RUST_LOG": "error"},
-                )
-                self.pids[server] = p.pid
+                try:
+                    proc = self.start_server_with_retry(server, max_retries=10000, retry_delay=4.0)
+                except Exception:
+                    print("Failed to launch server after retries")
+                self.pids[server] = proc.pid
                 time.sleep(1)
             except Exception as e:
                 print(f"Error spinning up {server}: {e}")
                 self.kill_servers(servers=servers)
                 exit(1)
+
+    def start_server_with_retry(self, server: str,
+                                max_retries: int = 5,
+                                retry_delay: float = 1.0):
+        for attempt in range(1, max_retries + 1):
+            try:
+                print(f"[Attempt {attempt}] Spinning up {server}…")
+                log_path = os.path.join(ROOT_DIR, f"log-{server}.txt")
+                if os.path.exists(log_path):
+                    os.remove(log_path)
+
+                with open(log_path, "w") as log_file:
+                    p = subprocess.Popen(
+                        [TARGET_RUN_CMD + server,
+                        "--config", str(RAY_SERVERS_CONFIG_PATH)],
+                        cwd=ROOT_DIR,
+                        start_new_session=True,
+                        text=True,
+                        stdout=log_file,
+                        stderr=log_file,
+                        env={**os.environ, "RUST_LOG": "error"},
+                    )
+                time.sleep(1)
+                if p.poll() is not None:
+                    server_addresses = self.get_server_addresses(server)
+                    for server_address in server_addresses:
+                        _, port = server_address.split(":")
+                        for conn in psutil.net_connections(kind="inet"):
+                            if conn.pid is not None and conn.laddr.port == int(port):
+                                print(f"Killing process {conn.pid} listening on port {port}")
+                                os.kill(conn.pid, signal.SIGKILL)
+                                break
+                    raise RuntimeError(f"{server} exited with code {p.returncode}")
+
+                print(f"{server} started (pid={p.pid})")
+                return p
+
+            except Exception as e:
+                print(f"Error starting {server}: {e!r}")
+                if attempt < max_retries:
+                    print(f" → retrying in {retry_delay}s…")
+                    time.sleep(retry_delay)
+                else:
+                    print(f" → gave up after {max_retries} attempts")
+                    raise
+
 
 
 atomix_setup = AtomixSetup()
