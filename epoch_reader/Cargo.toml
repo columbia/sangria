@@ -7,7 +7,6 @@ edition = "2021"
 
 [dependencies]
 common = {path = "../common"}
-epoch_publisher = {path = "../epoch_publisher"}
 tokio = { version = "1", features = ["full"] }
 uuid = {version = "0.8", features = ["v4"]}
 bytes = "1"
