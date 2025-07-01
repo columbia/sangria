@@ -37,17 +37,10 @@ impl Coordinator {
         range_client: Arc<RangeClient>,
         resolver: Arc<dyn ResolverClient>,
     ) -> Coordinator {
-        let region_config = config.regions.get(&zone.region).unwrap();
-        let publisher_set = region_config
-            .epoch_publishers
-            .iter()
-            .find(|&s| s.zone == zone)
-            .unwrap();
         let epoch_reader = Arc::new(EpochReader::new(
             fast_network.clone(),
             runtime.clone(),
             bg_runtime.clone(),
-            publisher_set.clone(),
             cancellation_token.clone(),
         ));
         Coordinator {

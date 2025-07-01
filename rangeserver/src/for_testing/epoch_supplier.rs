@@ -1,6 +1,5 @@
 use crate::epoch_supplier::EpochSupplier as Trait;
 use async_trait::async_trait;
-use epoch_publisher::error::Error;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::sync::RwLock;
@@ -69,22 +68,22 @@ impl EpochSupplier {
 
 #[async_trait]
 impl Trait for EpochSupplier {
-    async fn read_epoch(&self) -> Result<u64, Error> {
+    async fn read_epoch(&self) -> u64 {
         let state = self.state.read().unwrap();
-        Ok(state.epoch)
+        state.epoch
     }
 
-    async fn wait_until_epoch(&self, epoch: u64, _timeout: chrono::Duration) -> Result<(), Error> {
+    async fn wait_until_epoch(&self, epoch: u64, _timeout: chrono::Duration) {
         let (s, r) = oneshot::channel();
         {
             let mut state = self.state.write().unwrap();
             if state.epoch >= epoch {
-                return Ok(());
+                return;
             };
 
             state.waiters.push(EpochWaiter { epoch, sender: s });
         }
         r.await.unwrap();
-        Ok(())
+        // Ok(())
     }
 }

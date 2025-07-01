@@ -132,7 +132,7 @@ impl WardenHandler {
         epoch_supplier: Arc<dyn EpochSupplier>,
     ) -> Result<(), WardenErr> {
         let addr = format!("http://{}", config.warden_address.clone());
-        let epoch = epoch_supplier.read_epoch().await?;
+        let epoch = epoch_supplier.read_epoch().await;
         let mut client = WardenClient::connect(addr).await?;
         let registration_request = proto::warden::RegisterRangeServerRequest {
             range_server: Some(proto::warden::HostInfo {

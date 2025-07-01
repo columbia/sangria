@@ -666,10 +666,7 @@ where
         self.bg_runtime
             .spawn(async move {
                 // TODO: handle all errors instead of panicking.
-                let epoch = epoch_supplier
-                    .read_epoch()
-                    .await
-                    .map_err(Error::from_epoch_supplier_error)?;
+                let epoch = 0; //epoch_supplier.read_epoch().await;
                 let mut range_info = storage
                     .take_ownership_and_load_range(range_id)
                     .await
@@ -677,10 +674,10 @@ where
                 // Epoch read from the provider can be 1 less than the true epoch. The highest known epoch
                 // of a range cannot move backward even across range load/unloads, so to maintain that guarantee
                 // we just wait for the epoch to advance once.
-                epoch_supplier
-                    .wait_until_epoch(epoch + 1, chrono::Duration::seconds(10))
-                    .await
-                    .map_err(Error::from_epoch_supplier_error)?;
+                // epoch_supplier
+                //     .wait_until_epoch(epoch + 1, chrono::Duration::seconds(10))
+                //     .await
+                //     .map_err(Error::from_epoch_supplier_error)?;
                 // Get a new epoch lease.
                 let highest_known_epoch = epoch + 1;
                 let new_epoch_lease_lower_bound =
@@ -734,10 +731,7 @@ where
         loop {
             let leader_sequence_number: u64;
             let old_lease: (u64, u64);
-            let epoch = epoch_supplier
-                .read_epoch()
-                .await
-                .map_err(Error::from_epoch_supplier_error)?;
+            let epoch = 0; //epoch_supplier.read_epoch().await;
             let highest_known_epoch = epoch + 1;
             if let State::Loaded(state) = state.read().await.deref() {
                 old_lease = state.range_info.epoch_lease;

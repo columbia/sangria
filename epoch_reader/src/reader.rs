@@ -1,15 +1,15 @@
 use std::{collections::HashMap, sync::atomic::AtomicU64, sync::atomic::Ordering, sync::Arc};
 
 use common::{
-    config::EpochPublisherSet,
+    // config::EpochPublisherSet,
     host_info::{HostIdentity, HostInfo},
     network::fast_network::FastNetwork,
 };
-use epoch_publisher::{client::EpochPublisherClient, error::Error};
-use std::net::ToSocketAddrs;
-use tokio::task::JoinSet;
+// // use epoch_publisher::{client::EpochPublisherClient, error::Error};
+// use std::net::ToSocketAddrs;
+// use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use tracing::warn;
+// use tracing::warn;
 
 /// EpochReader reads the latest epoch from an EpochPublisherSet.
 pub struct EpochReader {
@@ -24,7 +24,6 @@ impl EpochReader {
         fast_network: Arc<dyn FastNetwork>,
         runtime: tokio::runtime::Handle,
         bg_runtime: tokio::runtime::Handle,
-        publisher_set: EpochPublisherSet,
         cancellation_token: CancellationToken,
     ) -> EpochReader {
         // assert!(!publisher_set.publishers.is_empty());
@@ -64,9 +63,9 @@ impl EpochReader {
         }
     }
 
-    pub async fn read_epoch(&self) -> Result<u64, Error> {
+    pub async fn read_epoch(&self) -> u64 {
         self.epoch.fetch_add(1, Ordering::Relaxed);
-        Ok(self.epoch.load(Ordering::Relaxed))
+        self.epoch.load(Ordering::Relaxed)
         // // TODO(tamer): add timeout and retries.
         // // Fire off a request to read the epoch from each publisher in the set in parallel.
         // // let mut join_set = JoinSet::new();
