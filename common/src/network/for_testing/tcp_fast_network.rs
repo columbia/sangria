@@ -1,21 +1,19 @@
 use crate::network::fast_network::FastNetwork as Trait;
-use std::{collections::HashMap, net::SocketAddr, sync::RwLock};
+use std::{collections::HashMap, net::SocketAddr};
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use std::str::FromStr;
+use std::sync::Arc;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
-    sync::mpsc,
+    sync::{mpsc, oneshot, RwLock},
 };
 use tracing::{info, trace};
 
-const ADDR_LEN: usize = 15; // Length of "127.0.0.1:50058", adjust as needed
-
 enum DefaultHandler {
     NotRegistered,
-    Registered(mpsc::UnboundedSender<(SocketAddr, Bytes)>),
+    Registered(mpsc::UnboundedSender<(oneshot::Sender<Bytes>, Bytes)>),
 }
 
 pub struct TcpFastNetwork {
@@ -37,10 +35,10 @@ impl TcpFastNetwork {
     }
 
     /// Start accepting connections and spawning tasks to read
-    pub async fn run(self: std::sync::Arc<Self>) -> std::io::Result<()> {
+    pub async fn run(self: Arc<Self>) -> std::io::Result<()> {
         loop {
             let (socket, addr) = self.listener.accept().await?;
-            // info!("Accepted connection from: {:?}", addr);
+            info!("Accepted connection from: {:?}", addr);
             let network = self.clone();
             tokio::spawn(async move {
                 if let Err(e) = network.handle_connection(socket, addr).await {
@@ -56,63 +54,50 @@ impl TcpFastNetwork {
         addr: SocketAddr,
     ) -> std::io::Result<()> {
         let mut buf = vec![0u8; 65535];
-        loop {
-            let n = socket.read(&mut buf).await?;
-            if n == 0 {
-                break;
-            }
-            let bytes = Bytes::copy_from_slice(&buf[..n]);
-            if bytes.len() < ADDR_LEN {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Message too short",
-                ));
-            }
-            let (message, addr_bytes) = bytes.split_at(bytes.len() - ADDR_LEN);
-            let addr_str = std::str::from_utf8(addr_bytes)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-            let addr = SocketAddr::from_str(&addr_str).unwrap();
-            info!("Received message from: {:?}", addr);
-            let message = Bytes::from(message.to_vec());
-
-            let listeners = self.connections.read().unwrap();
-            if let Some(listener) = listeners.get(&addr) {
-                let _ = listener.send(message.clone());
+        let (p, s) = oneshot::channel();
+        let n = socket.read(&mut buf).await?;
+        let message = Bytes::copy_from_slice(&buf[..n]);
+        let listeners = self.connections.read().await;
+        if let Some(listener) = listeners.get(&addr) {
+            let _ = listener.send(message.clone());
+        } else {
+            let dh = self.default_handler.read().await;
+            if let DefaultHandler::Registered(tx) = &*dh {
+                let _ = tx.send((p, message));
             } else {
-                let dh = self.default_handler.read().unwrap();
-                if let DefaultHandler::Registered(tx) = &*dh {
-                    let _ = tx.send((addr, message));
-                } else {
-                    trace!("No handler registered for message from {}", addr);
-                }
+                trace!("No handler registered for message from {}", addr);
             }
         }
+
+        let response = s.await.unwrap();
+        socket.write_all(&response).await?;
         Ok(())
     }
 }
 
 #[async_trait]
 impl Trait for TcpFastNetwork {
-    async fn send(&self, to: SocketAddr, payload: Bytes) -> Result<(), std::io::Error> {
-        // info!("Sending to: {:?}", to);
-        let mut p = payload.to_vec();
-        p.extend_from_slice(self.bind_addr.to_string().as_bytes());
-        let ext_payload = Bytes::from(p);
+    async fn send(&self, to: SocketAddr, payload: Bytes) -> Result<Option<Bytes>, std::io::Error> {
+        info!("Sending message to: {:?}", to);
         let mut stream = TcpStream::connect(to).await?;
-        stream.write_all(&ext_payload).await?;
-        Ok(())
+        stream.write_all(&payload).await?;
+        stream.flush().await?;
+        let mut response_buf = Vec::new();
+        stream.read_to_end(&mut response_buf).await?;
+        stream.shutdown().await?;
+        Ok(Some(Bytes::from(response_buf)))
     }
 
-    fn listen_default(&self) -> mpsc::UnboundedReceiver<(SocketAddr, Bytes)> {
+    async fn listen_default(&self) -> mpsc::UnboundedReceiver<(oneshot::Sender<Bytes>, Bytes)> {
         let (tx, rx) = mpsc::unbounded_channel();
-        let mut default_handler = self.default_handler.write().unwrap();
+        let mut default_handler = self.default_handler.write().await;
         *default_handler = DefaultHandler::Registered(tx);
         rx
     }
 
-    fn register(&self, from: SocketAddr) -> mpsc::UnboundedReceiver<Bytes> {
+    async fn register(&self, from: SocketAddr) -> mpsc::UnboundedReceiver<Bytes> {
         let (tx, rx) = mpsc::unbounded_channel();
-        let mut connections = self.connections.write().unwrap();
+        let mut connections = self.connections.write().await;
         connections.insert(from, tx);
         rx
     }

@@ -8,7 +8,6 @@ use common::{
 };
 use rangeclient::client::{Error, GetResult, PrepareOk, RangeClient as Client};
 use tokio::sync::RwLock;
-use tokio_util::sync::CancellationToken;
 use tracing::info;
 use uuid::Uuid;
 
@@ -18,8 +17,6 @@ pub struct RangeClient {
     range_assignment_oracle: Arc<dyn RangeAssignmentOracle>,
     range_clients: RwLock<HashMap<HostIdentity, Arc<Client>>>,
     fast_network: Arc<dyn FastNetwork>,
-    runtime: tokio::runtime::Handle,
-    cancellation_token: CancellationToken,
 }
 
 // public interface
@@ -27,15 +24,11 @@ impl RangeClient {
     pub fn new(
         range_assignment_oracle: Arc<dyn RangeAssignmentOracle>,
         fast_network: Arc<dyn FastNetwork>,
-        runtime: tokio::runtime::Handle,
-        cancellation_token: CancellationToken,
     ) -> RangeClient {
         RangeClient {
             range_assignment_oracle,
             fast_network,
             range_clients: RwLock::new(HashMap::new()),
-            runtime,
-            cancellation_token,
         }
     }
 
@@ -144,12 +137,7 @@ impl RangeClient {
             }
         };
 
-        Client::start(
-            client.clone(),
-            self.runtime.clone(),
-            self.cancellation_token.clone(),
-        )
-        .await;
+        Client::start(client.clone()).await;
         Ok(client)
     }
 

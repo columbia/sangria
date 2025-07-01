@@ -17,7 +17,6 @@ use std::net::SocketAddr;
 use std::ops::DerefMut;
 use std::sync::Arc;
 use tokio::sync::{oneshot, RwLock};
-use tokio_util::sync::CancellationToken;
 use tonic::transport::Channel;
 use tonic::Request;
 use tracing::info;
@@ -80,11 +79,7 @@ impl RangeClient {
         })
     }
 
-    pub async fn start(
-        rc: Arc<Self>,
-        runtime: tokio::runtime::Handle,
-        cancellation_token: CancellationToken,
-    ) {
+    pub async fn start(rc: Arc<Self>) {
         let mut state = rc.state.write().await;
         match state.deref_mut() {
             State::Started(_) | State::Stopped => return (),
@@ -94,11 +89,6 @@ impl RangeClient {
             outstanding_requests: HashMap::new(),
         };
         let _ = std::mem::replace(state.deref_mut(), State::Started(started_state));
-        let rc_clone = rc.clone();
-        runtime.spawn(async move {
-            let _ = Self::network_loop(rc_clone, cancellation_token).await;
-            println!("Network loop exited!")
-        });
     }
 
     pub async fn is_stopped(&self) -> bool {
@@ -157,20 +147,19 @@ impl RangeClient {
             },
         );
         fbb.finish(fbb_root, None);
-        let (tx, rx) = oneshot::channel();
-        self.record_outstanding_request(req_id, tx).await?;
         let get_request_bytes = Bytes::copy_from_slice(fbb.finished_data());
         let mut envelope_fbb = FlatBufferBuilder::new();
         let request_bytes =
             self.create_msg_envelope(&mut envelope_fbb, MessageType::Get, get_request_bytes);
-        self.fast_network
+        let response = self
+            .fast_network
             .send(
                 self.range_server_info.address,
                 Bytes::copy_from_slice(request_bytes),
             )
             .await
+            .unwrap()
             .unwrap();
-        let response = rx.await.unwrap()?;
         let msg = response.to_vec();
         let envelope = flatbuffers::root::<ResponseEnvelope>(msg.as_slice()).unwrap();
         match envelope.type_() {
@@ -260,8 +249,6 @@ impl RangeClient {
             },
         );
         fbb.finish(fbb_root, None);
-        let (tx, rx) = oneshot::channel();
-        self.record_outstanding_request(req_id, tx).await?;
         let prepare_request_bytes = Bytes::copy_from_slice(fbb.finished_data());
         let mut envelope_fbb = FlatBufferBuilder::new();
         let request_bytes = self.create_msg_envelope(
@@ -269,14 +256,15 @@ impl RangeClient {
             MessageType::Prepare,
             prepare_request_bytes,
         );
-        self.fast_network
+        let response = self
+            .fast_network
             .send(
                 self.range_server_info.address,
                 Bytes::copy_from_slice(request_bytes),
             )
             .await
+            .unwrap()
             .unwrap();
-        let response = rx.await.unwrap()?;
         let msg = response.to_vec();
         let envelope = flatbuffers::root::<ResponseEnvelope>(msg.as_slice()).unwrap();
         match envelope.type_() {
@@ -334,20 +322,19 @@ impl RangeClient {
             },
         );
         fbb.finish(fbb_root, None);
-        let (tx, rx) = oneshot::channel();
-        self.record_outstanding_request(req_id, tx).await?;
         let abort_request_bytes = Bytes::copy_from_slice(fbb.finished_data());
         let mut envelope_fbb = FlatBufferBuilder::new();
         let request_bytes =
             self.create_msg_envelope(&mut envelope_fbb, MessageType::Abort, abort_request_bytes);
-        self.fast_network
+        let response = self
+            .fast_network
             .send(
                 self.range_server_info.address,
                 Bytes::copy_from_slice(request_bytes),
             )
             .await
+            .unwrap()
             .unwrap();
-        let response = rx.await.unwrap()?;
         let msg = response.to_vec();
         let envelope = flatbuffers::root::<ResponseEnvelope>(msg.as_slice()).unwrap();
         match envelope.type_() {
@@ -399,24 +386,23 @@ impl RangeClient {
             },
         );
         fbb.finish(fbb_root, None);
-        let (tx, rx) = oneshot::channel();
-        self.record_outstanding_request(req_id, tx).await?;
         let commit_request_bytes = Bytes::copy_from_slice(fbb.finished_data());
         let mut envelope_fbb = FlatBufferBuilder::new();
         let request_bytes =
             self.create_msg_envelope(&mut envelope_fbb, MessageType::Commit, commit_request_bytes);
-        self.fast_network
+        let response = self
+            .fast_network
             .send(
                 self.range_server_info.address,
                 Bytes::copy_from_slice(request_bytes),
             )
             .await
+            .unwrap()
             .unwrap();
         info!(
             "Inner RangeClient: Sent commit request {:?} - {:?}",
             transactions, req_id
         );
-        let response = rx.await.unwrap()?;
         info!(
             "Inner RangeClient: Received commit response {:?}",
             transactions
@@ -431,72 +417,6 @@ impl RangeClient {
                 return Ok(());
             }
             _ => return Err(RangeServerError::InvalidRequestFormat),
-        }
-    }
-
-    fn get_request_id_from_response(msg: Bytes) -> Uuid {
-        let msg = msg.to_vec();
-        let envelope = flatbuffers::root::<ResponseEnvelope>(msg.as_slice()).unwrap();
-        let req_id = match envelope.type_() {
-            MessageType::Get => {
-                let msg =
-                    flatbuffers::root::<GetResponse>(envelope.bytes().unwrap().bytes()).unwrap();
-                msg.request_id()
-            }
-            MessageType::Prepare => {
-                let msg = flatbuffers::root::<PrepareResponse>(envelope.bytes().unwrap().bytes())
-                    .unwrap();
-                msg.request_id()
-            }
-            MessageType::Abort => {
-                let msg =
-                    flatbuffers::root::<AbortResponse>(envelope.bytes().unwrap().bytes()).unwrap();
-                msg.request_id()
-            }
-            MessageType::Commit => {
-                let msg =
-                    flatbuffers::root::<CommitResponse>(envelope.bytes().unwrap().bytes()).unwrap();
-                msg.request_id()
-            }
-            _ => panic!("unknown response message type"), // TODO: return and log unknown message type error.
-        };
-        common::util::flatbuf::deserialize_uuid(req_id.unwrap())
-    }
-
-    async fn network_loop(client: Arc<Self>, cancellation_token: CancellationToken) {
-        let mut network_receiver = client
-            .fast_network
-            .register(client.range_server_info.address);
-        loop {
-            let () = tokio::select! {
-                () = cancellation_token.cancelled() => {
-                    // TODO(tamer): remove from fast network as well.
-                    client.close().await;
-                    return ()
-                }
-                maybe_message = network_receiver.recv() => {
-                    match maybe_message {
-                        None => {
-                            println!("fast network closed unexpectedly!");
-                            cancellation_token.cancel()
-                        }
-                        Some(msg) => {
-                            let req_id = Self::get_request_id_from_response(msg.clone());
-                            // info!("Inner RangeClient: Received response {:?}", req_id);
-                            let mut state = client.state.write().await;
-                            let outstanding_requests = match state.deref_mut() {
-                                State::NotStarted | State::Stopped => {
-                                    cancellation_token.cancel();
-                                    continue
-                                }
-                                State::Started(started_state) => &mut started_state.outstanding_requests,
-                            };
-                            let sender = outstanding_requests.remove(&req_id).unwrap();
-                            sender.send(Ok(msg)).unwrap()
-                        }
-                    }
-                }
-            };
         }
     }
 
@@ -516,38 +436,6 @@ impl RangeClient {
         );
         fbb.finish(fbb_root, None);
         fbb.finished_data()
-    }
-
-    async fn record_outstanding_request(
-        &self,
-        req_id: Uuid,
-        tx: oneshot::Sender<Result<Bytes, RangeServerError>>,
-    ) -> Result<(), RangeServerError> {
-        {
-            let mut state = self.state.write().await;
-            let outstanding_requests = match state.deref_mut() {
-                State::NotStarted | State::Stopped => {
-                    return Err(RangeServerError::ConnectionClosed)
-                }
-                State::Started(started_state) => &mut started_state.outstanding_requests,
-            };
-            outstanding_requests.insert(req_id, tx);
-            Ok(())
-        }
-    }
-
-    async fn close(&self) {
-        let mut outstanding_requests = {
-            let mut state = self.state.write().await;
-            let old_state = std::mem::replace(state.deref_mut(), State::Stopped);
-            match old_state {
-                State::NotStarted | State::Stopped => HashMap::new(),
-                State::Started(started_state) => started_state.outstanding_requests,
-            }
-        };
-        for (_, tx) in outstanding_requests.drain().take(1) {
-            tx.send(Err(RangeServerError::ConnectionClosed)).unwrap();
-        }
     }
 
     pub async fn prefetch(

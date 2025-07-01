@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use proto::resolver::resolver_client::ResolverClient as ProtoResolverClient;
 use proto::resolver::{
-    GetGroupCommitStatusRequest, GetNumWaitingTransactionsRequest, GetResolvedTransactionsStatusRequest, GetStatsRequest, GetTransactionInfoStatusRequest, GetWaitingTransactionsStatusRequest,
+    GetGroupCommitStatusRequest, GetNumWaitingTransactionsRequest,
+    GetResolvedTransactionsStatusRequest, GetStatsRequest, GetTransactionInfoStatusRequest,
+    GetWaitingTransactionsStatusRequest,
 };
 
 pub struct MonitoringClient {

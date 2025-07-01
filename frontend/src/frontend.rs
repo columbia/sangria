@@ -393,8 +393,6 @@ impl Server {
         let range_client = Arc::new(RangeClient::new(
             range_assignment_oracle.clone(),
             fast_network.clone(),
-            runtime.clone(),
-            cancellation_token.clone(),
         ));
         let resolver: Arc<dyn ResolverClientTrait + Send + Sync> = match config.resolver.mode {
             ResolverMode::Local => {

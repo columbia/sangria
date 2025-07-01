@@ -1,11 +1,7 @@
 use clap::Parser;
 use common::{
     config::Config,
-    network::{
-        for_testing::tcp_fast_network::TcpFastNetwork,
-        // fast_network::spawn_tokio_polling_thread,
-        // for_testing::udp_fast_network::UdpFastNetwork,
-    },
+    network::for_testing::tcp_fast_network::TcpFastNetwork,
     region::{Region, Zone},
     util::core_affinity::restrict_to_cores,
 };
@@ -66,22 +62,6 @@ fn main() {
         .unwrap();
     let fast_network =
         Arc::new(runtime.block_on(async { TcpFastNetwork::new(fast_network_addr).await.unwrap() }));
-    // let fast_network = Arc::new(UdpFastNetwork::new(
-    //     UdpSocket::bind(fast_network_addr).unwrap(),
-    // ));
-    let fast_network_clone = fast_network.clone();
-    runtime.spawn(async move {
-        fast_network_clone.run().await.unwrap();
-    });
-    // runtime.spawn(async move {
-    //     spawn_tokio_polling_thread(
-    //         "fast-network-poller-frontend",
-    //         fast_network_clone,
-    //         config.frontend.fast_network_polling_core_id as usize,
-    //     )
-    //     .await;
-    // });
-
     let cancellation_token = CancellationToken::new();
     let runtime_handle = runtime.handle().clone();
     let ct_clone = cancellation_token.clone();

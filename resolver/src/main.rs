@@ -1,18 +1,12 @@
 use clap::Parser;
-// use common::network::fast_network::spawn_tokio_polling_thread;
 use common::region::Zone;
 use common::{config::Config, region::Region, util::core_affinity::restrict_to_cores};
 use core_affinity;
-use std::{
-    fs::read_to_string,
-    net::{ToSocketAddrs, UdpSocket},
-    sync::Arc,
-};
+use std::{fs::read_to_string, net::ToSocketAddrs, sync::Arc};
 use tokio::runtime::Builder;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-// use common::network::for_testing::udp_fast_network::UdpFastNetwork;
 use common::network::for_testing::tcp_fast_network::TcpFastNetwork;
 use coordinator_rangeclient::{
     range_assignment_oracle::RangeAssignmentOracle, rangeclient::RangeClient,
@@ -110,22 +104,10 @@ fn main() {
         .unwrap();
     let fast_network =
         Arc::new(runtime.block_on(async { TcpFastNetwork::new(fast_network_addr).await.unwrap() }));
-    // let fast_network = Arc::new(UdpFastNetwork::new(
-    //     UdpSocket::bind(fast_network_addr).unwrap(),
-    // ));
-    let fast_network_clone = fast_network.clone();
-    runtime.spawn(async move {
-        fast_network_clone.run().await.unwrap();
-    });
+    // let fast_network_clone = fast_network.clone();
     // runtime.spawn(async move {
-    //     spawn_tokio_polling_thread(
-    //         "fast-network-poller-resolver",
-    //         fast_network_clone,
-    //         config.resolver.fast_network_polling_core_id as usize,
-    //     )
-    //     .await;
+    //     fast_network_clone.run().await.unwrap();
     // });
-
     let cancellation_token = CancellationToken::new();
 
     let bg_runtime = Builder::new_multi_thread()
@@ -147,8 +129,6 @@ fn main() {
         let range_client = Arc::new(RangeClient::new(
             Arc::new(RangeAssignmentOracle::new(client)),
             fast_network,
-            runtime_clone,
-            cancellation_token_clone,
         ));
         let tx_state_store = Arc::new(TxStateStoreClient::new(config.clone(), zone.region).await);
         let group_commit = GroupCommit::new(range_client, tx_state_store);

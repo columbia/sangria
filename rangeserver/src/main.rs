@@ -71,15 +71,6 @@ fn main() {
     runtime.spawn(async move {
         fast_network_clone.run().await.unwrap();
     });
-    // let fast_network_clone = fast_network.clone();
-    // runtime.spawn(async move {
-    //     spawn_tokio_polling_thread(
-    //         "fast-network-poller-rangeserver",
-    //         fast_network_clone,
-    //         config.range_server.fast_network_polling_core_id as usize,
-    //     )
-    //     .await;
-    // });
     let server_handle = runtime.spawn(async move {
         let cancellation_token = CancellationToken::new();
         let host_info = HostInfo {
@@ -96,12 +87,6 @@ fn main() {
             address: args.address.parse().unwrap(),
             warden_connection_epoch: 0,
         };
-        let region_config = config.regions.get(&host_info.identity.zone.region).unwrap();
-        let publisher_set = region_config
-            .epoch_publishers
-            .iter()
-            .find(|&s| s.zone == host_info.identity.zone)
-            .unwrap();
         let proto_server_addr = config
             .range_server
             .proto_server_addr
@@ -123,7 +108,6 @@ fn main() {
             fast_network.clone(),
             runtime_handle,
             bg_runtime.handle().clone(),
-            publisher_set.clone(),
             cancellation_token.clone(),
         ));
         let server = Server::<_>::new(

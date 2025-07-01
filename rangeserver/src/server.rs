@@ -34,6 +34,8 @@ use proto::rangeserver::{PrefetchRequest, PrefetchResponse};
 use crate::prefetching_buffer::PrefetchingBuffer;
 use colored::Colorize;
 
+use tracing::info;
+
 #[derive(Clone)]
 struct ProtoServer<S>
 where
@@ -265,7 +267,7 @@ where
     async fn send_response(
         &self,
         fast_network: Arc<dyn FastNetwork>,
-        sender: SocketAddr,
+        producer: oneshot::Sender<Bytes>,
         msg_type: MessageType,
         msg_payload: &[u8],
     ) -> Result<(), std::io::Error> {
@@ -281,7 +283,7 @@ where
         );
         fbb.finish(fb_root, None);
         let response = Bytes::copy_from_slice(fbb.finished_data());
-        fast_network.send(sender, response).await?;
+        producer.send(response).unwrap();
         Ok(())
     }
 
@@ -345,7 +347,7 @@ where
     async fn get(
         &self,
         network: Arc<dyn FastNetwork>,
-        sender: SocketAddr,
+        producer: oneshot::Sender<Bytes>,
         request: GetRequest<'_>,
     ) -> Result<(), DynamicErr> {
         let mut fbb = FlatBufferBuilder::new();
@@ -409,7 +411,7 @@ where
         };
 
         fbb.finish(fbb_root, None);
-        self.send_response(network, sender, MessageType::Get, fbb.finished_data())
+        self.send_response(network, producer, MessageType::Get, fbb.finished_data())
             .await?;
         Ok(())
     }
@@ -438,7 +440,7 @@ where
     async fn prepare(
         &self,
         network: Arc<dyn FastNetwork>,
-        sender: SocketAddr,
+        producer: oneshot::Sender<Bytes>,
         request: PrepareRequest<'_>,
     ) -> Result<(), DynamicErr> {
         let mut fbb = FlatBufferBuilder::new();
@@ -504,7 +506,7 @@ where
         };
 
         fbb.finish(fbb_root, None);
-        self.send_response(network, sender, MessageType::Prepare, fbb.finished_data())
+        self.send_response(network, producer, MessageType::Prepare, fbb.finished_data())
             .await?;
         Ok(())
     }
@@ -535,7 +537,7 @@ where
     pub async fn commit(
         &self,
         network: Arc<dyn FastNetwork>,
-        sender: SocketAddr,
+        producer: oneshot::Sender<Bytes>,
         request: CommitRequest<'_>,
     ) -> Result<(), DynamicErr> {
         let mut fbb = FlatBufferBuilder::new();
@@ -562,7 +564,7 @@ where
             }
         };
         fbb.finish(fbb_root, None);
-        self.send_response(network, sender, MessageType::Commit, fbb.finished_data())
+        self.send_response(network, producer, MessageType::Commit, fbb.finished_data())
             .await?;
         Ok(())
     }
@@ -590,7 +592,7 @@ where
     pub async fn abort(
         &self,
         network: Arc<dyn FastNetwork>,
-        sender: SocketAddr,
+        producer: oneshot::Sender<Bytes>,
         request: AbortRequest<'_>,
     ) -> Result<(), DynamicErr> {
         let mut fbb = FlatBufferBuilder::new();
@@ -617,7 +619,7 @@ where
             }
         };
         fbb.finish(fbb_root, None);
-        self.send_response(network, sender, MessageType::Abort, fbb.finished_data())
+        self.send_response(network, producer, MessageType::Abort, fbb.finished_data())
             .await?;
         Ok(())
     }
@@ -664,7 +666,7 @@ where
     async fn handle_message(
         server: Arc<Self>,
         fast_network: Arc<dyn FastNetwork>,
-        sender: SocketAddr,
+        producer: oneshot::Sender<Bytes>,
         msg: Bytes,
     ) -> Result<(), DynamicErr> {
         // TODO: gracefully handle malformed messages instead of unwrapping and crashing.
@@ -673,27 +675,27 @@ where
         match envelope.type_() {
             MessageType::Get => {
                 let get_msg = flatbuffers::root::<GetRequest>(envelope.bytes().unwrap().bytes())?;
-                server.get(fast_network.clone(), sender, get_msg).await?
+                server.get(fast_network.clone(), producer, get_msg).await?
             }
             MessageType::Prepare => {
                 let prepare_msg =
                     flatbuffers::root::<PrepareRequest>(envelope.bytes().unwrap().bytes())?;
                 server
-                    .prepare(fast_network.clone(), sender, prepare_msg)
+                    .prepare(fast_network.clone(), producer, prepare_msg)
                     .await?
             }
             MessageType::Abort => {
                 let abort_msg =
                     flatbuffers::root::<AbortRequest>(envelope.bytes().unwrap().bytes())?;
                 server
-                    .abort(fast_network.clone(), sender, abort_msg)
+                    .abort(fast_network.clone(), producer, abort_msg)
                     .await?
             }
             MessageType::Commit => {
                 let commit_msg =
                     flatbuffers::root::<CommitRequest>(envelope.bytes().unwrap().bytes())?;
                 server
-                    .commit(fast_network.clone(), sender, commit_msg)
+                    .commit(fast_network.clone(), producer, commit_msg)
                     .await?
             }
             _ => (), // TODO: return and log unknown message type error.
@@ -706,7 +708,7 @@ where
         fast_network: Arc<dyn FastNetwork>,
         cancellation_token: CancellationToken,
     ) {
-        let mut network_receiver = fast_network.listen_default();
+        let mut network_receiver = fast_network.listen_default().await;
         loop {
             let () = tokio::select! {
                 () = cancellation_token.cancelled() => {
@@ -718,11 +720,11 @@ where
                             println!("fast network closed unexpectedly!");
                             cancellation_token.cancel()
                         }
-                        Some((sender, msg)) => {
+                        Some((producer, msg)) => {
                             let server = server.clone();
                             let fast_network = fast_network.clone();
                             tokio::spawn(async move{
-                                let _ = Self::handle_message(server, fast_network, sender, msg).await;
+                                let _ = Self::handle_message(server, fast_network, producer, msg).await;
                                 // TODO log any error here.
                             });
 
