@@ -2,9 +2,6 @@ use crate::core::resolver::TransactionInfo;
 use common::full_range_id::FullRangeId;
 use coordinator_rangeclient::{error::Error, rangeclient::RangeClient};
 use std::collections::{HashMap, HashSet};
-// use std::fs::File;
-// use std::fs::OpenOptions;
-// use std::io::Write;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::task::JoinSet;
@@ -19,8 +16,8 @@ use uuid::Uuid;
 // we need to add new participant ranges to the hashmap.
 
 #[derive(Default)]
-pub struct Stats {
-    pub committed_group_sizes: HashMap<String, usize>,
+pub struct GroupCommitStats {
+    pub committed_group_sizes: HashMap<String, f64>,
 }
 
 struct State {
@@ -35,7 +32,7 @@ pub struct GroupCommit {
     non_empty_groups: Arc<RwLock<HashSet<FullRangeId>>>,
     range_client: Arc<RangeClient>,
     tx_state_store: Arc<TxStateStoreClient>,
-    stats: Arc<RwLock<Stats>>,
+    stats: Arc<RwLock<GroupCommitStats>>,
     returned_transactions: Arc<RwLock<Vec<TransactionInfo>>>,
 }
 
@@ -49,15 +46,15 @@ impl GroupCommit {
             non_empty_groups: Arc::new(RwLock::new(HashSet::new())),
             range_client,
             tx_state_store,
-            stats: Arc::new(RwLock::new(Stats::default())),
+            stats: Arc::new(RwLock::new(GroupCommitStats::default())),
             returned_transactions: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
-    pub async fn get_stats(&self) -> Stats {
+    pub async fn get_stats(&self) -> HashMap<String, f64> {
         let mut stats = self.stats.write().await;
         let stats = std::mem::take(&mut *stats);
-        stats
+        stats.committed_group_sizes
     }
 
     pub async fn get_status(&self) -> String {
@@ -177,11 +174,6 @@ impl GroupCommit {
                 tmp_group_per_participant.keys().cloned().collect(),
             )
             .await;
-        info!("Inserted new participant ranges");
-
-        info!(
-            "Updating number of participant commits we need to wait for in order to register the transaction as committed"
-        );
         {
             // Update the number of participant commits we need to wait for in order to register the transaction as committed
             let mut num_pending_participant_commits_per_transaction = self
@@ -208,12 +200,6 @@ impl GroupCommit {
                         Some(group) => {
                             let mut group = group.write().await;
                             group.extend(transactions.iter().cloned());
-                            // let mut file = OpenOptions::new()
-                            //     .create(true)
-                            //     .append(true)
-                            //     .open("group-status.txt")
-                            //     .unwrap();
-                            // write!(file, "\nGroup {:?} has:\n {:?}\n", participant_range.range_id, group.iter().map(|tx| tx.id).collect::<Vec<_>>()).unwrap();
                         }
                         None => {
                             panic!(
@@ -286,16 +272,10 @@ impl GroupCommit {
                         }
                     };
 
-                    // {
-                    //     let mut file = OpenOptions::new()
-                    //     .create(true)
-                    //     .append(true)
-                    //     .open("committing-transactions-status.txt")
-                    //     .unwrap();
-                    //     write!(file, "\nCommitting transactions:\n {:?}\n", transactions.iter().map(|tx| tx.id).collect::<Vec<_>>()).unwrap();
-                    // }
-
-                    if !fake {
+                    if fake {
+                        // Fake transaction: sleep to emulate the time it takes to commit in the ranges
+                        // tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                    } else {
                         // TODO: Handle cascading aborts
                         // TODO: Does order of tx_ids matter in the tx_state_store?
                         // NOTE: A transaction will be recorded as committed in the tx_state_store once per every participant range it is part of.
@@ -306,21 +286,11 @@ impl GroupCommit {
                             .try_batch_commit_transactions(&tx_ids_vec, 0)
                             .await
                         {
-                            // let mut file = File::create("error-commit-tx-state-store.txt").unwrap();
-                            // write!(file, "Error committing transactions {:?}: {:?}", participant_range_clone, e).unwrap();
                             panic!(
                                 "Error committing transactions to tx_state_store {:?}: {:?}",
                                 participant_range_clone, e
                             );
                         }
-                        // {
-                        //     let mut file = OpenOptions::new()
-                        //     .create(true)
-                        //     .append(true)
-                        //     .open("committed-transactions-tx-state-store-status.txt")
-                        //     .unwrap();
-                        //     write!(file, "\nCommitted transactions to tx_state_store:\n {:?}\n", transactions.iter().map(|tx| tx.id).collect::<Vec<_>>()).unwrap();
-                        // }
                         // Notify participant so that:
                         // - it applies the TXs' PrepareRecords in storage
                         // - and then quickly updates its PendingCommitTable to stop treating these transactions as dependencies for other transactions
@@ -329,38 +299,22 @@ impl GroupCommit {
                             .commit_transactions(tx_ids_vec, &participant_range_clone, 0)
                             .await
                         {
-                            // let mut file = File::create("error-commit-range-client.txt").unwrap();
-                            // write!(file, "Error committing transactions {:?}: {:?}", participant_range_clone, e).unwrap();
                             panic!(
                                 "Error committing transactions to range client {:?}: {:?}",
                                 participant_range_clone, e
                             );
                         }
-                        // {
-                        // let mut file = OpenOptions::new()
-                        // .create(true)
-                        // .append(true)
-                        // .open("committed-transactions-status.txt")
-                        // .unwrap();
-                        // write!(file, "\nCommitted transactions:\n {:?}\n", transactions.iter().map(|tx| tx.id).collect::<Vec<_>>()).unwrap();
-                        // }
                         {
                             let mut stats = stats_clone.write().await;
                             stats
                                 .committed_group_sizes
                                 .entry(format!("Group size: {}", transactions.len()))
-                                .and_modify(|count| *count += 1)
-                                .or_insert(1);
+                                .and_modify(|count| *count += 1.0)
+                                .or_insert(1.0);
                         }
                     }
                     {
                         let mut returned_transactions = returned_transactions_clone.write().await;
-                        // let mut file = OpenOptions::new()
-                        // .create(true)
-                        // .append(true)
-                        // .open("returned-transactions-status.txt")
-                        // .unwrap();
-                        // write!(file, "\nReturned transactions:\n {:?}\n", transactions.iter().map(|tx| tx.id).collect::<Vec<_>>()).unwrap();
                         returned_transactions.extend(transactions);
                     }
                     Ok(())

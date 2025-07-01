@@ -7,7 +7,7 @@ from plotter import make_plots, line, bar, cdf
 import plotly.io as pio
 import argparse
 import json
-from utils import process_resolver_stats, get_unique_key_values
+from utils import process_resolver_stats_group_sizes, get_unique_key_values
 from itertools import product
 import copy
 import warnings
@@ -20,6 +20,14 @@ METRICS = [
     # "p99_latency",
 ]  # "p50_latency", "p95_latency", "p99_latency"]
 
+RESOLVER_STATS = [
+    "requests_per_second",
+    "waiting_transactions_std",
+    "waiting_transactions_max",
+    "waiting_transactions_min",
+    "waiting_transactions_avg",
+    "waiting_transactions_count",
+]
 CONFIG_PARAMS = [
     "baseline",
     "num_queries",
@@ -87,29 +95,35 @@ class Plotter:
             "axis_title_font_size": {"x": 18, "y": 18},
             "axis_tick_font_size": {"x": 14, "y": 14},
             "column_widths": [5],
-            "output_path": f"{self.plots_path.joinpath(f'{y}_{facet_row}_{x}.png')}",
+            "output_path": f"{self.plots_path.joinpath(f'{y}_{facet_row}_{x}')}",
             "title": f"{', '.join([f'{k}={v}' for k, v in fixed_params.items()])}",
             "height": rows * 300,
             "width": 1500,
         }
         make_plots(figs, rows=rows, cols=cols, **figs_args)
 
-    def plot_resolver_stats(self, free_param: str, fixed_params: Dict[str, int]):
+    def plot_resolver_group_sizes(self, free_param: str, fixed_params: Dict[str, int]):
+        # Only first iteration of each experiment
+        results = self.results[self.results["iteration"] == 1].copy()
+
         keys_fixed = list(fixed_params.keys())
-        df = self.results[["resolver_stats", "baseline", free_param, *keys_fixed]]
+        df = results[["resolver_stats", "baseline", free_param, *keys_fixed]]
         for param, value in fixed_params.items():
             df = df[df[param] == value]
 
+        df["resolver_stats"] = df["resolver_stats"].apply(json.loads)
+        df["resolver_stats"] = df["resolver_stats"].apply(
+            lambda x: {k: v for k, v in x.items() if k.startswith("Group size:")}
+        )
         df["resolver_stats"] = df["resolver_stats"].apply(
             lambda x: (
-                json.dumps({"Group size: 1": fixed_params["num_queries"]})
-                if x == "{}"
+                {"Group size: 1": fixed_params["num_queries"]}
+                if x == {}
                 else x
             )
         )
-
         figs = []
-        cumvalues, group_sizes = process_resolver_stats(df, free_param)
+        cumvalues, group_sizes = process_resolver_stats_group_sizes(df, free_param)
         for i, free_param_value in enumerate(
             sorted(get_unique_key_values(df, free_param))
         ):
@@ -132,7 +146,64 @@ class Plotter:
             "axis_title_font_size": {"x": 18, "y": 18},
             "axis_tick_font_size": {"x": 20, "y": 20},
             "column_widths": [5],
-            "output_path": f"{self.plots_path.joinpath(f'resolver_stats_{free_param}_{fixed_params}.png')}",
+            "output_path": f"{self.plots_path.joinpath(f'resolver_group_sizes_{free_param}_{fixed_params}')}",
+            "title": f"{', '.join([f'{k}={v}' for k, v in fixed_params.items()])}",
+            "height": rows * 300,
+            "width": 1500,
+        }
+        make_plots(figs, rows=rows, cols=cols, **figs_args)
+
+
+
+    def plot_resolver_stats(
+        self, y: str, x: str, facet_row: str, fixed_params: Dict[str, int]):
+
+        # Only first iteration of each experiment
+        results = self.results[self.results["iteration"] == 1]
+
+        keys_fixed = list(fixed_params.keys())
+        df = results[["resolver_stats", x, facet_row, "baseline", *keys_fixed]]
+        for param, value in fixed_params.items():
+            df = df[df[param] == value]
+        df = df.sort_values(by=x)
+        df[x] = df[x].astype(str)
+        df[facet_row] = df[facet_row].astype(str)
+        
+        df["resolver_stats"] = df["resolver_stats"].apply(json.loads)
+
+        y_name = "requests_num" if y == "waiting_transactions_count" else y
+        df[y_name] = df["resolver_stats"].apply(lambda x: x.get(y, 0))
+        del df["resolver_stats"]
+
+        figs = []
+
+        unique_facet_row_values = df[facet_row].unique()
+        max_value = df[y_name].max()
+        # print(facet_row, unique_facet_row_values)
+        for i, facet_row_value in enumerate(unique_facet_row_values):
+            arg = {
+                "df": df[df[facet_row] == facet_row_value],
+                "x": x,
+                "y": y_name,
+                "key": "baseline",
+                "title": f"{facet_row}={facet_row_value}",
+                "showlegend": True if i == 0 else False,
+                "legend_title": "baseline",
+                "legend_orientation": "h",
+                "x_axis_title": x,
+                "y_axis_title": y_name,
+                "y_range": (0, max_value),
+            }
+            figs.append([(bar, arg)])
+
+        rows = len(figs)
+        cols = len(figs[0])
+
+        figs_args = {
+            "axis_title_font_size": {"x": 18, "y": 18},
+            "axis_tick_font_size": {"x": 14, "y": 14},
+            "column_widths": [5],
+            "output_path": f"{self.plots_path.joinpath(f'resolver_stats_{y_name}_{facet_row}_{x}')}",
             "title": f"{', '.join([f'{k}={v}' for k, v in fixed_params.items()])}",
             "height": rows * 300,
             "width": 1500,
@@ -178,26 +249,19 @@ def main():
     free_params = args.free_params.split(",")
     assert len(free_params) <= 2
 
-    #  Append resolver_cores to each baseline if baseline not traditional
-    # plotter.results["baseline"] = plotter.results.apply(
-    #     lambda row: (
-    #         str(row["resolver_cores"]) + "_RC_" + row["baseline"]
-    #         if row["baseline"] != "Traditional"
-    #         else row["baseline"]
-    #     ),
-    #     axis=1,
-    # )
-
     # Obtain the df_traditional where baseline is Traditional and concat it with the df for every value of resolver_cores
     df_traditional = plotter.results[plotter.results["baseline"] == "Traditional"]
     df = plotter.results[plotter.results["baseline"] != "Traditional"]
 
     #  Didn't rerun traditional experiments for each value of resolver_tx_load_concurrency because it's invariant to it
-    for resolver_tx_load_concurrency in get_unique_key_values(df, "resolver_tx_load_concurrency"):
+    for resolver_tx_load_concurrency in get_unique_key_values(
+        df, "resolver_tx_load_concurrency"
+    ):
         df_traditional["resolver_tx_load_concurrency"] = resolver_tx_load_concurrency
         df = pd.concat([df, copy.deepcopy(df_traditional)])
     plotter.results = df
 
+    # --------Plot Metrics vs X vs Z--------
     facet_row, x_axis = free_params
     for metric in METRICS:
         plotter.plot_metrics_vs_x_vs_z(
@@ -207,11 +271,23 @@ def main():
             fixed_params=fixed_params,
         )
 
+    # --------Plot Resolver Stats--------
+    facet_row, x_axis = free_params
+    for stat in RESOLVER_STATS:
+        plotter.plot_resolver_stats(
+            y=stat,
+            x=x_axis,
+            facet_row=facet_row,
+            fixed_params=fixed_params,
+        )
+
+
+    # --------Plot Resolver Group Sizes--------
     subplot_key = free_params[0]
     unique_values_of_subplot_key = get_unique_key_values(plotter.results, subplot_key)
     for subplot_key_value in unique_values_of_subplot_key:
         fixed_params[subplot_key] = subplot_key_value
-        plotter.plot_resolver_stats(
+        plotter.plot_resolver_group_sizes(
             free_param=free_params[1],
             fixed_params=fixed_params,
         )

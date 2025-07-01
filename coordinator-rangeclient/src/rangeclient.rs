@@ -9,6 +9,7 @@ use common::{
 use rangeclient::client::{Error, GetResult, PrepareOk, RangeClient as Client};
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
+use tracing::info;
 use uuid::Uuid;
 
 /// RangeClient abstracts away the individual rangeservers and allows users
@@ -84,11 +85,14 @@ impl RangeClient {
         range_id: &FullRangeId,
         epoch: u64,
     ) -> Result<(), Error> {
+        info!("RangeClient: Committing transactions {:?}", transactions);
         let client = self.get_range_client(range_id).await?;
         client
-            .commit_transactions(transactions, range_id, epoch)
+            .commit_transactions(transactions.clone(), range_id, epoch)
             .await
-            .map_err(|e| self.handle_rangeserver_err(range_id, e))
+            .map_err(|e| self.handle_rangeserver_err(range_id, e))?;
+        info!("RangeClient: Committed transactions {:?}", transactions);
+        Ok(())
     }
 }
 

@@ -21,65 +21,55 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
     experiment_name = f"{namespace}_{name}"
 
     # BASELINES = [ADAPTIVE, , PIPELINED]
-    BASELINES = [PIPELINED]
-
-    NUM_ITERATIONS = 1
-    NUM_QUERIES = [2500]
-
     # NUM_KEYS = [1, 5, 10, 25, 50, 100, 200, 400, 600]
     # NUM_KEYS = [200, 400, 600]
     # MAX_CONCURRENCY = [200]
+    
+    BASELINES = [PIPELINED, TRADITIONAL]
+
+    NUM_ITERATIONS = 2
+    NUM_QUERIES = [2500]
+
     NUM_KEYS = [50]
-    MAX_CONCURRENCY = [5, 1, 10, 25, 50, 100, 200]
+    MAX_CONCURRENCY = [1, 5, 10, 25, 50, 100, 200]
+    
     # MAX_CONCURRENCY = [50]
+    # BASELINES = [TRADITIONAL]
 
     RESOLVER_CAPACITY = [
-        # {
-        #     "cpu_percentage": 1,
-        #     "background_runtime_core_ids": list(range(5, 32)),
-        # },
         {
             "cpu_percentage": 1,
-            "background_runtime_core_ids": [4],
+            "background_runtime_core_ids": [1] #+ list(range(3, 32))
         },
-        # {
-        #     "cpu_percentage": 0.5,
-        #     "background_runtime_core_ids": [4],
-        # },
-        # {
-        #     "cpu_percentage": 0.1,
-        #     "background_runtime_core_ids": [4],
-        # },
     ]
 
     # Second workload generator with configurable tx load
     RESOLVER_TX_LOAD = [
         {
+            "max_concurrency": 0,  # zero extra load
+            "num_queries": None,
+            "num_keys": 100,
+            "background_runtime_core_ids": [2,3],
+        },
+        {
             "max_concurrency": 100,
-            "num_queries": 100000,
-            "num_keys": 10,
-            "background_runtime_core_ids": [5],
+            "num_queries": None,
+            "num_keys": 100,
+            "background_runtime_core_ids": [2,3],
         },
         {
-            "max_concurrency": 0,   # zero extra load
+            "max_concurrency": 1000,
             "num_queries": None,
-            "num_keys": 10,
-            "background_runtime_core_ids": [5],
+            "num_keys": 100,
+            "background_runtime_core_ids": [2,3],
         },
-        {
-            "max_concurrency": 10,
-            "num_queries": None,
-            "num_keys": 10,
-            "background_runtime_core_ids": [5],
-        },
-
-        {
-            "max_concurrency": 1000,   # super extra load
-            "num_queries": None,
-            "num_keys": 10,
-            "background_runtime_core_ids": [5],
-        }
-    ]   
+        # {
+        #     "max_concurrency": 10000000,  # super extra load
+        #     "num_queries": None,
+        #     "num_keys": 100,
+        #     "background_runtime_core_ids": [2],
+        # },
+    ]
 
     config = {
         "baseline": BASELINES,
@@ -91,7 +81,7 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
         "zipf_exponent": [0],
         "namespace": [namespace],
         "name": [name],
-        "background_runtime_core_ids": [list(range(6, 32))],
+        "background_runtime_core_ids": [list(range(3, 32))],
     }
 
     reporter = tune.CLIReporter(
@@ -123,7 +113,9 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
             resources_per_trial={"cpu": psutil.cpu_count()},
             storage_path=ray_logs_dir,
             name=experiment_name,
-            search_alg=GridSearcherInOrder(atomix_setup, NUM_ITERATIONS, config, experiment_name, ray_logs_dir),
+            search_alg=GridSearcherInOrder(
+                atomix_setup, NUM_ITERATIONS, config, experiment_name, ray_logs_dir
+            ),
             reuse_actors=True,
             max_concurrent_trials=1,
             scheduler=FIFOScheduler(),
@@ -141,7 +133,7 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
         "num_keys": NUM_KEYS[0],
     }
     free_params = "resolver_tx_load_concurrency,max_concurrency"
-    # plot_results_df(experiment_name, fixed_params, free_params)
+    plot_results_df(experiment_name, fixed_params, free_params)
     ray.shutdown()
 
 

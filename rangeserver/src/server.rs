@@ -562,7 +562,8 @@ where
             }
         };
         fbb.finish(fbb_root, None);
-        self.send_response(network, sender, MessageType::Commit, fbb.finished_data())?;
+        self.send_response(network, sender, MessageType::Commit, fbb.finished_data())
+            .await?;
         Ok(())
     }
 

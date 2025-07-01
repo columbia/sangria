@@ -5,23 +5,28 @@ import tempfile
 import os
 import concurrent.futures
 
+
 def build_docker_images_script(images):
     script = ""
     for image in images:
         script += f"sudo docker build -t {image}:latest --target {image} --build-arg BUILD_TYPE=release .\n"
     return script
 
+
 def run_dockers(images):
     script = ""
     # Run cassandra
     script += "sudo docker run -d -p 9042:9042 --name cassandra --ulimit nofile=100000:100000 cassandra:5.0\n"
-    script += "sudo docker exec -i cassandra cqlsh < schema/cassandra/atomix/keyspace.cql\n"
+    script += (
+        "sudo docker exec -i cassandra cqlsh < schema/cassandra/atomix/keyspace.cql\n"
+    )
     script += "sudo docker exec -i cassandra cqlsh -k atomix < schema/cassandra/atomix/schema.cql\n"
 
     for image in images:
         script += f"sudo docker run -d --name {image} {image}\n"
 
     return script
+
 
 class Node(ABC):
     def __init__(self, config):
@@ -34,14 +39,14 @@ class Node(ABC):
     def setup(self):
         # Install docker
         script = ""
-        script += '''sudo apt-get update\n'''
-        script += '''sudo apt-get install ca-certificates curl\n'''
-        script += '''sudo install -m 0755 -d /etc/apt/keyrings\n'''
-        script += '''sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc\n'''
-        script += '''sudo chmod a+r /etc/apt/keyrings/docker.asc\n'''
-        script += '''echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" |   sudo tee /etc/apt/sources.list.d/docker.list > /dev/null\n'''
-        script += '''sudo apt-get update\n'''
-        script += '''sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin\n'''
+        script += """sudo apt-get update\n"""
+        script += """sudo apt-get install ca-certificates curl\n"""
+        script += """sudo install -m 0755 -d /etc/apt/keyrings\n"""
+        script += """sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc\n"""
+        script += """sudo chmod a+r /etc/apt/keyrings/docker.asc\n"""
+        script += """echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" |   sudo tee /etc/apt/sources.list.d/docker.list > /dev/null\n"""
+        script += """sudo apt-get update\n"""
+        script += """sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin\n"""
 
         # Git clone atomix
         script += """\
@@ -59,7 +64,6 @@ class Node(ABC):
 
     def teardown(self):
         pass
-
 
 
 class RemoteNode(Node):
@@ -81,10 +85,16 @@ class RemoteNode(Node):
 
         try:
             print(f"[{self.name}] Copying script to remote host...")
-            subprocess.run(["scp", tmp_path, f"{self.username}@{self.address}:/tmp/setup.sh"], check=True)
+            subprocess.run(
+                ["scp", tmp_path, f"{self.username}@{self.address}:/tmp/setup.sh"],
+                check=True,
+            )
 
             print(f"[{self.name}] Running script on remote host...")
-            subprocess.run(["ssh", f"{self.username}@{self.address}", "bash /tmp/setup.sh"], check=True)
+            subprocess.run(
+                ["ssh", f"{self.username}@{self.address}", "bash /tmp/setup.sh"],
+                check=True,
+            )
         finally:
             os.remove(tmp_path)
 
@@ -116,10 +126,10 @@ class LocalNode(Node):
 class ExperimentSetup:
     def __init__(self, nodes):
         self.nodes = nodes
-        
+
     def setup(self):
         print(f"Setting up {len(self.nodes)} nodes...")
-        
+
         with concurrent.futures.ThreadPoolExecutor() as executor:
             futures = [executor.submit(node.setup) for node in self.nodes]
             concurrent.futures.wait(futures)
@@ -130,11 +140,10 @@ class ExperimentSetup:
             node.teardown()
 
 
-
 def main():
     username = "kelkost"
     branch = "expsremote"
-    
+
     resolver_node_config = {
         "name": "resolver",
         "address": "128.105.146.3",
@@ -158,13 +167,14 @@ def main():
     }
 
     nodes = [
-        RemoteNode(resolver_node_config),                 # To be used for the resolver
-        RemoteNode(primary_node_config),                  # To be used for Atomix 2
-        LocalNode(secondary_node_config),                 # To be used for Atomix 1
+        RemoteNode(resolver_node_config),  # To be used for the resolver
+        RemoteNode(primary_node_config),  # To be used for Atomix 2
+        LocalNode(secondary_node_config),  # To be used for Atomix 1
     ]
 
     experiment_setup = ExperimentSetup(nodes)
     experiment_setup.setup()
+
 
 if __name__ == "__main__":
     main()

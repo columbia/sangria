@@ -42,7 +42,7 @@ pub struct Metrics {
     pub p95_latency: Duration,
     pub p99_latency: Duration,
     pub throughput: f64,
-    pub resolver_stats: HashMap<String, usize>,
+    pub resolver_stats: HashMap<String, f64>,
 }
 
 // Add a struct to hold our metrics
@@ -280,7 +280,9 @@ impl WorkloadGenerator {
             .unwrap();
         let response = response.into_inner();
         let mut stats_map = HashMap::new();
-        for (group_size, count) in response.stats {}
+        for (key, value) in response.stats {
+            stats_map.insert(key, value as f64);
+        }
         info!("Resolver stats: {:?}", stats_map);
 
         Metrics {

@@ -2,7 +2,7 @@
 workload-generator/experiments/
 workload-generator/experiments/*.log
 
-workload-generator/configs/*
+workload-generator/configs/
 log-*.txt
 
 # Rust specific

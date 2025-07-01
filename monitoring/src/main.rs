@@ -17,6 +17,7 @@ enum StatusType {
     ResolvedTransactions,
     WaitingTransactions,
     GroupCommit,
+    NumWaitingTransactions,
 }
 
 #[tokio::main]
@@ -27,8 +28,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match args.status {
         StatusType::All => {
             // Get resolver status
-            let status = client.get_resolver_status().await;
-            println!("Resolver Status:\n{}", status);
+            let status = client.get_stats().await;
+            println!("Resolver Statistics:\n{:?}", status);
 
             // Get transaction info status
             let transaction_info_status = client.get_transaction_info_status().await;
@@ -53,8 +54,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Group Commit Status:\n{}", group_commit_status);
         }
         StatusType::Resolver => {
-            let status = client.get_resolver_status().await;
-            println!("Resolver Status:\n{}", status);
+            let status = client.get_stats().await;
+            println!("Resolver Statistics:\n{:?}", status);
         }
         StatusType::TransactionInfo => {
             let transaction_info_status = client.get_transaction_info_status().await;
@@ -77,6 +78,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         StatusType::GroupCommit => {
             let group_commit_status = client.get_group_commit_status().await;
             println!("Group Commit Status:\n{}", group_commit_status);
+        }
+
+        StatusType::NumWaitingTransactions => {
+            let num_waiting_transactions = client.get_num_waiting_transactions().await;
+            println!(
+                "Number of waiting transactions: {}",
+                num_waiting_transactions
+            );
         }
     }
 

@@ -47,7 +47,7 @@ def get_unique_key_values(df, key):
     return set(df[key].unique())
 
 
-def process_resolver_stats(df, free_param):
+def process_resolver_stats_group_sizes(df, free_param):
     group_sizes = set()
     resolver_stats_per_baseline = {}
     cumvalues = {}
@@ -62,15 +62,15 @@ def process_resolver_stats(df, free_param):
             ]
             resolver_stats = {}
             for _, row in df_key.iterrows():
-                d = json.loads(row["resolver_stats"])
+                d = row["resolver_stats"]
                 for k, v in d.items():
-                    resolver_stats[k] = resolver_stats.get(k, 0) + v
+                    if k != "Group size: 0":
+                        resolver_stats[k] = resolver_stats.get(k, 0) + v
             resolver_stats = {
                 int(k.split(":")[1]): v for k, v in resolver_stats.items()
             }
             group_sizes.update(resolver_stats.keys())
             resolver_stats_per_baseline[free_param_value][baseline] = resolver_stats
-
     for free_param_value in resolver_stats_per_baseline.keys():
         cumvalues[free_param_value] = {}
         for baseline in resolver_stats_per_baseline[free_param_value].keys():

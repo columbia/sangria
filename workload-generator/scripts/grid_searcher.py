@@ -6,6 +6,7 @@ from termcolor import colored
 from atomix_setup import AtomixSetup
 import pandas as pd
 
+
 class GridSearcherInOrder(Searcher):
     def __init__(
         self,
@@ -28,7 +29,7 @@ class GridSearcherInOrder(Searcher):
 
         # Each iteration should have a different seed
         # self.seeds = [random.randint(0, 1000000000) for _ in range(self.num_iterations)]
-        start_seed = 1234567890
+        start_seed = 1234567110
         self.seeds = [start_seed + i * 10 for i in range(self.num_iterations)]
 
         self.grid = list(itertools.product(*self.param_values))
@@ -51,7 +52,9 @@ class GridSearcherInOrder(Searcher):
             len(resolver_capacity["background_runtime_core_ids"])
             * resolver_capacity["cpu_percentage"]
         )
-        config["resolver_tx_load_concurrency"] = config["resolver_tx_load"]["max_concurrency"]
+        config["resolver_tx_load_concurrency"] = config["resolver_tx_load"][
+            "max_concurrency"
+        ]
         print(colored(f"Config: {config}", "blue"))
         self.trial_map[trial_id] = config
         return config

@@ -205,13 +205,42 @@ def bar(
     return traces
 
 
+def bar_with_error_bars(df, x, y, key=None, showlegend=True, order=None, **kwargs) -> List[go.Bar]:
+    """Create a bar plot with error bars showing min/max values"""
+    unique_keys = get_unique_key_values(df, key)
+    unique_keys = sorted(unique_keys)
+
+    color_map = create_color_map(df, key)
+
+    # box plot with error bars
+    traces = []
+    for i, unique_key in enumerate(unique_keys):
+        df_key = df[df[key] == unique_key]
+        trace = go.Box(
+            y=df_key[y],
+            name=unique_key,
+            legendgroup=unique_key,
+            showlegend=showlegend,
+            legendgrouptitle=dict(text=key) if i == 0 else None,
+            marker_color=color_map[unique_key],
+            boxpoints="all",
+            jitter=0.3,
+            pointpos=-1.8,
+            whiskerwidth=0.2,
+            fillcolor=color_map[unique_key],
+            opacity=0.6,
+            line=dict(color="black", width=1),
+        )
+        traces.append(trace)
+    return traces
+
+
 def cdf(df, cumvalues, group_sizes, showlegend=True, **kwargs):
     """Create a CDF plot"""
 
     baselines = get_unique_key_values(df, "baseline")
     baselines = sorted(baselines)
     color_map = create_color_map(df, "baseline")
-
     traces = []
     for i, baseline in enumerate(baselines):
         traces.append(

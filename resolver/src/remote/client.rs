@@ -3,7 +3,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
-    core::group_commit::Stats, participant_range_info::ParticipantRangeInfo,
+    participant_range_info::ParticipantRangeInfo,
     resolver_client::ResolverClient as ResolverClientTrait,
 };
 use async_trait::async_trait;
@@ -11,11 +11,12 @@ use common::config::Config;
 use coordinator_rangeclient::error::Error;
 use proto::resolver::resolver_client::ResolverClient as ProtoResolverClient;
 use proto::resolver::{
-    CommitRequest, GetGroupCommitStatusRequest, GetGroupCommitStatusResponse,
-    GetResolvedTransactionsStatusRequest, GetResolvedTransactionsStatusResponse, GetStatsRequest,
-    GetStatusRequest, GetTransactionInfoStatusRequest, GetTransactionInfoStatusResponse,
-    GetWaitingTransactionsStatusRequest, GetWaitingTransactionsStatusResponse,
-    ParticipantRangeInfo as ProtoParticipantRangeInfo, RegisterCommittedTransactionsRequest,
+    CommitRequest, GetGroupCommitStatusRequest, GetNumWaitingTransactionsRequest,
+    GetResolvedTransactionsStatusRequest,
+    GetResolvedTransactionsStatusResponse, GetStatsRequest, GetTransactionInfoStatusRequest,
+    GetTransactionInfoStatusResponse, GetWaitingTransactionsStatusRequest,
+    GetWaitingTransactionsStatusResponse, ParticipantRangeInfo as ProtoParticipantRangeInfo,
+    RegisterCommittedTransactionsRequest,
 };
 use std::collections::HashMap;
 
@@ -39,23 +40,10 @@ impl ResolverClient {
 
 #[async_trait]
 impl ResolverClientTrait for ResolverClient {
-    async fn get_stats(&self) -> Stats {
+    async fn get_stats(&self) -> HashMap<String, f64> {
         let mut client = self.client.clone();
         let response = client.get_stats(GetStatsRequest {}).await.unwrap();
-        let stats = response.into_inner().stats;
-        let mut committed_group_sizes = HashMap::new();
-        for (group_size, count) in stats {
-            committed_group_sizes.insert(group_size, count as usize);
-        }
-        Stats {
-            committed_group_sizes,
-        }
-    }
-
-    async fn get_status(&self) -> String {
-        let mut client = self.client.clone();
-        let response = client.get_status(GetStatusRequest {}).await.unwrap();
-        response.into_inner().status
+        response.into_inner().stats
     }
 
     async fn get_transaction_info_status(&self) -> String {
@@ -92,6 +80,15 @@ impl ResolverClientTrait for ResolverClient {
             .await
             .unwrap();
         response.into_inner().status
+    }
+
+    async fn get_num_waiting_transactions(&self) -> usize {
+        let mut client = self.client.clone();
+        let response = client
+            .get_num_waiting_transactions(GetNumWaitingTransactionsRequest {})
+            .await
+            .unwrap();
+        response.into_inner().num_waiting_transactions as usize
     }
 
     async fn commit(

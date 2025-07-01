@@ -8,7 +8,7 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::{
-    core::group_commit::{GroupCommit, Stats},
+    core::{group_commit::GroupCommit, statistics::StatisticsTracker},
     participant_range_info::ParticipantRangeInfo,
 };
 use coordinator_rangeclient::error::Error;
@@ -39,11 +39,13 @@ pub struct State {
     info_per_transaction: HashMap<Uuid, TransactionInfo>,
     resolved_transactions: HashSet<Uuid>,
 }
+
 pub struct Resolver {
     state: RwLock<State>,
     group_commit: GroupCommit,
     waiting_transactions: RwLock<HashMap<Uuid, oneshot::Sender<()>>>,
     bg_runtime: tokio::runtime::Handle,
+    stats_tracker: RwLock<StatisticsTracker>,
 }
 
 impl Resolver {
@@ -56,24 +58,22 @@ impl Resolver {
             group_commit,
             waiting_transactions: RwLock::new(HashMap::new()),
             bg_runtime,
+            stats_tracker: RwLock::new(StatisticsTracker::new()),
         }
     }
 
-    pub async fn get_stats(resolver: Arc<Self>) -> Stats {
-        resolver.group_commit.get_stats().await
+    pub async fn get_stats(resolver: Arc<Self>) -> HashMap<String, f64> {
+        let mut group_commit_stats = resolver.group_commit.get_stats().await;
+        let mut stats_tracker = resolver.stats_tracker.write().await;
+        let resolver_stats = stats_tracker.get_stats();
+        stats_tracker.reset();
+        group_commit_stats.extend(resolver_stats);
+        group_commit_stats
     }
 
-    pub async fn get_status(resolver: Arc<Self>) -> String {
-        let mut status = String::new();
-        status.push_str("=== Resolver Status ===\n");
-
-        // Get each component's status
-        status.push_str(&resolver.get_transaction_info_status().await);
-        status.push_str(&resolver.get_resolved_transactions_status().await);
-        status.push_str(&resolver.get_waiting_transactions_status().await);
-        status.push_str(&resolver.get_group_commit_status().await);
-
-        status
+    pub async fn reset_stats(&self) {
+        let mut stats_tracker = self.stats_tracker.write().await;
+        stats_tracker.reset();
     }
 
     pub async fn get_transaction_info_status(&self) -> String {
@@ -102,6 +102,11 @@ impl Resolver {
             "Waiting transactions: {:?}\n",
             waiting.keys().collect::<Vec<_>>()
         )
+    }
+
+    pub async fn get_num_waiting_transactions(&self) -> usize {
+        let waiting = self.waiting_transactions.read().await;
+        waiting.len()
     }
 
     pub async fn get_group_commit_status(&self) -> String {
@@ -159,6 +164,14 @@ impl Resolver {
                 .write()
                 .await
                 .insert(transaction_id, s);
+            
+            {
+                // Record waiting transactions sample for statistics
+                let mut stats_tracker = resolver.stats_tracker.write().await;
+                let waiting_count = resolver.waiting_transactions.read().await.len();
+                stats_tracker.record_waiting_transactions_sample(waiting_count);
+                stats_tracker.record_request();
+            }
             info!("Updated dependencies for transaction {:?}", transaction_id);
             if num_pending_dependencies == 0 {
                 // If there are no pending dependencies, we can commit the transaction

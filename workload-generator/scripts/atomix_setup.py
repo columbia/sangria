@@ -7,6 +7,7 @@ from utils import *
 import psutil
 import signal
 
+
 class AtomixSetup:
     def __init__(self):
         self.servers_config = json.load(open(SERVERS_CONFIG_PATH, "r"))
@@ -29,31 +30,24 @@ class AtomixSetup:
     def get_server_addresses(self, server: str):
         match server:
             case "warden":
-                return [self.servers_config["regions"]["test-region"][
-                    "warden_address"
-                ]]
+                return [self.servers_config["regions"]["test-region"]["warden_address"]]
             case "rangeserver":
-                return [self.servers_config["range_server"][
-                    "proto_server_addr"
-                ], self.servers_config["range_server"][
-                    "fast_network_addr"
-                ]]
+                return [
+                    self.servers_config["range_server"]["proto_server_addr"],
+                    self.servers_config["range_server"]["fast_network_addr"],
+                ]
             case "frontend":
-                return [self.servers_config["frontend"][
-                    "proto_server_addr"
-                ], self.servers_config["frontend"][
-                    "fast_network_addr"
-                ]]
+                return [
+                    self.servers_config["frontend"]["proto_server_addr"],
+                    self.servers_config["frontend"]["fast_network_addr"],
+                ]
             case "resolver":
-                return [self.servers_config["resolver"][
-                    "proto_server_addr"
-                ], self.servers_config["resolver"][
-                    "fast_network_addr"
-                ]]
+                return [
+                    self.servers_config["resolver"]["proto_server_addr"],
+                    self.servers_config["resolver"]["fast_network_addr"],
+                ]
             case "universe":
-                return [self.servers_config["universe"][
-                    "proto_server_addr"
-                ]]
+                return [self.servers_config["universe"]["proto_server_addr"]]
             case _:
                 return []
 
@@ -121,7 +115,9 @@ class AtomixSetup:
             try:
                 print(f"- Spinning up {server}")
                 try:
-                    proc = self.start_server_with_retry(server, max_retries=10000, retry_delay=4.0)
+                    proc = self.start_server_with_retry(
+                        server, max_retries=10000, retry_delay=5.0
+                    )
                 except Exception:
                     print("Failed to launch server after retries")
                 self.pids[server] = proc.pid
@@ -131,9 +127,9 @@ class AtomixSetup:
                 self.kill_servers(servers=servers)
                 exit(1)
 
-    def start_server_with_retry(self, server: str,
-                                max_retries: int = 5,
-                                retry_delay: float = 1.0):
+    def start_server_with_retry(
+        self, server: str, max_retries: int = 5, retry_delay: float = 1.0
+    ):
         for attempt in range(1, max_retries + 1):
             try:
                 print(f"[Attempt {attempt}] Spinning up {server}…")
@@ -143,8 +139,11 @@ class AtomixSetup:
 
                 with open(log_path, "w") as log_file:
                     p = subprocess.Popen(
-                        [TARGET_RUN_CMD + server,
-                        "--config", str(RAY_SERVERS_CONFIG_PATH)],
+                        [
+                            TARGET_RUN_CMD + server,
+                            "--config",
+                            str(RAY_SERVERS_CONFIG_PATH),
+                        ],
                         cwd=ROOT_DIR,
                         start_new_session=True,
                         text=True,
@@ -159,7 +158,9 @@ class AtomixSetup:
                         _, port = server_address.split(":")
                         for conn in psutil.net_connections(kind="inet"):
                             if conn.pid is not None and conn.laddr.port == int(port):
-                                print(f"Killing process {conn.pid} listening on port {port}")
+                                print(
+                                    f"Killing process {conn.pid} listening on port {port}"
+                                )
                                 os.kill(conn.pid, signal.SIGKILL)
                                 break
                     raise RuntimeError(f"{server} exited with code {p.returncode}")
@@ -168,14 +169,13 @@ class AtomixSetup:
                 return p
 
             except Exception as e:
-                print(f"Error starting {server}: {e!r}")
+                # print(f"Error starting {server}: {e!r}")
                 if attempt < max_retries:
                     print(f" → retrying in {retry_delay}s…")
                     time.sleep(retry_delay)
                 else:
                     print(f" → gave up after {max_retries} attempts")
                     raise
-
 
 
 atomix_setup = AtomixSetup()

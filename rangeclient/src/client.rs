@@ -20,6 +20,7 @@ use tokio::sync::{oneshot, RwLock};
 use tokio_util::sync::CancellationToken;
 use tonic::transport::Channel;
 use tonic::Request;
+use tracing::info;
 use uuid::Uuid;
 
 pub type Error = RangeServerError;
@@ -369,6 +370,10 @@ impl RangeClient {
     ) -> Result<(), RangeServerError> {
         // TODO: gracefully handle malformed messages instead of unwrapping and crashing.
         // TODO: too much copying :(
+        info!(
+            "Inner RangeClient: Committing transactions {:?}",
+            transactions
+        );
         let req_id = Uuid::new_v4();
         let mut fbb = FlatBufferBuilder::new();
 
@@ -407,7 +412,15 @@ impl RangeClient {
             )
             .await
             .unwrap();
+        info!(
+            "Inner RangeClient: Sent commit request {:?} - {:?}",
+            transactions, req_id
+        );
         let response = rx.await.unwrap()?;
+        info!(
+            "Inner RangeClient: Received commit response {:?}",
+            transactions
+        );
         let msg = response.to_vec();
         let envelope = flatbuffers::root::<ResponseEnvelope>(msg.as_slice()).unwrap();
         match envelope.type_() {
@@ -469,6 +482,7 @@ impl RangeClient {
                         }
                         Some(msg) => {
                             let req_id = Self::get_request_id_from_response(msg.clone());
+                            // info!("Inner RangeClient: Received response {:?}", req_id);
                             let mut state = client.state.write().await;
                             let outstanding_requests = match state.deref_mut() {
                                 State::NotStarted | State::Stopped => {

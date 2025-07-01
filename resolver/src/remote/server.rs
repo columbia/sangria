@@ -4,13 +4,13 @@ use proto::resolver::resolver_server::{
 };
 use proto::resolver::{
     CommitRequest, CommitResponse, GetGroupCommitStatusRequest, GetGroupCommitStatusResponse,
+    GetNumWaitingTransactionsRequest, GetNumWaitingTransactionsResponse,
     GetResolvedTransactionsStatusRequest, GetResolvedTransactionsStatusResponse, GetStatsRequest,
-    GetStatsResponse, GetStatusRequest, GetStatusResponse, GetTransactionInfoStatusRequest,
-    GetTransactionInfoStatusResponse, GetWaitingTransactionsStatusRequest,
-    GetWaitingTransactionsStatusResponse, RegisterCommittedTransactionsRequest,
-    RegisterCommittedTransactionsResponse,
+    GetStatsResponse, GetTransactionInfoStatusRequest, GetTransactionInfoStatusResponse,
+    GetWaitingTransactionsStatusRequest, GetWaitingTransactionsStatusResponse,
+    RegisterCommittedTransactionsRequest, RegisterCommittedTransactionsResponse,
 };
-use std::{collections::HashMap, net::ToSocketAddrs, str::FromStr, sync::Arc};
+use std::{net::ToSocketAddrs, str::FromStr, sync::Arc};
 use tonic::{Request, Response, Status as TStatus, transport::Server as TServer};
 use tracing::{info, instrument};
 use uuid::Uuid;
@@ -89,24 +89,9 @@ impl ProtoResolver for ProtoServer {
         info!("Got a request: {:?}", request);
         let resolver_server = self.resolver_server.clone();
         let stats = Resolver::get_stats(resolver_server.resolver.clone()).await;
-        let mut response_stats = HashMap::new();
-        for (group_size, count) in stats.committed_group_sizes {
-            response_stats.insert(group_size, count as i32);
-        }
         Ok(Response::new(GetStatsResponse {
-            stats: response_stats,
+            stats,
         }))
-    }
-
-    #[instrument(skip(self))]
-    async fn get_status(
-        &self,
-        request: Request<GetStatusRequest>,
-    ) -> Result<Response<GetStatusResponse>, TStatus> {
-        info!("Got a request: {:?}", request);
-        let resolver_server = self.resolver_server.clone();
-        let status = Resolver::get_status(resolver_server.resolver.clone()).await;
-        Ok(Response::new(GetStatusResponse { status }))
     }
 
     #[instrument(skip(self))]
@@ -161,6 +146,22 @@ impl ProtoResolver for ProtoServer {
         let resolver_server = self.resolver_server.clone();
         let status = resolver_server.resolver.get_group_commit_status().await;
         Ok(Response::new(GetGroupCommitStatusResponse { status }))
+    }
+
+    #[instrument(skip(self))]
+    async fn get_num_waiting_transactions(
+        &self,
+        request: Request<GetNumWaitingTransactionsRequest>,
+    ) -> Result<Response<GetNumWaitingTransactionsResponse>, TStatus> {
+        info!("Got a request: {:?}", request);
+        let resolver_server = self.resolver_server.clone();
+        let num_waiting_transactions = resolver_server
+            .resolver
+            .get_num_waiting_transactions()
+            .await;
+        Ok(Response::new(GetNumWaitingTransactionsResponse {
+            num_waiting_transactions: num_waiting_transactions as u32,
+        }))
     }
 }
 

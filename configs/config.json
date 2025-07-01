@@ -14,8 +14,8 @@
         },
         "proto_server_addr": "127.0.0.1:50054",
         "fast_network_addr": "127.0.0.1:50055",
-        "fast_network_polling_core_id": 1,
-        "background_runtime_core_ids": [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+        "fast_network_polling_core_id": 1000,
+        "background_runtime_core_ids": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
     },
     "universe": {
         "proto_server_addr": "127.0.0.1:50056"
@@ -23,8 +23,8 @@
     "frontend": {
         "proto_server_addr": "127.0.0.1:50057",
         "fast_network_addr": "127.0.0.1:50058",
-        "fast_network_polling_core_id": 2,
-        "background_runtime_core_ids": [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
+        "fast_network_polling_core_id": 1000,
+        "background_runtime_core_ids": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
         "transaction_overall_timeout": {
             "secs": 10,
             "nanos": 0
@@ -34,8 +34,8 @@
         "mode": "Remote",
         "proto_server_addr": "127.0.0.1:50059",
         "fast_network_addr": "127.0.0.1:50060",
-        "fast_network_polling_core_id": 3,
-        "background_runtime_core_ids": [4],
+        "fast_network_polling_core_id": 1000,
+        "background_runtime_core_ids": [1],
         "cpu_percentage": 1
     },
     "epoch": {
@@ -60,7 +60,7 @@
                             "name": "ep1",
                             "backend_addr": "127.0.0.1:50051",
                             "fast_network_addr": "127.0.0.1:50052",
-                            "fast_network_polling_core_id": 3
+                            "fast_network_polling_core_id": 1000
                         }
                     ]
                 }

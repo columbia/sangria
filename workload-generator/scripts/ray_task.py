@@ -1,12 +1,10 @@
 import json
 import os
 import re
+import time
 import subprocess
 from utils import *
-
-# load atomix_setup from another script at runtime
 from atomix_setup import atomix_setup
-
 
 def parse_metrics(output):
     metrics = {}
@@ -119,7 +117,9 @@ def run_workload(config):
         config["num_queries"] = resolver_tx_load["num_queries"]
         config["num_keys"] = resolver_tx_load["num_keys"]
         config["name"] = f"{main_name}-2"
-        config["background_runtime_core_ids"] = resolver_tx_load["background_runtime_core_ids"]
+        config["background_runtime_core_ids"] = resolver_tx_load[
+            "background_runtime_core_ids"
+        ]
         os.makedirs(os.path.dirname(SECONDARY_RAY_WORKLOAD_CONFIG_PATH), exist_ok=True)
         with open(SECONDARY_RAY_WORKLOAD_CONFIG_PATH, "w") as f:
             json.dump(config, f)
@@ -143,14 +143,17 @@ def run_workload(config):
         process2 = None
         if resolver_tx_load["max_concurrency"] > 0:
             process2 = subprocess.Popen(
-                cmd2,   
+                cmd2,
                 cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 env={**os.environ, "RUST_LOG": "error"},
             )
-        
+
+        # Let it run for a while
+        time.sleep(2)
+
         process1 = subprocess.Popen(
             cmd1,
             cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -159,14 +162,16 @@ def run_workload(config):
             text=True,
             env={**os.environ, "RUST_LOG": "error"},
         )
-        
+
         try:
             # Wait for the main workload generator to finish
-            stdout1, stderr1 = process1.communicate(timeout=60 * 60)  # 60 minutes timeout
+            stdout1, stderr1 = process1.communicate(
+                timeout=60 * 60
+            )  # 60 minutes timeout
             print(stderr1)
             metrics = parse_metrics(stdout1)
             print("Finished main workload generator")
-            
+
             # Send interrupt signal to the secondary workload generator
             if process2:
                 process2.send_signal(subprocess.signal.SIGUSR1)
@@ -179,14 +184,14 @@ def run_workload(config):
                 if process2:
                     process2.kill()
                 print("Force killed secondary workload generator")
-                
+
         except subprocess.TimeoutExpired:
             process1.kill()
             if process2:
                 process2.kill()
             print(f"Timeout exceeded for config: {config}")
             metrics = {"throughput": 0.0}
-            
+
     except Exception as e:
         print(f"Error running workloads: {e}")
         metrics = {"throughput": 0.0}

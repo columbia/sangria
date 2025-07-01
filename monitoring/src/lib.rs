@@ -1,7 +1,8 @@
+use std::collections::HashMap;
+
 use proto::resolver::resolver_client::ResolverClient as ProtoResolverClient;
 use proto::resolver::{
-    GetGroupCommitStatusRequest, GetResolvedTransactionsStatusRequest, GetStatusRequest,
-    GetTransactionInfoStatusRequest, GetWaitingTransactionsStatusRequest,
+    GetGroupCommitStatusRequest, GetNumWaitingTransactionsRequest, GetResolvedTransactionsStatusRequest, GetStatsRequest, GetTransactionInfoStatusRequest, GetWaitingTransactionsStatusRequest,
 };
 
 pub struct MonitoringClient {
@@ -16,10 +17,10 @@ impl MonitoringClient {
         MonitoringClient { client }
     }
 
-    pub async fn get_resolver_status(&mut self) -> String {
-        let request = tonic::Request::new(GetStatusRequest {});
-        let response = self.client.get_status(request).await.unwrap();
-        response.into_inner().status
+    pub async fn get_stats(&mut self) -> HashMap<String, f64> {
+        let request = tonic::Request::new(GetStatsRequest {});
+        let response = self.client.get_stats(request).await.unwrap();
+        response.into_inner().stats
     }
 
     // Individual component status functions
@@ -57,5 +58,15 @@ impl MonitoringClient {
         let request = tonic::Request::new(GetGroupCommitStatusRequest {});
         let response = self.client.get_group_commit_status(request).await.unwrap();
         response.into_inner().status
+    }
+
+    pub async fn get_num_waiting_transactions(&mut self) -> usize {
+        let request = tonic::Request::new(GetNumWaitingTransactionsRequest {});
+        let response = self
+            .client
+            .get_num_waiting_transactions(request)
+            .await
+            .unwrap();
+        response.into_inner().num_waiting_transactions as usize
     }
 }
