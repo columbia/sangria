@@ -6,6 +6,7 @@ import subprocess
 from utils import *
 from atomix_setup import atomix_setup
 
+
 def parse_metrics(output):
     metrics = {}
     # Find the metrics section between METRICS_START and METRICS_END

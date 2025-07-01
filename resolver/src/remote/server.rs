@@ -89,9 +89,7 @@ impl ProtoResolver for ProtoServer {
         info!("Got a request: {:?}", request);
         let resolver_server = self.resolver_server.clone();
         let stats = Resolver::get_stats(resolver_server.resolver.clone()).await;
-        Ok(Response::new(GetStatsResponse {
-            stats,
-        }))
+        Ok(Response::new(GetStatsResponse { stats }))
     }
 
     #[instrument(skip(self))]

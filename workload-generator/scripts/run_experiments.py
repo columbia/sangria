@@ -24,7 +24,7 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
     # NUM_KEYS = [1, 5, 10, 25, 50, 100, 200, 400, 600]
     # NUM_KEYS = [200, 400, 600]
     # MAX_CONCURRENCY = [200]
-    
+
     BASELINES = [PIPELINED, TRADITIONAL]
 
     NUM_ITERATIONS = 2
@@ -32,14 +32,14 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
 
     NUM_KEYS = [50]
     MAX_CONCURRENCY = [1, 5, 10, 25, 50, 100, 200]
-    
+
     # MAX_CONCURRENCY = [50]
     # BASELINES = [TRADITIONAL]
 
     RESOLVER_CAPACITY = [
         {
             "cpu_percentage": 1,
-            "background_runtime_core_ids": [1] #+ list(range(3, 32))
+            "background_runtime_core_ids": [1],  # + list(range(3, 32))
         },
     ]
 
@@ -49,19 +49,19 @@ def varying_contention_and_resolver_struggling_experiment(ray_logs_dir):
             "max_concurrency": 0,  # zero extra load
             "num_queries": None,
             "num_keys": 100,
-            "background_runtime_core_ids": [2,3],
+            "background_runtime_core_ids": [2, 3],
         },
         {
             "max_concurrency": 100,
             "num_queries": None,
             "num_keys": 100,
-            "background_runtime_core_ids": [2,3],
+            "background_runtime_core_ids": [2, 3],
         },
         {
             "max_concurrency": 1000,
             "num_queries": None,
             "num_keys": 100,
-            "background_runtime_core_ids": [2,3],
+            "background_runtime_core_ids": [2, 3],
         },
         # {
         #     "max_concurrency": 10000000,  # super extra load

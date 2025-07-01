@@ -205,7 +205,9 @@ def bar(
     return traces
 
 
-def bar_with_error_bars(df, x, y, key=None, showlegend=True, order=None, **kwargs) -> List[go.Bar]:
+def bar_with_error_bars(
+    df, x, y, key=None, showlegend=True, order=None, **kwargs
+) -> List[go.Bar]:
     """Create a bar plot with error bars showing min/max values"""
     unique_keys = get_unique_key_values(df, key)
     unique_keys = sorted(unique_keys)

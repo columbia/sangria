@@ -164,7 +164,7 @@ impl Resolver {
                 .write()
                 .await
                 .insert(transaction_id, s);
-            
+
             {
                 // Record waiting transactions sample for statistics
                 let mut stats_tracker = resolver.stats_tracker.write().await;

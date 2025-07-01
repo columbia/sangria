@@ -12,11 +12,10 @@ use coordinator_rangeclient::error::Error;
 use proto::resolver::resolver_client::ResolverClient as ProtoResolverClient;
 use proto::resolver::{
     CommitRequest, GetGroupCommitStatusRequest, GetNumWaitingTransactionsRequest,
-    GetResolvedTransactionsStatusRequest,
-    GetResolvedTransactionsStatusResponse, GetStatsRequest, GetTransactionInfoStatusRequest,
-    GetTransactionInfoStatusResponse, GetWaitingTransactionsStatusRequest,
-    GetWaitingTransactionsStatusResponse, ParticipantRangeInfo as ProtoParticipantRangeInfo,
-    RegisterCommittedTransactionsRequest,
+    GetResolvedTransactionsStatusRequest, GetResolvedTransactionsStatusResponse, GetStatsRequest,
+    GetTransactionInfoStatusRequest, GetTransactionInfoStatusResponse,
+    GetWaitingTransactionsStatusRequest, GetWaitingTransactionsStatusResponse,
+    ParticipantRangeInfo as ProtoParticipantRangeInfo, RegisterCommittedTransactionsRequest,
 };
 use std::collections::HashMap;
 

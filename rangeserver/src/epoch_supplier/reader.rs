@@ -18,12 +18,7 @@ impl Reader {
         cancellation_token: CancellationToken,
     ) -> Self {
         Reader {
-            epoch_reader: EpochReader::new(
-                fast_network,
-                runtime,
-                bg_runtime,
-                cancellation_token,
-            ),
+            epoch_reader: EpochReader::new(fast_network, runtime, bg_runtime, cancellation_token),
         }
     }
 }
@@ -34,10 +29,5 @@ impl EpochSupplier for Reader {
         self.epoch_reader.read_epoch().await
     }
 
-    async fn wait_until_epoch(
-        &self,
-        target_epoch: u64,
-        timeout: chrono::Duration,
-    ) {
-    }
+    async fn wait_until_epoch(&self, target_epoch: u64, timeout: chrono::Duration) {}
 }
