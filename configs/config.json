@@ -28,6 +28,10 @@
         "transaction_overall_timeout": {
             "secs": 10,
             "nanos": 0
+        },
+        "resolver_load_sampling_period": {
+            "secs": 0,
+            "nanos": 100000
         }
     },
     "resolver": {
@@ -36,7 +40,11 @@
         "fast_network_addr": "127.0.0.1:50060",
         "fast_network_polling_core_id": 1000,
         "background_runtime_core_ids": [1],
-        "cpu_percentage": 1
+        "cpu_percentage": 1,
+        "stats_sampling_period": {
+            "secs": 0,
+            "nanos": 1000000
+        }
     },
     "epoch": {
         "proto_server_addr": "127.0.0.1:50050",

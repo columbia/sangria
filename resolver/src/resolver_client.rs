@@ -12,6 +12,7 @@ pub trait ResolverClient: Send + Sync + 'static {
     async fn get_resolved_transactions_status(&self) -> String;
     async fn get_waiting_transactions_status(&self) -> String;
     async fn get_num_waiting_transactions(&self) -> usize;
+    async fn get_average_waiting_transactions(&self) -> f64;
     async fn get_group_commit_status(&self) -> String;
     async fn commit(
         &self,

@@ -59,6 +59,10 @@ impl ResolverClientTrait for ResolverClient {
         self.resolver.get_num_waiting_transactions().await
     }
 
+    async fn get_average_waiting_transactions(&self) -> f64 {
+        self.resolver.get_average_waiting_transactions().await
+    }
+
     async fn commit(
         &self,
         transaction_id: Uuid,

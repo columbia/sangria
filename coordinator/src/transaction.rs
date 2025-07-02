@@ -216,7 +216,7 @@ impl Transaction {
         panic!("encountered rangeclient error, translation not yet implemented.")
     }
 
-    pub async fn commit(&mut self) -> Result<(), Error> {
+    pub async fn commit(&mut self, resolver_average_load: f64) -> Result<(), Error> {
         self.check_still_running()?;
 
         // 1. --- PREPARE PHASE ---
@@ -245,6 +245,7 @@ impl Transaction {
                             has_reads,
                             &writes,
                             &deletes,
+                            resolver_average_load,
                         )
                         .await
                 },

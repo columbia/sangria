@@ -157,6 +157,7 @@ pub struct FrontendConfig {
     pub fast_network_polling_core_id: u32,
     pub background_runtime_core_ids: Vec<u32>,
     pub transaction_overall_timeout: std::time::Duration,
+    pub resolver_load_sampling_period: std::time::Duration,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -167,6 +168,7 @@ pub struct ResolverConfig {
     pub fast_network_polling_core_id: u32,
     pub background_runtime_core_ids: Vec<u32>,
     pub cpu_percentage: f32,
+    pub stats_sampling_period: std::time::Duration,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

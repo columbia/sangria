@@ -10,6 +10,7 @@ service Resolver {
     rpc GetWaitingTransactionsStatus(GetWaitingTransactionsStatusRequest) returns (GetWaitingTransactionsStatusResponse) {}
     rpc GetGroupCommitStatus(GetGroupCommitStatusRequest) returns (GetGroupCommitStatusResponse) {}
     rpc GetNumWaitingTransactions(GetNumWaitingTransactionsRequest) returns (GetNumWaitingTransactionsResponse) {}
+    rpc GetAverageWaitingTransactions(GetAverageWaitingTransactionsRequest) returns (GetAverageWaitingTransactionsResponse) {}
 }
 
 message RegisterCommittedTransactionsRequest {
@@ -82,4 +83,11 @@ message GetNumWaitingTransactionsRequest {
 
 message GetNumWaitingTransactionsResponse {
   uint32 num_waiting_transactions = 1;
+}
+
+message GetAverageWaitingTransactionsRequest {
+}
+
+message GetAverageWaitingTransactionsResponse {
+  double average_waiting_transactions = 1;
 }

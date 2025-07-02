@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use proto::resolver::resolver_client::ResolverClient as ProtoResolverClient;
 use proto::resolver::{
-    GetGroupCommitStatusRequest, GetNumWaitingTransactionsRequest,
+    GetAverageWaitingTransactionsRequest, GetGroupCommitStatusRequest, GetNumWaitingTransactionsRequest,
     GetResolvedTransactionsStatusRequest, GetStatsRequest, GetTransactionInfoStatusRequest,
     GetWaitingTransactionsStatusRequest,
 };
@@ -70,5 +70,15 @@ impl MonitoringClient {
             .await
             .unwrap();
         response.into_inner().num_waiting_transactions as usize
+    }
+
+    pub async fn get_average_waiting_transactions(&mut self) -> f64 {
+        let request = tonic::Request::new(GetAverageWaitingTransactionsRequest {});
+        let response = self
+            .client
+            .get_average_waiting_transactions(request)
+            .await
+            .unwrap();
+        response.into_inner().average_waiting_transactions
     }
 }

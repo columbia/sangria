@@ -62,57 +62,6 @@ impl Resolver {
         }
     }
 
-    pub async fn get_stats(resolver: Arc<Self>) -> HashMap<String, f64> {
-        let mut group_commit_stats = resolver.group_commit.get_stats().await;
-        let mut stats_tracker = resolver.stats_tracker.write().await;
-        let resolver_stats = stats_tracker.get_stats();
-        stats_tracker.reset();
-        group_commit_stats.extend(resolver_stats);
-        group_commit_stats
-    }
-
-    pub async fn reset_stats(&self) {
-        let mut stats_tracker = self.stats_tracker.write().await;
-        stats_tracker.reset();
-    }
-
-    pub async fn get_transaction_info_status(&self) -> String {
-        let mut status = String::new();
-        status.push_str("Info per transaction:\n");
-
-        let state = self.state.read().await;
-        for (tx_id, tx_info) in &state.info_per_transaction {
-            status.push_str(&format!(
-                "  Transaction {}: dependencies={}, dependents={:?}, fake={}\n",
-                tx_id, tx_info.num_dependencies, tx_info.dependents, tx_info.fake
-            ));
-        }
-
-        status
-    }
-
-    pub async fn get_resolved_transactions_status(&self) -> String {
-        let state = self.state.read().await;
-        format!("Resolved transactions: {:?}\n", state.resolved_transactions)
-    }
-
-    pub async fn get_waiting_transactions_status(&self) -> String {
-        let waiting = self.waiting_transactions.read().await;
-        format!(
-            "Waiting transactions: {:?}\n",
-            waiting.keys().collect::<Vec<_>>()
-        )
-    }
-
-    pub async fn get_num_waiting_transactions(&self) -> usize {
-        let waiting = self.waiting_transactions.read().await;
-        waiting.len()
-    }
-
-    pub async fn get_group_commit_status(&self) -> String {
-        self.group_commit.get_status().await
-    }
-
     pub async fn commit(
         resolver: Arc<Self>,
         transaction_id: Uuid,
@@ -165,13 +114,11 @@ impl Resolver {
                 .await
                 .insert(transaction_id, s);
 
-            {
-                // Record waiting transactions sample for statistics
-                let mut stats_tracker = resolver.stats_tracker.write().await;
-                let waiting_count = resolver.waiting_transactions.read().await.len();
-                stats_tracker.record_waiting_transactions_sample(waiting_count);
-                stats_tracker.record_request();
-            }
+            // {
+            //     let mut stats_tracker = resolver.stats_tracker.write().await;
+            //     stats_tracker.record_request();
+            // }
+            
             info!("Updated dependencies for transaction {:?}", transaction_id);
             if num_pending_dependencies == 0 {
                 // If there are no pending dependencies, we can commit the transaction
@@ -318,4 +265,69 @@ impl Resolver {
         }
         Ok(())
     }
+
+    // ---------------------- Statistics ----------------------
+    pub async fn sample_waiting_transactions(&self) {
+        let mut stats_tracker = self.stats_tracker.write().await;
+        let waiting_count = self.waiting_transactions.read().await.len();
+        stats_tracker.record_waiting_transactions_sample(waiting_count);
+    }
+
+    pub async fn get_average_waiting_transactions(&self) -> f64 {
+        let stats_tracker = self.stats_tracker.read().await;
+        stats_tracker.get_average_waiting_transactions()
+    }
+
+    pub async fn get_stats(resolver: Arc<Self>) -> HashMap<String, f64> {
+        // Call this function only at the end of the workload since it's reseting the stats!!
+        let mut group_commit_stats = resolver.group_commit.get_stats().await;
+        let mut stats_tracker = resolver.stats_tracker.write().await;
+        let resolver_stats = stats_tracker.get_stats();
+        stats_tracker.reset();
+        group_commit_stats.extend(resolver_stats);
+        group_commit_stats
+    }
+
+    pub async fn reset_stats(&self) {
+        let mut stats_tracker = self.stats_tracker.write().await;
+        stats_tracker.reset();
+    }
+
+    pub async fn get_transaction_info_status(&self) -> String {
+        let mut status = String::new();
+        status.push_str("Info per transaction:\n");
+
+        let state = self.state.read().await;
+        for (tx_id, tx_info) in &state.info_per_transaction {
+            status.push_str(&format!(
+                "  Transaction {}: dependencies={}, dependents={:?}, fake={}\n",
+                tx_id, tx_info.num_dependencies, tx_info.dependents, tx_info.fake
+            ));
+        }
+        status
+    }
+
+    pub async fn get_resolved_transactions_status(&self) -> String {
+        let state = self.state.read().await;
+        format!("Resolved transactions: {:?}\n", state.resolved_transactions)
+    }
+
+    pub async fn get_waiting_transactions_status(&self) -> String {
+        let waiting = self.waiting_transactions.read().await;
+        format!(
+            "Waiting transactions: {:?}\n",
+            waiting.keys().collect::<Vec<_>>()
+        )
+    }
+
+    pub async fn get_num_waiting_transactions(&self) -> usize {
+        let waiting = self.waiting_transactions.read().await;
+        waiting.len()
+    }
+
+    pub async fn get_group_commit_status(&self) -> String {
+        self.group_commit.get_status().await
+    }
+    // ---------------------- / Statistics ----------------------
+
 }

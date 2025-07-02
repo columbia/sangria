@@ -21,7 +21,7 @@ pub struct Coordinator {
     epoch_reader: Arc<EpochReader>,
     tx_state_store: Arc<TxStateStoreClient>,
     commit_strategy: CommitStrategy,
-    resolver: Arc<dyn ResolverClient>,
+    pub resolver: Arc<dyn ResolverClient>,
 }
 
 impl Coordinator {

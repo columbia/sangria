@@ -67,6 +67,7 @@ table PrepareRequest {
   has_reads:bool;
   puts:[Record];
   deletes:[Key];
+  resolver_average_load:float64;
 }
 
 table PrepareResponse {

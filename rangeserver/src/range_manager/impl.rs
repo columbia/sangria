@@ -326,11 +326,12 @@ where
                 let mut released_lock_early = false;
                 let receiver = {
                     // Decide whether we should release the lock early for each key based on the commit strategy and the heuristic
+                    let resolver_average_load = prepare.resolver_average_load();
                     let mut early_lock_release_per_key = HashMap::new();
                     for key in prepare_record.changes.keys() {
                         early_lock_release_per_key.insert(
                             key.clone(),
-                            self.do_early_lock_release(state, key.clone()).await,
+                            self.do_early_lock_release(state, key.clone(), resolver_average_load).await,
                         );
                     }
                     info!(
@@ -786,7 +787,7 @@ where
         }
     }
 
-    async fn do_early_lock_release(&self, state: &LoadedState, _key: Bytes) -> bool {
+    async fn do_early_lock_release(&self, state: &LoadedState, _key: Bytes, resolver_average_load: f64) -> bool {
         match self.config.commit_strategy {
             CommitStrategy::Pipelined => true,
             CommitStrategy::Traditional => false,
@@ -796,21 +797,21 @@ where
                 // But for now, we just check the contention for the entire range based on how many transactions are currently waiting for the lock and return the same decision for all keys in the range.
                 match self.config.heuristic {
                     Heuristic::LockContention => {
-                        let resolver_cores = self.config.resolver.background_runtime_core_ids.len()
-                            as f32
-                            * self.config.resolver.cpu_percentage;
+                        // let resolver_cores = self.config.resolver.background_runtime_core_ids.len()
+                        //     as f32
+                        //     * self.config.resolver.cpu_percentage;
                         let waiters = state.lock_table.get_num_waiters().await;
-                        if 0.0 <= resolver_cores && resolver_cores < 0.5 {
+                        if resolver_average_load > 300.0 {
                             // avoid resolver
                             return false;
-                        } else if 0.5 <= resolver_cores && resolver_cores < 0.8 {
-                            if waiters >= 6 as u32 {
+                        } else if 100.0 <= resolver_average_load && resolver_average_load < 300.0 {
+                            if waiters >= 8 as u32 {
                                 return true;
                             } else {
                                 return false;
                             }
-                        } else if 0.8 <= resolver_cores && resolver_cores <= 1.0 {
-                            if waiters >= 6 as u32 {
+                        } else if 15.0 <= resolver_average_load && resolver_average_load < 100.0 {
+                            if waiters >= 2 as u32 {
                                 return true;
                             } else {
                                 return false;
@@ -911,6 +912,7 @@ mod tests {
             writes: Vec<(Bytes, Bytes)>,
             deletes: Vec<Bytes>,
             has_reads: bool,
+            resolver_average_load: f64,
         ) -> Result<(), Error> {
             let mut fbb = FlatBufferBuilder::new();
             let transaction_id = Some(Uuidu128::create(
@@ -952,6 +954,7 @@ mod tests {
                     has_reads,
                     puts,
                     deletes,
+                    resolver_average_load,
                 },
             );
             fbb.finish(fbb_root, None);
@@ -1086,6 +1089,7 @@ mod tests {
             Vec::from([(key.clone(), val.clone())]),
             Vec::new(),
             false,
+            0.0,
         )
         .await
         .unwrap();

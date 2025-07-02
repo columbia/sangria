@@ -52,10 +52,11 @@ impl RangeClient {
         has_reads: bool,
         writes: &[Record],
         deletes: &[Bytes],
+        resolver_average_load: f64,
     ) -> Result<PrepareOk, Error> {
         let client = self.get_range_client(range_id).await?;
         client
-            .prepare_transaction(tx, range_id, has_reads, writes, deletes)
+            .prepare_transaction(tx, range_id, has_reads, writes, deletes, resolver_average_load)
             .await
             .map_err(|e| self.handle_rangeserver_err(range_id, e))
     }

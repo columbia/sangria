@@ -7,6 +7,8 @@ pub struct StatisticsTracker {
     waiting_transactions_samples: Vec<usize>,
 }
 
+const MAX_SAMPLES: usize = 100;
+
 impl StatisticsTracker {
     pub fn new() -> Self {
         Self {
@@ -22,6 +24,17 @@ impl StatisticsTracker {
 
     pub fn record_waiting_transactions_sample(&mut self, count: usize) {
         self.waiting_transactions_samples.push(count);
+        if self.waiting_transactions_samples.len() > MAX_SAMPLES {
+            self.waiting_transactions_samples.remove(0);
+        }
+    }
+
+    pub fn get_average_waiting_transactions(&self) -> f64 {
+        if self.waiting_transactions_samples.is_empty() {
+            return 0.0;
+        }
+        self.waiting_transactions_samples.iter().sum::<usize>() as f64
+            / self.waiting_transactions_samples.len() as f64
     }
 
     pub fn get_stats(&mut self) -> HashMap<String, f64> {
@@ -92,8 +105,8 @@ impl StatisticsTracker {
             waiting_transactions_std,
         );
         stats.insert(
-            "waiting_transactions_count".to_string(),
-            self.waiting_transactions_samples.len() as f64,
+            "num_requests".to_string(),
+            self.request_count as f64,
         );
         stats
     }

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use common::{
     config::{Config, ResolverMode},
@@ -349,10 +349,13 @@ impl Frontend for ProtoServer {
                 .ok_or_else(|| TStatus::not_found("Transaction not found"))?
                 .clone()
         };
-
+        let resolver_average_load = {
+            let stats = self.parent_server.resolver_stats.read().await;
+            stats.get("avg_waiting_txs").unwrap_or(&0.0).clone()
+        };
         {
             let mut tx = transaction.lock().await;
-            tx.commit()
+            tx.commit(resolver_average_load)
                 .await
                 .map_err(|e| TStatus::internal(format!("Commit operation failed: {:?}", e)))?;
         }
@@ -376,6 +379,7 @@ pub struct Server {
     //  Keeping track of transactions that haven't committed yet
     transaction_table: RwLock<HashMap<Uuid, Arc<Mutex<Transaction>>>>,
     bg_runtime: tokio::runtime::Handle,
+    resolver_stats: RwLock<HashMap<String, f64>>,
 }
 // TODO: add a trait for Frontend?
 impl Server {
@@ -425,6 +429,7 @@ impl Server {
             coordinator,
             transaction_table: RwLock::new(HashMap::new()),
             bg_runtime,
+            resolver_stats: RwLock::new(HashMap::new()),
         })
     }
 
@@ -449,6 +454,19 @@ impl Server {
                 .await
             {
                 panic!("Unable to start proto server: {:?}", e);
+            }
+        });
+
+        let resolver_clone = server.coordinator.resolver.clone();
+        let server_clone = server.clone();
+        server.bg_runtime.spawn(async move {
+            loop {
+                let avg_waiting_txs = resolver_clone.get_average_waiting_transactions().await;
+                {
+                    let mut stats = server_clone.resolver_stats.write().await;
+                    stats.insert("avg_waiting_txs".to_string(), avg_waiting_txs);
+                }
+                tokio::time::sleep(server_clone.config.frontend.resolver_load_sampling_period).await;
             }
         });
     }

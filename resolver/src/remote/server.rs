@@ -9,6 +9,7 @@ use proto::resolver::{
     GetStatsResponse, GetTransactionInfoStatusRequest, GetTransactionInfoStatusResponse,
     GetWaitingTransactionsStatusRequest, GetWaitingTransactionsStatusResponse,
     RegisterCommittedTransactionsRequest, RegisterCommittedTransactionsResponse,
+    GetAverageWaitingTransactionsRequest, GetAverageWaitingTransactionsResponse,
 };
 use std::{net::ToSocketAddrs, str::FromStr, sync::Arc};
 use tonic::{Request, Response, Status as TStatus, transport::Server as TServer};
@@ -161,6 +162,21 @@ impl ProtoResolver for ProtoServer {
             num_waiting_transactions: num_waiting_transactions as u32,
         }))
     }
+
+    #[instrument(skip(self))]
+    async fn get_average_waiting_transactions(
+        &self,
+        request: Request<GetAverageWaitingTransactionsRequest>,
+    ) -> Result<Response<GetAverageWaitingTransactionsResponse>, TStatus> {
+        let average_waiting_transactions = self
+            .resolver_server
+            .resolver
+            .get_average_waiting_transactions()
+            .await;
+        Ok(Response::new(GetAverageWaitingTransactionsResponse {
+            average_waiting_transactions,
+        }))
+    }
 }
 
 pub struct ResolverServer {
@@ -194,6 +210,16 @@ impl ResolverServer {
                 .await
             {
                 panic!("Unable to start proto server: {:?}", e);
+            }
+        });
+
+        // Spawn a task to periodically collect the number of waiting transactions
+        let resolver_server_clone = resolver_server.clone();
+        bg_runtime.spawn(async move {
+            loop {
+                resolver_server_clone.resolver.sample_waiting_transactions().await;
+                tokio::time::sleep(resolver_server_clone.config.resolver.stats_sampling_period)
+                    .await;
             }
         });
     }

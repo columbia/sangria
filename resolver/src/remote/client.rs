@@ -11,7 +11,7 @@ use common::config::Config;
 use coordinator_rangeclient::error::Error;
 use proto::resolver::resolver_client::ResolverClient as ProtoResolverClient;
 use proto::resolver::{
-    CommitRequest, GetGroupCommitStatusRequest, GetNumWaitingTransactionsRequest,
+    CommitRequest, GetAverageWaitingTransactionsRequest, GetGroupCommitStatusRequest, GetNumWaitingTransactionsRequest,
     GetResolvedTransactionsStatusRequest, GetResolvedTransactionsStatusResponse, GetStatsRequest,
     GetTransactionInfoStatusRequest, GetTransactionInfoStatusResponse,
     GetWaitingTransactionsStatusRequest, GetWaitingTransactionsStatusResponse,
@@ -88,6 +88,15 @@ impl ResolverClientTrait for ResolverClient {
             .await
             .unwrap();
         response.into_inner().num_waiting_transactions as usize
+    }
+
+    async fn get_average_waiting_transactions(&self) -> f64 {
+        let mut client = self.client.clone();
+        let response = client
+            .get_average_waiting_transactions(GetAverageWaitingTransactionsRequest {})
+            .await
+            .unwrap();
+        response.into_inner().average_waiting_transactions
     }
 
     async fn commit(

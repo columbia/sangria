@@ -18,6 +18,7 @@ enum StatusType {
     WaitingTransactions,
     GroupCommit,
     NumWaitingTransactions,
+    AverageWaitingTransactions,
 }
 
 #[tokio::main]
@@ -85,6 +86,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!(
                 "Number of waiting transactions: {}",
                 num_waiting_transactions
+            );
+        }
+        StatusType::AverageWaitingTransactions => {
+            let average_waiting_transactions = client.get_average_waiting_transactions().await;
+            println!(
+                "Average waiting transactions: {}",
+                average_waiting_transactions
             );
         }
     }
