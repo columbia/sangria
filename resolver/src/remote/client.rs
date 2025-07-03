@@ -11,11 +11,12 @@ use common::config::Config;
 use coordinator_rangeclient::error::Error;
 use proto::resolver::resolver_client::ResolverClient as ProtoResolverClient;
 use proto::resolver::{
-    CommitRequest, GetAverageWaitingTransactionsRequest, GetGroupCommitStatusRequest, GetNumWaitingTransactionsRequest,
-    GetResolvedTransactionsStatusRequest, GetResolvedTransactionsStatusResponse, GetStatsRequest,
-    GetTransactionInfoStatusRequest, GetTransactionInfoStatusResponse,
-    GetWaitingTransactionsStatusRequest, GetWaitingTransactionsStatusResponse,
-    ParticipantRangeInfo as ProtoParticipantRangeInfo, RegisterCommittedTransactionsRequest,
+    CommitRequest, GetAverageWaitingTransactionsRequest, GetGroupCommitStatusRequest,
+    GetNumWaitingTransactionsRequest, GetResolvedTransactionsStatusRequest,
+    GetResolvedTransactionsStatusResponse, GetStatsRequest, GetTransactionInfoStatusRequest,
+    GetTransactionInfoStatusResponse, GetWaitingTransactionsStatusRequest,
+    GetWaitingTransactionsStatusResponse, ParticipantRangeInfo as ProtoParticipantRangeInfo,
+    RegisterCommittedTransactionsRequest,
 };
 use std::collections::HashMap;
 

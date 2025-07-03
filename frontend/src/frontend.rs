@@ -466,7 +466,8 @@ impl Server {
                     let mut stats = server_clone.resolver_stats.write().await;
                     stats.insert("avg_waiting_txs".to_string(), avg_waiting_txs);
                 }
-                tokio::time::sleep(server_clone.config.frontend.resolver_load_sampling_period).await;
+                tokio::time::sleep(server_clone.config.frontend.resolver_load_sampling_period)
+                    .await;
             }
         });
     }

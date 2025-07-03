@@ -43,7 +43,7 @@
         "cpu_percentage": 1,
         "stats_sampling_period": {
             "secs": 0,
-            "nanos": 1000000
+            "nanos": 100000
         }
     },
     "epoch": {

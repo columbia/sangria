@@ -3,13 +3,14 @@ use proto::resolver::resolver_server::{
     Resolver as ProtoResolver, ResolverServer as ProtoResolverServer,
 };
 use proto::resolver::{
-    CommitRequest, CommitResponse, GetGroupCommitStatusRequest, GetGroupCommitStatusResponse,
-    GetNumWaitingTransactionsRequest, GetNumWaitingTransactionsResponse,
-    GetResolvedTransactionsStatusRequest, GetResolvedTransactionsStatusResponse, GetStatsRequest,
-    GetStatsResponse, GetTransactionInfoStatusRequest, GetTransactionInfoStatusResponse,
+    CommitRequest, CommitResponse, GetAverageWaitingTransactionsRequest,
+    GetAverageWaitingTransactionsResponse, GetGroupCommitStatusRequest,
+    GetGroupCommitStatusResponse, GetNumWaitingTransactionsRequest,
+    GetNumWaitingTransactionsResponse, GetResolvedTransactionsStatusRequest,
+    GetResolvedTransactionsStatusResponse, GetStatsRequest, GetStatsResponse,
+    GetTransactionInfoStatusRequest, GetTransactionInfoStatusResponse,
     GetWaitingTransactionsStatusRequest, GetWaitingTransactionsStatusResponse,
     RegisterCommittedTransactionsRequest, RegisterCommittedTransactionsResponse,
-    GetAverageWaitingTransactionsRequest, GetAverageWaitingTransactionsResponse,
 };
 use std::{net::ToSocketAddrs, str::FromStr, sync::Arc};
 use tonic::{Request, Response, Status as TStatus, transport::Server as TServer};
@@ -217,7 +218,10 @@ impl ResolverServer {
         let resolver_server_clone = resolver_server.clone();
         bg_runtime.spawn(async move {
             loop {
-                resolver_server_clone.resolver.sample_waiting_transactions().await;
+                resolver_server_clone
+                    .resolver
+                    .sample_waiting_transactions()
+                    .await;
                 tokio::time::sleep(resolver_server_clone.config.resolver.stats_sampling_period)
                     .await;
             }

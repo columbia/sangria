@@ -118,7 +118,7 @@ impl Resolver {
             //     let mut stats_tracker = resolver.stats_tracker.write().await;
             //     stats_tracker.record_request();
             // }
-            
+
             info!("Updated dependencies for transaction {:?}", transaction_id);
             if num_pending_dependencies == 0 {
                 // If there are no pending dependencies, we can commit the transaction
@@ -329,5 +329,4 @@ impl Resolver {
         self.group_commit.get_status().await
     }
     // ---------------------- / Statistics ----------------------
-
 }
