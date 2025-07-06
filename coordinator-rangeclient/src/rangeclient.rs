@@ -53,6 +53,7 @@ impl RangeClient {
         writes: &[Record],
         deletes: &[Bytes],
         resolver_average_load: f64,
+        num_open_clients: u32,
     ) -> Result<PrepareOk, Error> {
         let client = self.get_range_client(range_id).await?;
         client
@@ -63,6 +64,7 @@ impl RangeClient {
                 writes,
                 deletes,
                 resolver_average_load,
+                num_open_clients,
             )
             .await
             .map_err(|e| self.handle_rangeserver_err(range_id, e))

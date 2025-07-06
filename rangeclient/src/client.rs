@@ -203,6 +203,7 @@ impl RangeClient {
         writes: &[Record],
         deletes: &[Bytes],
         resolver_average_load: f64,
+        num_open_clients: u32,
     ) -> Result<PrepareOk, RangeServerError> {
         // TODO: gracefully handle malformed messages instead of unwrapping and crashing.
         // TODO: too much copying :(
@@ -248,6 +249,7 @@ impl RangeClient {
                 puts,
                 deletes,
                 resolver_average_load,
+                num_open_clients,
             },
         );
         fbb.finish(fbb_root, None);

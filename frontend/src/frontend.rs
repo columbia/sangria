@@ -7,6 +7,8 @@ use common::{
     region::Zone,
     transaction_info::TransactionInfo,
 };
+use colored::Colorize;
+
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -43,6 +45,8 @@ use tx_state_store::client::Client as TxStateStoreClient;
 struct ProtoServer {
     parent_server: Arc<Server>,
 }
+
+const MAX_SAMPLES: usize = 100;
 
 #[tonic::async_trait]
 impl Frontend for ProtoServer {
@@ -342,20 +346,41 @@ impl Frontend for ProtoServer {
         })?;
 
         // Get the transaction
-        let transaction = {
+        let (transaction, num_open_clients) = {
             let tx_table = self.parent_server.transaction_table.read().await;
-            tx_table
+            let transaction = tx_table
                 .get(&transaction_id)
                 .ok_or_else(|| TStatus::not_found("Transaction not found"))?
-                .clone()
+                .clone();
+            let num_open_clients = tx_table.len() as u32;
+            (transaction, num_open_clients)
         };
+
+        let num_open_clients = {
+            let mut num_open_clients_samples = self.parent_server.num_open_clients_samples.write().await;
+            num_open_clients_samples.push(num_open_clients);
+            if num_open_clients_samples.len() > MAX_SAMPLES {
+                num_open_clients_samples.remove(0);
+            }
+            num_open_clients_samples.iter().max().copied().unwrap_or(0) as u32
+        };
+
+        info!(
+            "{}",
+            format!("Num open clients: {}", num_open_clients)
+                .italic()
+                .bold()
+                .green()
+        );
+
         let resolver_average_load = {
             let stats = self.parent_server.resolver_stats.read().await;
             stats.get("avg_waiting_txs").unwrap_or(&0.0).clone()
         };
+
         {
             let mut tx = transaction.lock().await;
-            tx.commit(resolver_average_load)
+            tx.commit(resolver_average_load, num_open_clients)
                 .await
                 .map_err(|e| TStatus::internal(format!("Commit operation failed: {:?}", e)))?;
         }
@@ -380,6 +405,7 @@ pub struct Server {
     transaction_table: RwLock<HashMap<Uuid, Arc<Mutex<Transaction>>>>,
     bg_runtime: tokio::runtime::Handle,
     resolver_stats: RwLock<HashMap<String, f64>>,
+    num_open_clients_samples: RwLock<Vec<u32>>,
 }
 // TODO: add a trait for Frontend?
 impl Server {
@@ -430,6 +456,7 @@ impl Server {
             transaction_table: RwLock::new(HashMap::new()),
             bg_runtime,
             resolver_stats: RwLock::new(HashMap::new()),
+            num_open_clients_samples: RwLock::new(Vec::new()),
         })
     }
 

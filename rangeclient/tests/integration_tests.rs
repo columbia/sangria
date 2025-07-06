@@ -303,7 +303,7 @@ async fn commit_no_writes() {
     let deletes = vec![];
     let prepare_ok = context
         .client
-        .prepare_transaction(tx.clone(), &range_id, true, &writes, &deletes)
+        .prepare_transaction(tx.clone(), &range_id, true, &writes, &deletes, 0.0, 1)
         .await
         .unwrap();
     context
@@ -348,7 +348,7 @@ async fn read_modify_write() {
     let deletes = vec![];
     let prepare_ok = context
         .client
-        .prepare_transaction(tx.clone(), &range_id, true, &writes, &deletes)
+        .prepare_transaction(tx.clone(), &range_id, true, &writes, &deletes, 0.0, 1)
         .await
         .unwrap();
     context
@@ -396,7 +396,7 @@ async fn test_prefetch_with_value() {
     let deletes = vec![];
     let prepare_ok = context
         .client
-        .prepare_transaction(tx.clone(), &range_id, true, &writes, &deletes)
+        .prepare_transaction(tx.clone(), &range_id, true, &writes, &deletes, 0.0, 1)
         .await
         .unwrap();
     context

@@ -216,7 +216,7 @@ impl Transaction {
         panic!("encountered rangeclient error, translation not yet implemented.")
     }
 
-    pub async fn commit(&mut self, resolver_average_load: f64) -> Result<(), Error> {
+    pub async fn commit(&mut self, resolver_average_load: f64, num_open_clients: u32) -> Result<(), Error> {
         self.check_still_running()?;
 
         // 1. --- PREPARE PHASE ---
@@ -236,6 +236,7 @@ impl Transaction {
                 })
                 .collect();
             let deletes: Vec<Bytes> = info.deleteset.iter().cloned().collect();
+            let num_open_clients = num_open_clients;
             prepare_join_set.spawn_on(
                 async move {
                     range_client
@@ -246,6 +247,7 @@ impl Transaction {
                             &writes,
                             &deletes,
                             resolver_average_load,
+                            num_open_clients,
                         )
                         .await
                 },

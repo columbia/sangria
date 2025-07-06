@@ -68,6 +68,7 @@ table PrepareRequest {
   puts:[Record];
   deletes:[Key];
   resolver_average_load:float64;
+  num_open_clients:uint32;
 }
 
 table PrepareResponse {
