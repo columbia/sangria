@@ -13,6 +13,7 @@ message RangeKey {
 
 service RangeServer {
     rpc Prefetch (PrefetchRequest) returns (PrefetchResponse);
+    rpc GetStatistics (GetStatisticsRequest) returns (GetStatisticsResponse);
 }
 
 message PrefetchRequest {
@@ -23,4 +24,20 @@ message PrefetchRequest {
 
 message PrefetchResponse {
     string status = 1;
+}
+
+message GetStatisticsRequest {}
+
+message GetStatisticsResponse {
+    repeated RangeStatistics range_statistics = 1;
+}
+
+message RangeStatistics {
+    string range_id = 1;
+    repeated int64 num_waiters = 2;
+    repeated int64 num_pending_commits = 3;
+    repeated string request_timestamps = 4;
+    repeated string predictions = 5;
+    repeated string avg_delta_between_requests = 6;
+    repeated string avg_entropies = 7;
 }

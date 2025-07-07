@@ -29,7 +29,7 @@ class GridSearcherInOrder(Searcher):
 
         # Each iteration should have a different seed
         # self.seeds = [random.randint(0, 1000000000) for _ in range(self.num_iterations)]
-        start_seed = 1234567110
+        start_seed = 1239967999
         self.seeds = [start_seed + i * 10 for i in range(self.num_iterations)]
 
         self.grid = list(itertools.product(*self.param_values))

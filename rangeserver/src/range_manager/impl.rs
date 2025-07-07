@@ -6,11 +6,12 @@ use crate::{
     transaction_abort_reason::TransactionAbortReason, wal::Wal,
 };
 use bytes::Bytes;
+use colored::Colorize;
 use common::config::{CommitStrategy, Config, Heuristic};
 use common::full_range_id::FullRangeId;
 use common::transaction_info::TransactionInfo;
-
-use colored::Colorize;
+use std::fs::File;
+use std::io::Write;
 use uuid::Uuid;
 
 use crate::prefetching_buffer::KeyState;
@@ -266,7 +267,7 @@ where
                         }
                         // TODO: I should leave an entry in the PendingCommitTable for this transaction too - it needs to wait for its dependencies to be resolved too.
                         // state.pending_commit_table.write().await.insert(key, tx.id);
-                        state.lock_table.release().await;
+                        state.lock_table.release(None).await;
                     }
 
                     // Return early for read-only transactions
@@ -327,11 +328,18 @@ where
                 let receiver = {
                     // Decide whether we should release the lock early for each key based on the commit strategy and the heuristic
                     let resolver_average_load = prepare.resolver_average_load();
+                    let num_open_clients = prepare.num_open_clients();
                     let mut early_lock_release_per_key = HashMap::new();
                     for key in prepare_record.changes.keys() {
                         early_lock_release_per_key.insert(
                             key.clone(),
-                            self.do_early_lock_release(state, key.clone(), resolver_average_load).await,
+                            self.do_early_lock_release(
+                                state,
+                                key.clone(),
+                                resolver_average_load,
+                                num_open_clients,
+                            )
+                            .await,
                         );
                     }
                     info!(
@@ -405,7 +413,7 @@ where
                             "Early lock release for transaction {:?} on range {:?}",
                             tx.id, self.range_id.range_id
                         );
-                        state.lock_table.release().await;
+                        state.lock_table.soft_release().await;
                         released_lock_early = true;
                     }
                     receiver
@@ -460,7 +468,7 @@ where
                     });
                     receiver.await.unwrap().unwrap();
                 }
-                state.lock_table.release().await;
+                state.lock_table.release(None).await;
 
                 // let _ = self
                 //     .prefetching_buffer
@@ -605,13 +613,15 @@ where
                 // If any of the committed transactions is the one holding the lock, release it.
                 if let Some(current_holder_id) = state.lock_table.get_current_holder_id().await {
                     if transactions.iter().any(|tx| *tx == current_holder_id) {
-                        state.lock_table.release().await;
+                        state.lock_table.release(None).await;
                         info!(
                             "Lock released for transaction {:?} on range {:?}",
                             current_holder_id, self.range_id.range_id
                         );
                     }
                 }
+
+                state.lock_table.clean_soft_released(&transactions).await;
 
                 Ok(())
             }
@@ -787,7 +797,13 @@ where
         }
     }
 
-    async fn do_early_lock_release(&self, state: &LoadedState, _key: Bytes, resolver_average_load: f64) -> bool {
+    async fn do_early_lock_release(
+        &self,
+        state: &LoadedState,
+        _key: Bytes,
+        resolver_average_load: f64,
+        num_open_clients: u32,
+    ) -> bool {
         match self.config.commit_strategy {
             CommitStrategy::Pipelined => true,
             CommitStrategy::Traditional => false,
@@ -795,23 +811,45 @@ where
                 // When we have per-key locking, we can check contention for each key and allow early-lock-release for that key if it is contended.
                 // e.g. return self.lock_table.is_contended(&key).await;
                 // But for now, we just check the contention for the entire range based on how many transactions are currently waiting for the lock and return the same decision for all keys in the range.
+                // let contention_proxy = state.lock_table.get_num_waiters_and_pending().await;
+                // match self.config.heuristic {
+                //     Heuristic::LockContention => {
+                //         if contention_proxy >= 5000.0 {
+                //             // avoid resolver
+                //             return false;
+                //         } else if 200.0 <= resolver_average_load && resolver_average_load < 5000.0 {
+                //             if contention_proxy >= 1.0 {
+                //                 return true;
+                //             } else {
+                //                 return false;
+                //             }
+                //         } else if 10.0 <= resolver_average_load && resolver_average_load < 200.0 {
+                //             if contention_proxy >= 1.0 {
+                //                 return true;
+                //             } else {
+                //                 return false;
+                //             }
+                //         } else {
+                //             // Always go to Resolver
+                //             return true;
+                //         }
+                //     } // Heuristic::Static => map(state.range_info.range_id) -> Yes or No,
+                // }
+
+                let contention_proxy = num_open_clients as f64;
                 match self.config.heuristic {
                     Heuristic::LockContention => {
-                        // let resolver_cores = self.config.resolver.background_runtime_core_ids.len()
-                        //     as f32
-                        //     * self.config.resolver.cpu_percentage;
-                        let waiters = state.lock_table.get_num_waiters().await;
-                        if resolver_average_load > 300.0 {
+                        if resolver_average_load >= 5000.0 {
                             // avoid resolver
                             return false;
-                        } else if 100.0 <= resolver_average_load && resolver_average_load < 300.0 {
-                            if waiters >= 8 as u32 {
+                        } else if 200.0 <= resolver_average_load && resolver_average_load < 5000.0 {
+                            if contention_proxy > 100.0 {
                                 return true;
                             } else {
                                 return false;
                             }
-                        } else if 15.0 <= resolver_average_load && resolver_average_load < 100.0 {
-                            if waiters >= 2 as u32 {
+                        } else if 10.0 <= resolver_average_load && resolver_average_load < 200.0 {
+                            if contention_proxy > 50.0 {
                                 return true;
                             } else {
                                 return false;
@@ -835,6 +873,16 @@ where
             State::Loaded(state) => {
                 state.lock_table.print_state(self.range_id.range_id).await;
             }
+        }
+    }
+
+    pub async fn get_lock_table_stats(&self) -> lock_table::Statistics {
+        let s = self.state.read().await;
+        match s.deref() {
+            State::NotLoaded | State::Unloaded | State::Loading(_) => {
+                lock_table::Statistics::default()
+            }
+            State::Loaded(state) => state.lock_table.get_statistics().await,
         }
     }
 
@@ -913,6 +961,7 @@ mod tests {
             deletes: Vec<Bytes>,
             has_reads: bool,
             resolver_average_load: f64,
+            num_open_clients: u32,
         ) -> Result<(), Error> {
             let mut fbb = FlatBufferBuilder::new();
             let transaction_id = Some(Uuidu128::create(
@@ -955,6 +1004,7 @@ mod tests {
                     puts,
                     deletes,
                     resolver_average_load,
+                    num_open_clients,
                 },
             );
             fbb.finish(fbb_root, None);

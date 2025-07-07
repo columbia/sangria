@@ -11,6 +11,7 @@ use common::{
 };
 use proto::{
     frontend::frontend_client::FrontendClient,
+    rangeserver::{range_server_client::RangeServerClient, GetStatisticsRequest},
     resolver::resolver_client::ResolverClient,
     resolver::GetStatsRequest,
     universe::{CreateKeyspaceRequest, KeyRangeRequest, Zone as ProtoZone},
@@ -43,6 +44,7 @@ pub struct Metrics {
     pub p99_latency: Duration,
     pub throughput: f64,
     pub resolver_stats: HashMap<String, f64>,
+    pub range_server_stats: HashMap<String, HashMap<String, Vec<String>>>,
 }
 
 // Add a struct to hold our metrics
@@ -57,6 +59,7 @@ pub struct WorkloadGenerator {
     workload_config: WorkloadConfig,
     client: FrontendClient<tonic::transport::Channel>,
     resolver_client: ResolverClient<tonic::transport::Channel>,
+    range_server_client: RangeServerClient<tonic::transport::Channel>,
     metrics: Arc<Mutex<InternalMetrics>>,
     value_per_key: Arc<Mutex<HashMap<usize, u64>>>, // For verification
     rng: Arc<Mutex<StdRng>>,
@@ -68,6 +71,7 @@ impl WorkloadGenerator {
         workload_config: WorkloadConfig,
         client: FrontendClient<tonic::transport::Channel>,
         resolver_client: ResolverClient<tonic::transport::Channel>,
+        range_server_client: RangeServerClient<tonic::transport::Channel>,
     ) -> Self {
         let seed = workload_config
             .seed
@@ -78,6 +82,7 @@ impl WorkloadGenerator {
             workload_config,
             client,
             resolver_client,
+            range_server_client,
             metrics: Arc::new(Mutex::new(InternalMetrics::default())),
             value_per_key: Arc::new(Mutex::new(HashMap::new())),
             rng,
@@ -120,17 +125,18 @@ impl WorkloadGenerator {
 
     pub async fn generate_transaction(&self) -> Arc<dyn Transaction + Send + Sync> {
         //  sample num_keys uniformly from {1, 2}
+        let num_keys = 2; //rng.gen_range(1..3);
+                          // let keys = self.zipf_sample_without_replacement(num_keys, &mut rng);
+                          // info!("{}", format!("Generated transaction with keys: {:?}", keys).blue());
+                          // sample num_keys without replacement from uniform distribution
         let mut rng = self.rng.lock().await;
-        let num_keys = rng.gen_range(1..3);
-        let keys = self.zipf_sample_without_replacement(num_keys, &mut rng);
-        // info!("{}", format!("Generated transaction with keys: {:?}", keys).blue());
-        // sample num_keys without replacement from uniform distribution
-        // let mut keys: Vec<usize> = (0..self.workload_config.num_keys)
-        //     .choose_multiple(&mut thread_rng(), num_keys)
-        //     .into_iter()
-        //     .map(|k| k as usize)
-        //     .collect();
-        // keys.sort();
+        let mut keys: Vec<usize> = (0..self.workload_config.num_keys)
+            .choose_multiple(&mut *rng, num_keys)
+            .into_iter()
+            .map(|k| k as usize)
+            .collect();
+        drop(rng);
+        keys.sort();
         let keyspace = Keyspace {
             namespace: self.workload_config.namespace.clone(),
             name: self.workload_config.name.clone(),
@@ -285,6 +291,42 @@ impl WorkloadGenerator {
         }
         info!("Resolver stats: {:?}", stats_map);
 
+        // Get range server stats
+        let mut range_server_stats = HashMap::new();
+        let mut client_clone = self.range_server_client.clone();
+        let response = client_clone
+            .get_statistics(GetStatisticsRequest {})
+            .await
+            .unwrap();
+        let response = response.into_inner();
+        for range_statistic in &response.range_statistics {
+            range_server_stats.insert(
+                range_statistic.range_id.to_string(),
+                HashMap::from([
+                    (
+                        "num_waiters".to_string(),
+                        range_statistic
+                            .num_waiters
+                            .iter()
+                            .map(|t| t.to_string())
+                            .collect::<Vec<String>>(),
+                    ),
+                    (
+                        "num_pending_commits".to_string(),
+                        range_statistic
+                            .num_pending_commits
+                            .iter()
+                            .map(|t| t.to_string())
+                            .collect::<Vec<String>>(),
+                    ),
+                    // ("request_timestamps".to_string(), range_statistic.request_timestamps.clone()),
+                    // ("predictions".to_string(), range_statistic.predictions.clone()),
+                    // ("avg_delta_between_requests".to_string(), range_statistic.avg_delta_between_requests.clone()),
+                    // ("avg_entropies".to_string(), range_statistic.avg_entropies.clone()),
+                ]),
+            );
+        }
+        // info!("Range server stats: {:?}", range_server_stats);
         Metrics {
             total_duration,
             total_transactions,
@@ -294,6 +336,7 @@ impl WorkloadGenerator {
             p99_latency,
             throughput,
             resolver_stats: stats_map,
+            range_server_stats,
         }
     }
 }

@@ -1,5 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
+use colored::Colorize;
 use common::{
     config::{Config, ResolverMode},
     keyspace::Keyspace,
@@ -7,7 +8,6 @@ use common::{
     region::Zone,
     transaction_info::TransactionInfo,
 };
-use colored::Colorize;
 
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -357,7 +357,8 @@ impl Frontend for ProtoServer {
         };
 
         let num_open_clients = {
-            let mut num_open_clients_samples = self.parent_server.num_open_clients_samples.write().await;
+            let mut num_open_clients_samples =
+                self.parent_server.num_open_clients_samples.write().await;
             num_open_clients_samples.push(num_open_clients);
             if num_open_clients_samples.len() > MAX_SAMPLES {
                 num_open_clients_samples.remove(0);

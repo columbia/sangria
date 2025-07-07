@@ -19,6 +19,7 @@ use tokio_util::sync::CancellationToken;
 
 use uuid::Uuid;
 
+use crate::range_manager::lock_table::Statistics;
 use crate::range_manager::r#impl::RangeManager;
 use crate::range_manager::RangeManager as RangeManagerTrait;
 use crate::wal::cassandra::CassandraWal;
@@ -29,7 +30,9 @@ use flatbuf::rangeserver_flatbuffers::range_server::TransactionInfo as FlatbufTr
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 
 use proto::rangeserver::range_server_server::{RangeServer, RangeServerServer};
-use proto::rangeserver::{PrefetchRequest, PrefetchResponse};
+use proto::rangeserver::{
+    GetStatisticsRequest, GetStatisticsResponse, PrefetchRequest, PrefetchResponse, RangeStatistics,
+};
 
 use crate::prefetching_buffer::PrefetchingBuffer;
 use colored::Colorize;
@@ -93,6 +96,49 @@ where
             }
             Err(_) => Err(TStatus::internal("Failed to process prefetch request")),
         }
+    }
+
+    async fn get_statistics(
+        &self,
+        _request: Request<GetStatisticsRequest>,
+    ) -> Result<Response<GetStatisticsResponse>, TStatus> {
+        let loaded_ranges = self.parent_server.loaded_ranges.read().await;
+        let mut range_statistics = Vec::new();
+
+        let mut i = 0;
+        for (range_id, range_manager) in loaded_ranges.iter() {
+            let lock_table_stats = range_manager.get_lock_table_stats().await;
+            range_statistics.push(RangeStatistics {
+                range_id: i.to_string(),
+                num_waiters: lock_table_stats.num_waiters,
+                num_pending_commits: lock_table_stats.num_pending_commits,
+                request_timestamps: lock_table_stats
+                    .request_timestamps
+                    .iter()
+                    .map(|t| t.to_string())
+                    .collect(),
+                predictions: lock_table_stats
+                    .predictions
+                    .iter()
+                    .map(|t| t.to_string())
+                    .collect(),
+                avg_delta_between_requests: lock_table_stats
+                    .avg_delta_between_requests
+                    .iter()
+                    .map(|t| t.to_string())
+                    .collect(),
+                avg_entropies: lock_table_stats
+                    .avg_entropies
+                    .iter()
+                    .map(|t| t.to_string())
+                    .collect(),
+            });
+            i += 1;
+        }
+
+        let response = GetStatisticsResponse { range_statistics };
+
+        Ok(Response::new(response))
     }
 }
 
@@ -754,22 +800,22 @@ where
             println!("Warden update loop exited!")
         });
 
-        // let prefetch = ProtoServer {
-        //     parent_server: server.clone(),
-        // };
+        let prefetch = ProtoServer {
+            parent_server: server.clone(),
+        };
 
-        // // Spawn the gRPC server as a separate task
-        // server.bg_runtime.spawn(async move {
-        //     if let Err(e) = TServer::builder()
-        //         .add_service(RangeServerServer::new(prefetch))
-        //         .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(
-        //             proto_server_listener,
-        //         ))
-        //         .await
-        //     {
-        //         println!("Server error: {}", e);
-        //     }
-        // });
+        // Spawn the gRPC server as a separate task
+        server.bg_runtime.spawn(async move {
+            if let Err(e) = TServer::builder()
+                .add_service(RangeServerServer::new(prefetch))
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(
+                    proto_server_listener,
+                ))
+                .await
+            {
+                println!("Server error: {}", e);
+            }
+        });
 
         let server_ref = server.clone();
         let res = server

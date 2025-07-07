@@ -216,7 +216,11 @@ impl Transaction {
         panic!("encountered rangeclient error, translation not yet implemented.")
     }
 
-    pub async fn commit(&mut self, resolver_average_load: f64, num_open_clients: u32) -> Result<(), Error> {
+    pub async fn commit(
+        &mut self,
+        resolver_average_load: f64,
+        num_open_clients: u32,
+    ) -> Result<(), Error> {
         self.check_still_running()?;
 
         // 1. --- PREPARE PHASE ---

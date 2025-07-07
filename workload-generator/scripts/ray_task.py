@@ -27,6 +27,7 @@ def parse_metrics(output):
         "total_duration": r"Total Duration: ([\d\.]+[µnm]?s)",
         "total_transactions": r"Total Transactions: (\d+)",
         "resolver_stats": r"Resolver stats: (.*)",
+        "range_server_stats": r"Range server stats: (.*)",
     }
 
     for metric, pattern in patterns.items():
@@ -35,6 +36,8 @@ def parse_metrics(output):
             value = match.group(1)
             # Convert duration strings to seconds
             if metric == "resolver_stats":
+                metrics[metric] = value
+            elif metric == "range_server_stats":
                 metrics[metric] = value
             elif "s" in value:
                 if "µs" in value:

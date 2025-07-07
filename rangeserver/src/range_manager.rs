@@ -1,5 +1,6 @@
 pub mod r#impl;
-mod lock_table;
+pub mod labeled_histograms;
+pub mod lock_table;
 
 use crate::error::Error;
 use bytes::Bytes;

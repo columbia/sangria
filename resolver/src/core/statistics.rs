@@ -1,13 +1,15 @@
-use std::{collections::HashMap, time::Instant};
+use std::{collections::HashMap, fs::File, io::Write, time::Instant};
+use uuid::Uuid;
 
 #[derive(Debug)]
 pub struct StatisticsTracker {
     request_count: u64,
     last_reset_time: Instant,
     waiting_transactions_samples: Vec<usize>,
+    // history: Vec<f64>,
 }
 
-const MAX_SAMPLES: usize = 100;
+const MAX_SAMPLES: usize = 200;
 
 impl StatisticsTracker {
     pub fn new() -> Self {
@@ -15,6 +17,7 @@ impl StatisticsTracker {
             request_count: 0,
             last_reset_time: Instant::now(),
             waiting_transactions_samples: Vec::new(),
+            // history: Vec::new(),
         }
     }
 
@@ -27,14 +30,22 @@ impl StatisticsTracker {
         if self.waiting_transactions_samples.len() > MAX_SAMPLES {
             self.waiting_transactions_samples.remove(0);
         }
+        // self.history.push(count as f64);
     }
 
     pub fn get_average_waiting_transactions(&self) -> f64 {
         if self.waiting_transactions_samples.is_empty() {
             return 0.0;
         }
-        self.waiting_transactions_samples.iter().sum::<usize>() as f64
-            / self.waiting_transactions_samples.len() as f64
+        // self.waiting_transactions_samples.iter().sum::<usize>() as f64
+        // / self.waiting_transactions_samples.len() as f64
+        let waiting_transactions_max = self
+            .waiting_transactions_samples
+            .iter()
+            .max()
+            .copied()
+            .unwrap_or(0);
+        waiting_transactions_max as f64
     }
 
     pub fn get_stats(&mut self) -> HashMap<String, f64> {
@@ -104,10 +115,7 @@ impl StatisticsTracker {
             "waiting_transactions_std".to_string(),
             waiting_transactions_std,
         );
-        stats.insert(
-            "num_requests".to_string(),
-            self.request_count as f64,
-        );
+        stats.insert("num_requests".to_string(), self.request_count as f64);
         stats
     }
 
@@ -115,5 +123,6 @@ impl StatisticsTracker {
         self.request_count = 0;
         self.last_reset_time = Instant::now();
         self.waiting_transactions_samples.clear();
+        // self.history.clear();
     }
 }

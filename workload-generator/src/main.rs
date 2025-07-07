@@ -3,6 +3,7 @@ use common::config::Config;
 use common::util::core_affinity::restrict_to_cores;
 use core_affinity;
 use proto::frontend::frontend_client::FrontendClient;
+use proto::rangeserver::range_server_client::RangeServerClient;
 use proto::resolver::resolver_client::ResolverClient;
 use serde_json;
 use std::fs;
@@ -48,10 +49,16 @@ async fn run_workload(
         .await
         .unwrap();
 
+    let range_server_addr = config.range_server.proto_server_addr.to_string();
+    let range_server_client = RangeServerClient::connect(format!("http://{}", range_server_addr))
+        .await
+        .unwrap();
+
     let workload_generator = Arc::new(WorkloadGenerator::new(
         workload_config,
         client,
         resolver_client,
+        range_server_client,
     ));
     if create_keyspace {
         workload_generator.create_keyspace().await;
@@ -109,6 +116,7 @@ fn main() {
         Total Duration: {:?}\n\
         Total Transactions: {}\n\
         Resolver stats: {:?}\n\
+        Range server stats: {:?}\n\
         METRICS_END",
         metrics.throughput,
         metrics.avg_latency,
@@ -118,5 +126,6 @@ fn main() {
         metrics.total_duration,
         metrics.total_transactions,
         metrics.resolver_stats,
+        metrics.range_server_stats,
     )
 }
