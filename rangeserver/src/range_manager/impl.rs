@@ -333,13 +333,8 @@ where
                     for key in prepare_record.changes.keys() {
                         early_lock_release_per_key.insert(
                             key.clone(),
-                            self.do_early_lock_release(
-                                state,
-                                key.clone(),
-                                resolver_average_load,
-                                num_open_clients,
-                            )
-                            .await,
+                            self.do_early_lock_release(state, key.clone(), resolver_average_load, num_open_clients)
+                                .await,
                         );
                     }
                     info!(
@@ -804,6 +799,8 @@ where
         resolver_average_load: f64,
         num_open_clients: u32,
     ) -> bool {
+
+
         match self.config.commit_strategy {
             CommitStrategy::Pipelined => true,
             CommitStrategy::Traditional => false,
@@ -848,7 +845,7 @@ where
                             } else {
                                 return false;
                             }
-                        } else if 10.0 <= resolver_average_load && resolver_average_load < 200.0 {
+                        } else if 50.0 <= resolver_average_load && resolver_average_load < 200.0 {
                             if contention_proxy > 50.0 {
                                 return true;
                             } else {
@@ -882,10 +879,12 @@ where
             State::NotLoaded | State::Unloaded | State::Loading(_) => {
                 lock_table::Statistics::default()
             }
-            State::Loaded(state) => state.lock_table.get_statistics().await,
+            State::Loaded(state) => {
+                state.lock_table.get_statistics().await
+            }
         }
     }
-
+    
     async fn acquire_range_lock(
         &self,
         state: &LoadedState,

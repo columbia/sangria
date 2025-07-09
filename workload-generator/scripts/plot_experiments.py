@@ -112,6 +112,8 @@ class Plotter:
         }
         make_plots(figs, rows=rows, cols=cols, **figs_args)
 
+        df.to_csv(out_dir.joinpath(f'{y}_{facet_row}_{x}.csv'), index=False)
+
     def plot_resolver_group_sizes(self, free_param: str, fixed_params: Dict[str, int]):
         # Only first iteration of each experiment
         results = self.results[self.results["iteration"] == 1].copy()
@@ -165,6 +167,7 @@ class Plotter:
             "width": 1500,
         }
         make_plots(figs, rows=rows, cols=cols, **figs_args)
+        df.to_csv(out_dir.joinpath(f'{free_param}_{fixed_params}.csv'), index=False)
 
     def plot_resolver_stats(
         self, y: str, x: str, facet_row: str, fixed_params: Dict[str, int]):
@@ -505,28 +508,28 @@ def main():
     #             fixed_params=fixed_params,
     #         )
 
-    # --------Plot Range Server Stats--------
-    unique_resolver_loads = get_unique_key_values(df, "resolver_tx_load_concurrency")
-    unique_baselines = get_unique_key_values(df, "baseline")
+    # # --------Plot Range Server Stats--------
+    # unique_resolver_loads = get_unique_key_values(df, "resolver_tx_load_concurrency")
+    # unique_baselines = get_unique_key_values(df, "baseline")
 
-    for unique_baseline in unique_baselines:
-        for unique_resolver_load in unique_resolver_loads:
-            fixed_params["resolver_tx_load_concurrency"] = unique_resolver_load
-            fixed_params["baseline"] = unique_baseline
-            plotter.plot_range_server_stats(
-                fixed_params=fixed_params,
-            )
+    # for unique_baseline in unique_baselines:
+    #     for unique_resolver_load in unique_resolver_loads:
+    #         fixed_params["resolver_tx_load_concurrency"] = unique_resolver_load
+    #         fixed_params["baseline"] = unique_baseline
+    #         plotter.plot_range_server_stats(
+    #             fixed_params=fixed_params,
+    #         )
 
 
-    # # --------Plot Resolver Group Sizes--------
-    # subplot_key = free_params[0]
-    # unique_values_of_subplot_key = get_unique_key_values(plotter.results, subplot_key)
-    # for subplot_key_value in unique_values_of_subplot_key:
-    #     fixed_params[subplot_key] = subplot_key_value
-    #     plotter.plot_resolver_group_sizes(
-    #         free_param=free_params[1],
-    #         fixed_params=fixed_params,
-    #     )
+    # --------Plot Resolver Group Sizes--------
+    subplot_key = free_params[0]
+    unique_values_of_subplot_key = get_unique_key_values(plotter.results, subplot_key)
+    for subplot_key_value in unique_values_of_subplot_key:
+        fixed_params[subplot_key] = subplot_key_value
+        plotter.plot_resolver_group_sizes(
+            free_param=free_params[1],
+            fixed_params=fixed_params,
+        )
 
 
 if __name__ == "__main__":
