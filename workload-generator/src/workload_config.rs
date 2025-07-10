@@ -11,7 +11,7 @@ pub struct WorkloadConfig {
     pub namespace: String,
     pub name: String,
     #[serde(rename = "max_concurrency")]
-    pub max_concurrency: u64,
+    pub max_concurrency: String,
     #[serde(rename = "seed")]
     pub seed: Option<u64>,
     #[serde(rename = "background_runtime_core_ids")]

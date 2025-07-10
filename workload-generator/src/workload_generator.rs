@@ -190,66 +190,86 @@ impl WorkloadGenerator {
 
     pub async fn run(&self, runtime_handle: Handle) -> Metrics {
         info!("Starting workload");
-        let max_concurrency = min(
-            self.workload_config.max_concurrency,
-            self.workload_config.num_queries.unwrap_or(u64::MAX),
-        );
-        let semaphore = Arc::new(Semaphore::new(max_concurrency as usize));
-
         {
             let mut metrics = self.metrics.lock().await;
             metrics.start_time = Some(Instant::now());
         }
 
-        let mut sigusr1_stream = signal(SignalKind::user_defined1()).unwrap();
+        let concurrency_configs: Vec<Vec<u64>> =
+            if !self.workload_config.max_concurrency.contains(":") {
+                vec![vec![
+                    self.workload_config.max_concurrency.parse::<u64>().unwrap(),
+                    self.workload_config.num_queries.unwrap_or(u64::MAX),
+                ]]
+            } else {
+                self.workload_config
+                    .max_concurrency
+                    .split(",")
+                    .map(|s| {
+                        s.split(":")
+                            .map(|s| s.parse::<u64>().unwrap())
+                            .collect::<Vec<u64>>()
+                    })
+                    .collect::<Vec<Vec<u64>>>()
+            };
+        info!("Concurrency configs: {:?}", concurrency_configs);
+        for concurrency_config in concurrency_configs {
+            let max_concurrency = concurrency_config[0];
+            let num_queries = concurrency_config[1];
 
-        let mut task_counter = 0;
-        let mut join_set = JoinSet::new();
-        loop {
-            tokio::select! {
-                Ok(permit) = semaphore.clone().acquire_owned() => {
-                    task_counter += 1;
-                    if task_counter > self.workload_config.num_queries.unwrap_or(u64::MAX) {
-                        drop(permit);
-                        break;
+            let semaphore = Arc::new(Semaphore::new(max_concurrency as usize));
+            let mut sigusr1_stream = signal(SignalKind::user_defined1()).unwrap();
+
+            {
+                let mut task_counter = 0;
+                let mut join_set = JoinSet::new();
+                loop {
+                    tokio::select! {
+                        Ok(permit) = semaphore.clone().acquire_owned() => {
+                            task_counter += 1;
+                            if task_counter > num_queries {
+                                drop(permit);
+                                break;
+                            }
+                            let next_task = self.generate_transaction().await;
+                            let metrics = self.metrics.clone();
+                            let value_per_key = self.value_per_key.clone();
+                            let join_handle = runtime_handle.spawn(async move {
+                                let start_time = Instant::now();
+                                let result = next_task.execute(value_per_key).await;
+                                let latency = start_time.elapsed();
+
+                                // Record metrics
+                                let mut metrics = metrics.lock().await;
+                                metrics.latencies.push(latency);
+                                metrics.completed_transactions += 1;
+                                drop(permit);
+                                result
+                            });
+
+                            join_set.spawn(async move {
+                                let _ = join_handle.await;
+                            });
+                        }
+                        Some(res) = join_set.join_next() => {
+                            if let Err(e) = res {
+                                error!("Task panicked: {:?}", e);
+                            }
+                        }
+                        _ = sigusr1_stream.recv() => {
+                            println!("Received SIGUSR1, initiating shutdown");
+                            return Metrics::default();
+                        }
+
+                        else => break,
                     }
-                    let next_task = self.generate_transaction().await;
-                    let metrics = self.metrics.clone();
-                    let value_per_key = self.value_per_key.clone();
-                    let join_handle = runtime_handle.spawn(async move {
-                        let start_time = Instant::now();
-                        let result = next_task.execute(value_per_key).await;
-                        let latency = start_time.elapsed();
-
-                        // Record metrics
-                        let mut metrics = metrics.lock().await;
-                        metrics.latencies.push(latency);
-                        metrics.completed_transactions += 1;
-                        drop(permit);
-                        result
-                    });
-
-                    join_set.spawn(async move {
-                        let _ = join_handle.await;
-                    });
                 }
-                Some(res) = join_set.join_next() => {
+
+                while let Some(res) = join_set.join_next().await {
                     if let Err(e) = res {
                         error!("Task panicked: {:?}", e);
                     }
                 }
-                _ = sigusr1_stream.recv() => {
-                    println!("Received SIGUSR1, initiating shutdown");
-                    break;
-                }
-
-                else => break,
-            }
-        }
-
-        while let Some(res) = join_set.join_next().await {
-            if let Err(e) = res {
-                error!("Task panicked: {:?}", e);
             }
         }
 

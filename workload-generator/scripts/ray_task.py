@@ -145,7 +145,7 @@ def run_workload(config):
 
     try:
         process2 = None
-        if resolver_tx_load["max_concurrency"] > 0:
+        if resolver_tx_load["max_concurrency"] != "0":
             process2 = subprocess.Popen(
                 cmd2,
                 cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
