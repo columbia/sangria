@@ -13,8 +13,33 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 pio.kaleido.scope.mathjax = None
 
-colors_list = ["red", "green", "blue", "purple", "orange", "brown", "pink", "gray", "black"]
-markers_list = ["circle", "square", "diamond", "triangle-up", "triangle-down", "triangle-left", "triangle-right", "triangle-top", "triangle-bottom", "triangle-topleft", "triangle-topright", "triangle-bottomleft", "triangle-bottomright"]
+colors_list = [
+    "red",
+    "green",
+    "blue",
+    "purple",
+    "orange",
+    "brown",
+    "pink",
+    "gray",
+    "black",
+]
+markers_list = [
+    "circle",
+    "square",
+    "diamond",
+    "triangle-up",
+    "triangle-down",
+    "triangle-left",
+    "triangle-right",
+    "triangle-top",
+    "triangle-bottom",
+    "triangle-topleft",
+    "triangle-topright",
+    "triangle-bottomleft",
+    "triangle-bottomright",
+]
+
 
 def create_color_map(df, key):
     if key == "max_concurrency":
@@ -23,7 +48,6 @@ def create_color_map(df, key):
         for i, key in enumerate(unique_keys):
             color_map[key] = colors_list[i]
         return color_map
-    
 
     unique_keys = get_unique_key_values(df, key)
     unique_keys = sorted(unique_keys)
@@ -64,6 +88,7 @@ def create_marker_map(df, key):
         for i, key in enumerate(unique_keys):
             marker_map[key] = markers_list[i]
         return marker_map
+
 
 def make_plots(
     figs,
@@ -237,8 +262,6 @@ def cdf(df, cumvalues, group_sizes, showlegend=True, **kwargs):
     return traces
 
 
-
-
 # ------------------------------------------------------------
 def scatter(df, x, key=None, showlegend=True, **kwargs) -> List[go.Scatter]:
     """Create a scatter plot"""
@@ -270,7 +293,7 @@ def scatter(df, x, key=None, showlegend=True, **kwargs) -> List[go.Scatter]:
 def bar2(df, y, key=None, showlegend=True, **kwargs) -> List[go.Scatter]:
     unique_keys = get_unique_key_values(df, key)
     color_map = create_color_map(df, key)
-    
+
     traces = []
     for i, unique_key in enumerate(unique_keys):
         df_key = df[df[key] == unique_key]
@@ -307,20 +330,22 @@ def entropy(samples):
         ent -= p * math.log2(p)
     return ent
 
+
 data = {}
+
+
 def entropy_line(df, y, key=None, showlegend=True, **kwargs) -> List[go.Scatter]:
     unique_keys = get_unique_key_values(df, key)
     color_map = create_color_map(df, key)
-    
+
     traces = []
     for i, unique_key in enumerate(unique_keys):
         df_key = df[df[key] == unique_key]
         y_list = df_key[y].values.tolist()[0]
 
-
         if unique_key not in data:
             data[unique_key] = []
-        
+
         # # counter of ylist and normalize it
         # counter = Counter(y_list)
         # total = sum(counter.values())
@@ -341,9 +366,11 @@ def entropy_line(df, y, key=None, showlegend=True, **kwargs) -> List[go.Scatter]
         #     df = pd.DataFrame.from_dict(flattened_data, orient='index')
         #     df.to_csv(f"data.csv")
 
-        entropy_list = [entropy(y_list[:i+1]) for i in range(len(y_list))]
+        entropy_list = [entropy(y_list[: i + 1]) for i in range(len(y_list))]
         # take the avg of each prefix
-        entropy_list = [sum(entropy_list[:i+1]) / (i+1) for i in range(len(entropy_list))]
+        entropy_list = [
+            sum(entropy_list[: i + 1]) / (i + 1) for i in range(len(entropy_list))
+        ]
 
         trace = go.Scatter(
             x=list(range(len(entropy_list))),
@@ -368,11 +395,11 @@ def max_line(df, y, key=None, showlegend=True, **kwargs) -> List[go.Scatter]:
         if len(y_list) == 0:
             return 0
         return np.percentile(y_list, 75)
-    
+
     for i, unique_key in enumerate(unique_keys):
         df_key = df[df[key] == unique_key]
         y_list = df_key[y].values.tolist()[0]
-        max_list = [percentile(y_list[:i+1]) for i in range(len(y_list))]
+        max_list = [percentile(y_list[: i + 1]) for i in range(len(y_list))]
 
         # # take the avg of each prefix
         # max_list = [sum(max_list[:i+1]) / (i+1) for i in range(len(max_list))]
@@ -390,17 +417,21 @@ def max_line(df, y, key=None, showlegend=True, **kwargs) -> List[go.Scatter]:
         traces.append(trace)
     return traces
 
+
 def delta_line(df, y, key=None, showlegend=True, **kwargs) -> List[go.Scatter]:
     unique_keys = get_unique_key_values(df, key)
     color_map = create_color_map(df, key)
-    
+
     traces = []
     for i, unique_key in enumerate(unique_keys):
         df_key = df[df[key] == unique_key]
         timestamp_stream = df_key[y].values.tolist()[0]
 
-        delta_list = [timestamp_stream[i+1] - timestamp_stream[i] for i in range(len(timestamp_stream)-1)]
-        delta_avg = [sum(delta_list[:i+1]) / (i+1) for i in range(len(delta_list))]
+        delta_list = [
+            timestamp_stream[i + 1] - timestamp_stream[i]
+            for i in range(len(timestamp_stream) - 1)
+        ]
+        delta_avg = [sum(delta_list[: i + 1]) / (i + 1) for i in range(len(delta_list))]
 
         trace = go.Scatter(
             x=list(range(len(delta_avg))),
@@ -419,7 +450,7 @@ def delta_line(df, y, key=None, showlegend=True, **kwargs) -> List[go.Scatter]:
 def delta_line2(df, y, key=None, showlegend=True, **kwargs) -> List[go.Scatter]:
     unique_keys = get_unique_key_values(df, key)
     color_map = create_color_map(df, key)
-    
+
     traces = []
     for i, unique_key in enumerate(unique_keys):
         df_key = df[df[key] == unique_key]
@@ -475,10 +506,13 @@ def predictions(df, y, key=None, showlegend=True, **kwargs) -> List[go.Scatter]:
         traces.append(trace)
     return traces
 
-def delta_between_requests(df, y, key=None, showlegend=True, **kwargs) -> List[go.Scatter]:
+
+def delta_between_requests(
+    df, y, key=None, showlegend=True, **kwargs
+) -> List[go.Scatter]:
     unique_keys = get_unique_key_values(df, key)
     color_map = create_color_map(df, key)
-    
+
     traces = []
     for i, unique_key in enumerate(unique_keys):
         df_key = df[df[key] == unique_key]
@@ -496,6 +530,7 @@ def delta_between_requests(df, y, key=None, showlegend=True, **kwargs) -> List[g
         )
         traces.append(trace)
     return traces
+
 
 def avg_entropy(df, y, key=None, showlegend=True, **kwargs) -> List[go.Scatter]:
     """Create a scatter plot"""
@@ -523,6 +558,8 @@ def avg_entropy(df, y, key=None, showlegend=True, **kwargs) -> List[go.Scatter]:
         )
         traces.append(trace)
     return traces
+
+
 class RobustPrefixGapScore:
     def __init__(self, burst_window=3, multiplier=1, patience=2):
         self.history_size = 1000
@@ -538,12 +575,12 @@ class RobustPrefixGapScore:
 
     def current_cap(self):
         if not self.recent_burst_deltas:
-            return float('inf')  # Avoid clipping early on
+            return float("inf")  # Avoid clipping early on
         # median_gap = np.median(self.recent_burst_deltas)
         # return self.multiplier * median_gap
         min_gap = np.min(self.recent_burst_deltas)
         return self.multiplier * min_gap
-    
+
     def update(self, timestamp):
         if self.prev_ts is None:
             self.prev_ts = timestamp

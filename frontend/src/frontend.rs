@@ -99,6 +99,16 @@ impl Frontend for ProtoServer {
     ) -> Result<Response<StartTransactionResponse>, TStatus> {
         info!("Got a request: {:?}", request);
 
+        let req = request.get_ref();
+        let keyspace_proto = req
+            .keyspace
+            .as_ref()
+            .ok_or_else(|| TStatus::invalid_argument("Missing keyspace"))?;
+        let keyspace = Keyspace {
+            namespace: keyspace_proto.namespace.clone(),
+            name: keyspace_proto.name.clone(),
+        };
+
         // Generate a new transaction id
         let transaction_id = Uuid::new_v4();
         let transaction_info = Arc::new(TransactionInfo {
@@ -114,13 +124,26 @@ impl Frontend for ProtoServer {
         let transaction = self
             .parent_server
             .coordinator
-            .start_transaction(transaction_info)
+            .start_transaction(transaction_info, keyspace.clone())
             .await;
-        self.parent_server
-            .transaction_table
-            .write()
-            .await
-            .insert(transaction_id, Arc::new(Mutex::new(transaction)));
+
+        {
+            self.parent_server
+                .transaction_table
+                .write()
+                .await
+                .insert(transaction_id, Arc::new(Mutex::new(transaction)));
+        }
+        {
+            let mut stats_per_keyspace = self.parent_server.stats_per_keyspace.write().await;
+            stats_per_keyspace
+                .entry(keyspace.clone())
+                .or_insert(StatsPerKeyspace {
+                    num_open_clients: 0,
+                    history: Vec::new(),
+                })
+                .num_open_clients += 1;
+        }
 
         info!("Transaction started: {:?}", transaction_id);
 
@@ -346,29 +369,33 @@ impl Frontend for ProtoServer {
         })?;
 
         // Get the transaction
-        let (transaction, num_open_clients) = {
+        let transaction = {
             let tx_table = self.parent_server.transaction_table.read().await;
             let transaction = tx_table
                 .get(&transaction_id)
                 .ok_or_else(|| TStatus::not_found("Transaction not found"))?
                 .clone();
-            let num_open_clients = tx_table.len() as u32;
-            (transaction, num_open_clients)
+            transaction
+        };
+
+        let keyspace = {
+            let mut tx = transaction.lock().await;
+            tx.keyspace.clone()
         };
 
         let num_open_clients = {
-            let mut num_open_clients_samples =
-                self.parent_server.num_open_clients_samples.write().await;
-            num_open_clients_samples.push(num_open_clients);
-            if num_open_clients_samples.len() > MAX_SAMPLES {
-                num_open_clients_samples.remove(0);
+            let mut stats_per_keyspace = self.parent_server.stats_per_keyspace.write().await;
+            let mut stats = stats_per_keyspace.get_mut(&keyspace).unwrap();
+            stats.history.push(stats.num_open_clients);
+            if stats.history.len() > MAX_SAMPLES {
+                stats.history.remove(0);
             }
-            num_open_clients_samples.iter().max().copied().unwrap_or(0) as u32
+            stats.history.iter().max().copied().unwrap_or(0) as u32
         };
 
         info!(
             "{}",
-            format!("Num open clients: {}", num_open_clients)
+            format!("{}: Num open clients: {}", keyspace.name, num_open_clients)
                 .italic()
                 .bold()
                 .green()
@@ -386,27 +413,40 @@ impl Frontend for ProtoServer {
                 .map_err(|e| TStatus::internal(format!("Commit operation failed: {:?}", e)))?;
         }
 
-        // Remove the transaction from the transaction table
-        self.parent_server
-            .transaction_table
-            .write()
-            .await
-            .remove(&transaction_id);
+        {
+            // Remove the transaction from the transaction table
+            self.parent_server
+                .transaction_table
+                .write()
+                .await
+                .remove(&transaction_id);
+        }
+        {
+            let mut stats_per_keyspace = self.parent_server.stats_per_keyspace.write().await;
+            let mut stats = stats_per_keyspace.get_mut(&keyspace).unwrap();
+            stats.num_open_clients -= 1;
+        }
+
         Ok(Response::new(CommitResponse {
             status: "Commit request processed successfully".to_string(),
         }))
     }
 }
 
+#[derive(Default)]
+struct StatsPerKeyspace {
+    num_open_clients: u32,
+    history: Vec<u32>,
+}
+
 // Implementation of the Frontend service
 pub struct Server {
     config: Config,
     coordinator: Coordinator,
-    //  Keeping track of transactions that haven't committed yet
+    stats_per_keyspace: RwLock<HashMap<Keyspace, StatsPerKeyspace>>,
     transaction_table: RwLock<HashMap<Uuid, Arc<Mutex<Transaction>>>>,
     bg_runtime: tokio::runtime::Handle,
     resolver_stats: RwLock<HashMap<String, f64>>,
-    num_open_clients_samples: RwLock<Vec<u32>>,
 }
 // TODO: add a trait for Frontend?
 impl Server {
@@ -454,10 +494,10 @@ impl Server {
         Arc::new(Server {
             config,
             coordinator,
+            stats_per_keyspace: RwLock::new(HashMap::new()),
             transaction_table: RwLock::new(HashMap::new()),
             bg_runtime,
             resolver_stats: RwLock::new(HashMap::new()),
-            num_open_clients_samples: RwLock::new(Vec::new()),
         })
     }
 

@@ -3,7 +3,20 @@ from typing import Dict, List
 import pandas as pd
 import plotly.express as px
 from run_experiments import RAY_LOGS_DIR
-from plotter import make_plots, bar, cdf, scatter, bar2, entropy_line, max_line, delta_line, delta_line2, predictions, delta_between_requests, avg_entropy
+from plotter import (
+    make_plots,
+    bar,
+    cdf,
+    scatter,
+    bar2,
+    entropy_line,
+    max_line,
+    delta_line,
+    delta_line2,
+    predictions,
+    delta_between_requests,
+    avg_entropy,
+)
 import plotly.io as pio
 import argparse
 import json
@@ -99,7 +112,7 @@ class Plotter:
         rows = len(figs)
         cols = len(figs[0])
 
-        out_dir = self.plots_path.joinpath(f'metrics')
+        out_dir = self.plots_path.joinpath(f"metrics")
         out_dir.mkdir(parents=True, exist_ok=True)
         figs_args = {
             "axis_title_font_size": {"x": 18, "y": 18},
@@ -107,12 +120,12 @@ class Plotter:
             "column_widths": [5],
             "output_path": f"{out_dir.joinpath(f'{y}_{facet_row}_{x}')}",
             "title": f"{', '.join([f'{k}={v}' for k, v in fixed_params.items()])}",
-            "height": rows * 300,
-            "width": 1500,
+            "height": rows * 400,
+            "width": 500,
         }
         make_plots(figs, rows=rows, cols=cols, **figs_args)
 
-        df.to_csv(out_dir.joinpath(f'{y}_{facet_row}_{x}.csv'), index=False)
+        df.to_csv(out_dir.joinpath(f"{y}_{facet_row}_{x}.csv"), index=False)
 
     def plot_resolver_group_sizes(self, free_param: str, fixed_params: Dict[str, int]):
         # Only first iteration of each experiment
@@ -128,11 +141,7 @@ class Plotter:
             lambda x: {k: v for k, v in x.items() if k.startswith("Group size:")}
         )
         df["resolver_stats"] = df["resolver_stats"].apply(
-            lambda x: (
-                {"Group size: 1": fixed_params["num_queries"]}
-                if x == {}
-                else x
-            )
+            lambda x: ({"Group size: 1": fixed_params["num_queries"]} if x == {} else x)
         )
         figs = []
         cumvalues, group_sizes = process_resolver_stats_group_sizes(df, free_param)
@@ -154,7 +163,7 @@ class Plotter:
         rows = len(figs)
         cols = len(figs[0])
 
-        out_dir = self.plots_path.joinpath(f'resolver/group_sizes')
+        out_dir = self.plots_path.joinpath(f"resolver/group_sizes")
         out_dir.mkdir(parents=True, exist_ok=True)
 
         figs_args = {
@@ -167,10 +176,11 @@ class Plotter:
             "width": 1500,
         }
         make_plots(figs, rows=rows, cols=cols, **figs_args)
-        df.to_csv(out_dir.joinpath(f'{free_param}_{fixed_params}.csv'), index=False)
+        df.to_csv(out_dir.joinpath(f"{free_param}_{fixed_params}.csv"), index=False)
 
     def plot_resolver_stats(
-        self, y: str, x: str, facet_row: str, fixed_params: Dict[str, int]):
+        self, y: str, x: str, facet_row: str, fixed_params: Dict[str, int]
+    ):
 
         # Only first iteration of each experiment
         results = self.results[self.results["iteration"] == 1]
@@ -182,7 +192,7 @@ class Plotter:
         df = df.sort_values(by=x)
         df[x] = df[x].astype(str)
         df[facet_row] = df[facet_row].astype(str)
-        
+
         df["resolver_stats"] = df["resolver_stats"].apply(json.loads)
 
         y_name = "requests_num" if y == "waiting_transactions_count" else y
@@ -213,7 +223,7 @@ class Plotter:
         rows = len(figs)
         cols = len(figs[0])
 
-        out_dir = self.plots_path.joinpath(f'resolver/stats')
+        out_dir = self.plots_path.joinpath(f"resolver/stats")
         out_dir.mkdir(parents=True, exist_ok=True)
         figs_args = {
             "axis_title_font_size": {"x": 18, "y": 18},
@@ -226,8 +236,7 @@ class Plotter:
         }
         make_plots(figs, rows=rows, cols=cols, **figs_args)
 
-    def plot_range_server_stats(
-        self, fixed_params: Dict[str, int]):
+    def plot_range_server_stats(self, fixed_params: Dict[str, int]):
 
         # Only first iteration of each experiment
         results = self.results[self.results["iteration"] == 1]
@@ -236,7 +245,7 @@ class Plotter:
         df = results[["range_server_stats", "max_concurrency", *keys_fixed]]
         for param, value in fixed_params.items():
             df = df[df[param] == value]
-        
+
         # List of RangeStatistics - one for each range
         num_ranges = fixed_params["num_keys"]
         df["range_server_stats"] = df["range_server_stats"].apply(json.loads)
@@ -248,11 +257,18 @@ class Plotter:
         figs = []
         for range_id in range(int(num_ranges)):
             d = df["range_server_stats"].apply(lambda x: x.get(str(range_id)))
-            
+
             # --------- Request timestamps ---------
             df["request_timestamps"] = d.apply(lambda x: x.get("request_timestamps"))
-            df["request_timestamps"] = df["request_timestamps"].apply(lambda x: [datetime.strptime(t[:26], "%Y-%m-%d %H:%M:%S.%f").timestamp() for t in x])
-            df["request_timestamps"] = df["request_timestamps"].apply(lambda x: [float(t - x[0]) for t in x])
+            df["request_timestamps"] = df["request_timestamps"].apply(
+                lambda x: [
+                    datetime.strptime(t[:26], "%Y-%m-%d %H:%M:%S.%f").timestamp()
+                    for t in x
+                ]
+            )
+            df["request_timestamps"] = df["request_timestamps"].apply(
+                lambda x: [float(t - x[0]) for t in x]
+            )
             arg1 = {
                 "df": df.copy(),
                 "x": "request_timestamps",
@@ -266,7 +282,7 @@ class Plotter:
                 "x_range": [0, 5],
                 "y_range": (0, max_concurrency),
             }
-            
+
             # # --------- Num waiters ---------
             df["num_waiters"] = d.apply(lambda x: x.get("num_waiters"))
             df["num_waiters"] = df["num_waiters"].apply(lambda x: [int(t) for t in x])
@@ -285,10 +301,12 @@ class Plotter:
             }
             # # --------- Num pending commits ---------
             df["num_pending_commits"] = d.apply(lambda x: x.get("num_pending_commits"))
-            df["num_pending_commits"] = df["num_pending_commits"].apply(lambda x: [int(t) for t in x])
+            df["num_pending_commits"] = df["num_pending_commits"].apply(
+                lambda x: [int(t) for t in x]
+            )
             # num_pending_commits_max = max(df["num_pending_commits"].apply(lambda x: max(x))) + 10
             arg3 = {
-                "df": df.copy(),  
+                "df": df.copy(),
                 "y": "num_pending_commits",
                 "key": "max_concurrency",
                 "title": f"key={range_id}",
@@ -303,7 +321,7 @@ class Plotter:
             # --------- Num waiter + num pending commits ---------
             df["sum_waiters_pending"] = df["num_waiters"] + df["num_pending_commits"]
             arg4 = {
-                "df": df.copy(),  
+                "df": df.copy(),
                 "y": "sum_waiters_pending",
                 "key": "max_concurrency",
                 "title": f"key={range_id}",
@@ -317,7 +335,7 @@ class Plotter:
 
             # --------- Entropy of Num waiter + num pending commits ---------
             arg5 = {
-                "df": df.copy(),  
+                "df": df.copy(),
                 "y": "sum_waiters_pending",
                 "key": "max_concurrency",
                 "title": f"key={range_id}",
@@ -329,7 +347,7 @@ class Plotter:
                 "y_range": [0, 5],
             }
             arg6 = {
-                "df": df.copy(),  
+                "df": df.copy(),
                 "y": "sum_waiters_pending",
                 "key": "max_concurrency",
                 "title": f"key={range_id}",
@@ -373,7 +391,7 @@ class Plotter:
             df["predictions"] = df["predictions"].apply(lambda x: [int(t) for t in x])
             # predictions_max = max(df["predictions"].apply(lambda x: max(x))) + 10
             arg9 = {
-                "df": df.copy(),  
+                "df": df.copy(),
                 "y": "predictions",
                 "key": "max_concurrency",
                 "title": f"key={range_id}",
@@ -385,11 +403,15 @@ class Plotter:
                 "y_range": [0, 150],
             }
             # --------- Avg Deltas between requests ---------
-            df["avg_delta_between_requests"] = d.apply(lambda x: x.get("avg_delta_between_requests"))
-            df["avg_delta_between_requests"] = df["avg_delta_between_requests"].apply(lambda x: [float(t) for t in x])
+            df["avg_delta_between_requests"] = d.apply(
+                lambda x: x.get("avg_delta_between_requests")
+            )
+            df["avg_delta_between_requests"] = df["avg_delta_between_requests"].apply(
+                lambda x: [float(t) for t in x]
+            )
             # predictions_max = max(df["predictions"].apply(lambda x: max(x))) + 10
             arg10 = {
-                "df": df.copy(),  
+                "df": df.copy(),
                 "y": "avg_delta_between_requests",
                 "key": "max_concurrency",
                 "title": f"key={range_id}",
@@ -403,28 +425,40 @@ class Plotter:
 
             # --------- Avg Entropies ---------
             df["avg_entropies"] = d.apply(lambda x: x.get("avg_entropies"))
-            df["avg_entropies"] = df["avg_entropies"].apply(lambda x: [float(t) for t in x])
+            df["avg_entropies"] = df["avg_entropies"].apply(
+                lambda x: [float(t) for t in x]
+            )
             # predictions_max = max(df["predictions"].apply(lambda x: max(x))) + 10
             arg11 = {
-                "df": df.copy(),  
+                "df": df.copy(),
                 "y": "avg_entropies",
                 "key": "max_concurrency",
                 "title": f"key={range_id}",
-                "showlegend":  True if range_id == 0 else False,
+                "showlegend": True if range_id == 0 else False,
                 "legend_title": "baseline",
                 "legend_orientation": "h",
                 "x_axis_title": "-",
                 "y_axis_title": "avg_entropies",
                 "y_range": [0, 5],
             }
-            figs.append([(scatter, arg1), (delta_line, arg7), (delta_line2, arg8), (bar2, arg4), 
-                         (entropy_line, arg5), (max_line, arg6), (predictions, arg9), 
-                         (delta_between_requests, arg10), (avg_entropy, arg11)]) #(bar2, arg2), (bar2, arg3)])
+            figs.append(
+                [
+                    (scatter, arg1),
+                    (delta_line, arg7),
+                    (delta_line2, arg8),
+                    (bar2, arg4),
+                    (entropy_line, arg5),
+                    (max_line, arg6),
+                    (predictions, arg9),
+                    (delta_between_requests, arg10),
+                    (avg_entropy, arg11),
+                ]
+            )  # (bar2, arg2), (bar2, arg3)])
 
         rows = len(figs)
         cols = len(figs[0])
 
-        out_dir = self.plots_path.joinpath(f'range_server_stats')
+        out_dir = self.plots_path.joinpath(f"range_server_stats")
         out_dir.mkdir(parents=True, exist_ok=True)
         figs_args = {
             "axis_title_font_size": {"x": 18, "y": 18},
@@ -519,7 +553,6 @@ def main():
     #         plotter.plot_range_server_stats(
     #             fixed_params=fixed_params,
     #         )
-
 
     # --------Plot Resolver Group Sizes--------
     subplot_key = free_params[0]

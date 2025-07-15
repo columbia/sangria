@@ -56,7 +56,7 @@ struct InternalMetrics {
 }
 
 pub struct WorkloadGenerator {
-    workload_config: WorkloadConfig,
+    workload_config: Arc<WorkloadConfig>,
     client: FrontendClient<tonic::transport::Channel>,
     resolver_client: ResolverClient<tonic::transport::Channel>,
     range_server_client: RangeServerClient<tonic::transport::Channel>,
@@ -68,17 +68,17 @@ pub struct WorkloadGenerator {
 
 impl WorkloadGenerator {
     pub fn new(
-        workload_config: WorkloadConfig,
+        workload_config: Arc<WorkloadConfig>,
         client: FrontendClient<tonic::transport::Channel>,
         resolver_client: ResolverClient<tonic::transport::Channel>,
         range_server_client: RangeServerClient<tonic::transport::Channel>,
-    ) -> Self {
+    ) -> Arc<Self> {
         let seed = workload_config
             .seed
             .unwrap_or_else(|| rand::thread_rng().gen());
         info!("Using seed: {}", seed);
         let rng = Arc::new(Mutex::new(StdRng::seed_from_u64(seed)));
-        Self {
+        Arc::new(Self {
             workload_config,
             client,
             resolver_client,
@@ -87,10 +87,14 @@ impl WorkloadGenerator {
             value_per_key: Arc::new(Mutex::new(HashMap::new())),
             rng,
             pending_commit_table: Arc::new(RwLock::new(HashMap::new())),
-        }
+        })
     }
 
-    fn zipf_sample_without_replacement(&self, sample_count: usize, rng: &mut StdRng) -> Vec<usize> {
+    fn zipf_sample_without_replacement(
+        self: &Arc<Self>,
+        sample_count: usize,
+        rng: &mut StdRng,
+    ) -> Vec<usize> {
         // Step 1: Build weights using Zipf formula: weight ∝ 1 / rank^s
         let mut weights: Vec<f64> = (1..=self.workload_config.num_keys)
             .map(|rank| 1.0 / (rank as f64).powf(self.workload_config.zipf_exponent))
@@ -123,7 +127,10 @@ impl WorkloadGenerator {
         chosen_keys
     }
 
-    pub async fn generate_transaction(&self) -> Arc<dyn Transaction + Send + Sync> {
+    pub async fn generate_transaction(
+        self: &Arc<Self>,
+        workload_id: usize,
+    ) -> Arc<dyn Transaction + Send + Sync> {
         //  sample num_keys uniformly from {1, 2}
         let num_keys = 2; //rng.gen_range(1..3);
                           // let keys = self.zipf_sample_without_replacement(num_keys, &mut rng);
@@ -137,9 +144,13 @@ impl WorkloadGenerator {
             .collect();
         drop(rng);
         keys.sort();
+        let name = match workload_id {
+            0 => self.workload_config.name.clone(),
+            _ => format!("{}_{}", self.workload_config.name.clone(), workload_id),
+        };
         let keyspace = Keyspace {
             namespace: self.workload_config.namespace.clone(),
-            name: self.workload_config.name.clone(),
+            name,
         };
         let transaction: Arc<dyn Transaction + Send + Sync> = match self
             .workload_config
@@ -159,7 +170,7 @@ impl WorkloadGenerator {
         transaction
     }
 
-    pub async fn create_keyspace(&self) {
+    pub async fn create_keyspace(self: &Arc<Self>, namespace: String, name: String) {
         let zone = Zone {
             region: Region {
                 cloud: None,
@@ -172,8 +183,8 @@ impl WorkloadGenerator {
         let mut client_clone = self.client.clone();
         let response = client_clone
             .create_keyspace(CreateKeyspaceRequest {
-                namespace: self.workload_config.namespace.clone(),
-                name: self.workload_config.name.clone(),
+                namespace,
+                name,
                 primary_zone: Some(ProtoZone::from(zone)),
                 base_key_ranges: (0..self.workload_config.num_keys)
                     .map(|i| KeyRangeRequest {
@@ -188,88 +199,113 @@ impl WorkloadGenerator {
         info!("Created keyspace with ID: {:?}", keyspace_id);
     }
 
-    pub async fn run(&self, runtime_handle: Handle) -> Metrics {
+    pub async fn run(self: Arc<Self>, runtime_handle: Handle) -> Metrics {
         info!("Starting workload");
         {
             let mut metrics = self.metrics.lock().await;
             metrics.start_time = Some(Instant::now());
         }
 
-        let concurrency_configs: Vec<Vec<u64>> =
-            if !self.workload_config.max_concurrency.contains(":") {
-                vec![vec![
-                    self.workload_config.max_concurrency.parse::<u64>().unwrap(),
-                    self.workload_config.num_queries.unwrap_or(u64::MAX),
-                ]]
-            } else {
-                self.workload_config
-                    .max_concurrency
-                    .split(",")
-                    .map(|s| {
-                        s.split(":")
-                            .map(|s| s.parse::<u64>().unwrap())
-                            .collect::<Vec<u64>>()
-                    })
-                    .collect::<Vec<Vec<u64>>>()
-            };
-        info!("Concurrency configs: {:?}", concurrency_configs);
-        for concurrency_config in concurrency_configs {
-            let max_concurrency = concurrency_config[0];
-            let num_queries = concurrency_config[1];
+        let mut join_set = JoinSet::new();
+        let concurrency_strings: Vec<String> = self
+            .workload_config
+            .max_concurrency
+            .split(';')
+            .map(|s| s.to_string())
+            .collect();
 
-            let semaphore = Arc::new(Semaphore::new(max_concurrency as usize));
-            let mut sigusr1_stream = signal(SignalKind::user_defined1()).unwrap();
+        for (workload_id, mixed_concurrency_config) in concurrency_strings.into_iter().enumerate() {
+            info!("Mixed concurrency config: {:?}", mixed_concurrency_config);
+            let self_clone = self.clone();
+            let runtime_handle_clone = runtime_handle.clone();
 
-            {
-                let mut task_counter = 0;
-                let mut join_set = JoinSet::new();
-                loop {
-                    tokio::select! {
-                        Ok(permit) = semaphore.clone().acquire_owned() => {
-                            task_counter += 1;
-                            if task_counter > num_queries {
-                                drop(permit);
-                                break;
+            join_set.spawn(async move {
+                info!("Starting workload with ID: {}", workload_id);
+                let concurrency_configs: Vec<Vec<u64>> = if !mixed_concurrency_config.contains(":")
+                {
+                    vec![vec![
+                        mixed_concurrency_config.parse::<u64>().unwrap(),
+                        self_clone.workload_config.num_queries.unwrap_or(u64::MAX),
+                    ]]
+                } else {
+                    mixed_concurrency_config
+                        .split(",")
+                        .map(|s| {
+                            s.split(":")
+                                .map(|s| s.parse::<u64>().unwrap())
+                                .collect::<Vec<u64>>()
+                        })
+                        .collect::<Vec<Vec<u64>>>()
+                };
+                info!("Concurrency configs: {:?}", concurrency_configs);
+                for concurrency_config in concurrency_configs {
+                    let max_concurrency = concurrency_config[0];
+                    let num_queries = concurrency_config[1];
+
+                    let semaphore = Arc::new(Semaphore::new(max_concurrency as usize));
+                    let mut sigusr1_stream = signal(SignalKind::user_defined1()).unwrap();
+
+                    {
+                        let mut task_counter = 0;
+                        let mut join_set = JoinSet::new();
+                        let sc = self_clone.clone();
+                        let rhc = runtime_handle_clone.clone();
+                        loop {
+                            tokio::select! {
+                                Ok(permit) = semaphore.clone().acquire_owned() => {
+                                    task_counter += 1;
+                                    if task_counter > num_queries {
+                                        drop(permit);
+                                        break;
+                                    }
+                                    let next_task = sc.generate_transaction(workload_id).await;
+                                    let metrics = sc.metrics.clone();
+                                    let value_per_key = sc.value_per_key.clone();
+                                    let join_handle = rhc.spawn(async move {
+                                        let start_time = Instant::now();
+                                        let result = next_task.execute(value_per_key).await;
+                                        let latency = start_time.elapsed();
+
+                                        // Record metrics
+                                        let mut metrics = metrics.lock().await;
+                                        metrics.latencies.push(latency);
+                                        metrics.completed_transactions += 1;
+                                        drop(permit);
+                                        result
+                                    });
+
+                                    join_set.spawn(async move {
+                                        let _ = join_handle.await;
+                                    });
+                                }
+                                Some(res) = join_set.join_next() => {
+                                    if let Err(e) = res {
+                                        error!("Task panicked: {:?}", e);
+                                    }
+                                }
+                                _ = sigusr1_stream.recv() => {
+                                    println!("Received SIGUSR1, initiating shutdown");
+                                    return;
+                                }
+
+                                else => break,
                             }
-                            let next_task = self.generate_transaction().await;
-                            let metrics = self.metrics.clone();
-                            let value_per_key = self.value_per_key.clone();
-                            let join_handle = runtime_handle.spawn(async move {
-                                let start_time = Instant::now();
-                                let result = next_task.execute(value_per_key).await;
-                                let latency = start_time.elapsed();
-
-                                // Record metrics
-                                let mut metrics = metrics.lock().await;
-                                metrics.latencies.push(latency);
-                                metrics.completed_transactions += 1;
-                                drop(permit);
-                                result
-                            });
-
-                            join_set.spawn(async move {
-                                let _ = join_handle.await;
-                            });
                         }
-                        Some(res) = join_set.join_next() => {
+
+                        while let Some(res) = join_set.join_next().await {
                             if let Err(e) = res {
                                 error!("Task panicked: {:?}", e);
                             }
                         }
-                        _ = sigusr1_stream.recv() => {
-                            println!("Received SIGUSR1, initiating shutdown");
-                            return Metrics::default();
-                        }
-
-                        else => break,
                     }
                 }
+            });
+        }
 
-                while let Some(res) = join_set.join_next().await {
-                    if let Err(e) = res {
-                        error!("Task panicked: {:?}", e);
-                    }
-                }
+        // Wait for all spawned tasks to complete
+        while let Some(res) = join_set.join_next().await {
+            if let Err(e) = res {
+                error!("Task panicked: {:?}", e);
             }
         }
 

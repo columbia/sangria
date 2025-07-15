@@ -47,7 +47,12 @@ impl Transaction for RwTransaction {
         // Start a transaction
         let mut client_clone = self.client.clone();
         let response = client_clone
-            .start_transaction(StartTransactionRequest {})
+            .start_transaction(StartTransactionRequest {
+                keyspace: Some(ProtoKeyspace {
+                    namespace: self.keyspace.namespace.clone(),
+                    name: self.keyspace.name.clone(),
+                }),
+            })
             .await
             .unwrap();
         let transaction_id = Uuid::parse_str(&response.get_ref().transaction_id).unwrap();

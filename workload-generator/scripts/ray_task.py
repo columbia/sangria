@@ -199,20 +199,4 @@ def run_workload(config):
     except Exception as e:
         print(f"Error running workloads: {e}")
         metrics = {"throughput": 0.0}
-
-    # if os.path.exists(ROOT_DIR / "group-status.txt"):
-    #     os.remove(ROOT_DIR / "group-status.txt")
-    # if os.path.exists(ROOT_DIR / "error-acquire-write-lock.txt"):
-    #     os.remove(ROOT_DIR / "error-acquire-write-lock.txt")
-    # if os.path.exists(ROOT_DIR / "error-commit-tx-state-store.txt"):
-    #     os.remove(ROOT_DIR / "error-commit-tx-state-store.txt")
-    # if os.path.exists(ROOT_DIR / "error-commit-range-client.txt"):
-    #     os.remove(ROOT_DIR / "error-commit-range-client.txt")
-    # if os.path.exists(ROOT_DIR / "error-fake-flag.txt"):
-    #     os.remove(ROOT_DIR / "error-fake-flag.txt")
-    # if os.path.exists(ROOT_DIR / "returned-transactions-status.txt"):
-    #     os.remove(ROOT_DIR / "returned-transactions-status.txt")
-    # if os.path.exists(ROOT_DIR / "committing-transactions-status.txt"):
-    #     os.remove(ROOT_DIR / "committing-transactions-status.txt")
-    # tune.report(metrics)
     return metrics

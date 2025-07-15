@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::transaction::Transaction;
 use common::{
     config::{CommitStrategy, Config},
+    keyspace::Keyspace,
     membership::range_assignment_oracle::RangeAssignmentOracle,
     network::fast_network::FastNetwork,
     region::Zone,
@@ -54,7 +55,11 @@ impl Coordinator {
         }
     }
 
-    pub async fn start_transaction(&self, transaction_info: Arc<TransactionInfo>) -> Transaction {
+    pub async fn start_transaction(
+        &self,
+        transaction_info: Arc<TransactionInfo>,
+        keyspace: Keyspace,
+    ) -> Transaction {
         self.tx_state_store
             .start_transaction(transaction_info.id)
             .await
@@ -69,6 +74,7 @@ impl Coordinator {
             self.runtime.clone(),
             self.resolver.clone(),
             self.commit_strategy.clone(),
+            keyspace,
         )
     }
 }

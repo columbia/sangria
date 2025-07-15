@@ -50,6 +50,7 @@ pub struct Transaction {
     runtime: tokio::runtime::Handle,
     commit_strategy: CommitStrategy,
     resolver: Arc<dyn ResolverClient>,
+    pub keyspace: Keyspace,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
@@ -443,6 +444,7 @@ impl Transaction {
         runtime: tokio::runtime::Handle,
         resolver: Arc<dyn ResolverClient>,
         commit_strategy: CommitStrategy,
+        keyspace: Keyspace,
     ) -> Transaction {
         Transaction {
             id: transaction_info.id,
@@ -457,6 +459,7 @@ impl Transaction {
             runtime,
             commit_strategy,
             resolver,
+            keyspace,
         }
     }
 }

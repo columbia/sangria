@@ -13,17 +13,19 @@ service Frontend {
     rpc Commit(CommitRequest) returns (CommitResponse) {}
 }
 
-message StartTransactionRequest {
-}
-
-message StartTransactionResponse {
-    string status = 1;
-    string transaction_id = 2;
-}
 message Keyspace {
     string namespace = 1;
     string name = 2;
 }
+
+message StartTransactionRequest {
+    Keyspace keyspace = 1;
+}
+
+message StartTransactionResponse {
+    string status = 1;
+    string transaction_id = 2;}
+
 
 message GetRequest {
     string transaction_id = 1;

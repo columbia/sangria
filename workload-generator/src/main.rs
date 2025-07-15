@@ -36,7 +36,7 @@ struct Args {
 async fn run_workload(
     runtime_handle: Handle,
     config: Config,
-    workload_config: WorkloadConfig,
+    workload_config: Arc<WorkloadConfig>,
     create_keyspace: bool,
 ) -> Metrics {
     let frontend_addr = config.frontend.proto_server_addr.to_string();
@@ -54,20 +54,35 @@ async fn run_workload(
         .await
         .unwrap();
 
-    let workload_generator = Arc::new(WorkloadGenerator::new(
-        workload_config,
+    let workload_generator = WorkloadGenerator::new(
+        workload_config.clone(),
         client,
         resolver_client,
         range_server_client,
-    ));
+    );
     if create_keyspace {
-        workload_generator.create_keyspace().await;
+        workload_generator
+            .create_keyspace(
+                workload_config.namespace.clone(),
+                workload_config.name.clone(),
+            )
+            .await;
         sleep(Duration::from_millis(2000)).await;
+        // If Mixed workload: Create second keyspace
+        if workload_config.max_concurrency.contains(";") {
+            workload_generator
+                .create_keyspace(
+                    workload_config.namespace.clone(),
+                    format!("{}_1", workload_config.name.clone()),
+                )
+                .await;
+            sleep(Duration::from_millis(2000)).await;
+        }
     }
-    let workload_generator_clone = workload_generator.clone();
+
     let runtime_handle_clone = runtime_handle.clone();
-    let workload_handle = runtime_handle
-        .spawn(async move { workload_generator_clone.run(runtime_handle_clone).await });
+    let workload_handle =
+        runtime_handle.spawn(async move { workload_generator.run(runtime_handle_clone).await });
     let metrics = workload_handle.await.unwrap();
     info!("Workload generator finished");
     metrics
@@ -77,8 +92,9 @@ fn main() {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
     let config: Config = serde_json::from_str(&fs::read_to_string(&args.config).unwrap()).unwrap();
-    let workload_config: WorkloadConfig =
-        serde_json::from_str(&fs::read_to_string(&args.workload_config).unwrap()).unwrap();
+    let workload_config: Arc<WorkloadConfig> = Arc::new(
+        serde_json::from_str(&fs::read_to_string(&args.workload_config).unwrap()).unwrap(),
+    );
 
     let mut background_runtime_cores = workload_config.background_runtime_core_ids.clone();
     if background_runtime_cores.is_empty() {
