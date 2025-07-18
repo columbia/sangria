@@ -60,6 +60,12 @@ def runtime_variations_contention_experiment(ray_logs_dir):
     MAX_CONCURRENCY = ["25:4000,500:4000,25:4000,500:4000"]
     RESOLVER_TX_LOAD = [
         {
+            "max_concurrency": "0",
+            "num_queries": None,
+            "num_keys": 100,
+            "background_runtime_core_ids": [2, 3],
+        },
+        {
             "max_concurrency": "100",
             "num_queries": None,
             "num_keys": 100,
@@ -83,13 +89,12 @@ def runtime_variations_contention_experiment(ray_logs_dir):
         ray_logs_dir,
     )
 
-
 def runtime_variations_resolver_capacity_experiment(ray_logs_dir):
     BASELINES = [ADAPTIVE, PIPELINED, TRADITIONAL]
     NUM_ITERATIONS = 2
     NUM_QUERIES = [16000]
     NUM_KEYS = [50]
-    MAX_CONCURRENCY = ["50"]
+    MAX_CONCURRENCY = ["5", "50", "500"]
 
     RESOLVER_TX_LOAD = [
         {
@@ -118,6 +123,12 @@ def mixed_workload_experiment(ray_logs_dir):
     MAX_CONCURRENCY = ["25:8000;500:8000"]
 
     RESOLVER_TX_LOAD = [
+        {
+            "max_concurrency": "0",
+            "num_queries": None,
+            "num_keys": 100,
+            "background_runtime_core_ids": [2, 3],
+        },
         {
             "max_concurrency": "100",
             "num_queries": None,
@@ -190,7 +201,14 @@ def run_experiment(
         config["baseline"] = [baseline]
         if baseline == TRADITIONAL:
             config["resolver_capacity"] = [RESOLVER_CAPACITY[0]]
-            config["resolver_tx_load"] = [RESOLVER_TX_LOAD[0]]
+            config["resolver_tx_load"] = [
+                {
+                    "max_concurrency": "0",
+                    "num_queries": None,
+                    "num_keys": 100,
+                    "background_runtime_core_ids": [2, 3],
+                }
+            ]
         elif baseline == PIPELINED or baseline == ADAPTIVE:
             config["resolver_capacity"] = RESOLVER_CAPACITY
             config["resolver_tx_load"] = RESOLVER_TX_LOAD

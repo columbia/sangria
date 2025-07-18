@@ -808,34 +808,6 @@ where
             CommitStrategy::Pipelined => true,
             CommitStrategy::Traditional => false,
             CommitStrategy::Adaptive => {
-                // When we have per-key locking, we can check contention for each key and allow early-lock-release for that key if it is contended.
-                // e.g. return self.lock_table.is_contended(&key).await;
-                // But for now, we just check the contention for the entire range based on how many transactions are currently waiting for the lock and return the same decision for all keys in the range.
-                // let contention_proxy = state.lock_table.get_num_waiters_and_pending().await;
-                // match self.config.heuristic {
-                //     Heuristic::LockContention => {
-                //         if contention_proxy >= 5000.0 {
-                //             // avoid resolver
-                //             return false;
-                //         } else if 200.0 <= resolver_average_load && resolver_average_load < 5000.0 {
-                //             if contention_proxy >= 1.0 {
-                //                 return true;
-                //             } else {
-                //                 return false;
-                //             }
-                //         } else if 10.0 <= resolver_average_load && resolver_average_load < 200.0 {
-                //             if contention_proxy >= 1.0 {
-                //                 return true;
-                //             } else {
-                //                 return false;
-                //             }
-                //         } else {
-                //             // Always go to Resolver
-                //             return true;
-                //         }
-                //     } // Heuristic::Static => map(state.range_info.range_id) -> Yes or No,
-                // }
-
                 let contention_proxy = num_open_clients as f64;
                 match self.config.heuristic {
                     Heuristic::LockContention => {
