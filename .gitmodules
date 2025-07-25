@@ -1,0 +1,3 @@
+[submodule "ycsb"]
+	path = ycsb
+	url = https://github.com/DelphianCalamity/YCSB.git
