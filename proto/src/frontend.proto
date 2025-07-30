@@ -11,7 +11,10 @@ service Frontend {
     rpc Delete(DeleteRequest) returns (DeleteResponse) {}
     rpc Abort(AbortRequest) returns (AbortResponse) {}
     rpc Commit(CommitRequest) returns (CommitResponse) {}
+    rpc ReadModifyWrite(ReadModifyWriteRequest) returns (ReadModifyWriteResponse) {}
 }
+
+
 
 message Keyspace {
     string namespace = 1;
@@ -72,5 +75,15 @@ message CommitRequest {
 }
 
 message CommitResponse {
+    string status = 1;
+}
+
+message ReadModifyWriteRequest {
+    Keyspace keyspace = 1;
+    repeated bytes keys = 2;
+    bytes value = 3;
+}
+
+message ReadModifyWriteResponse {
     string status = 1;
 }

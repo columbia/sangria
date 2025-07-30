@@ -70,6 +70,7 @@ def run_workload(config):
     main_num_queries = config["num_queries"]
     main_name = config["name"]
     main_background_runtime_core_ids = config["background_runtime_core_ids"]
+    workload_type = config["workload_type"]
 
     del config["iteration"]
     del config["baseline"]
@@ -117,6 +118,7 @@ def run_workload(config):
 
         # Create a temporary config file with the parameters of the secondary workload generator
         config["fake_transactions"] = True
+        config["workload_type"] = "custom"  # Secondary workload is always custom
         config["max_concurrency"] = resolver_tx_load["max_concurrency"]
         config["num_queries"] = resolver_tx_load["num_queries"]
         config["num_keys"] = resolver_tx_load["num_keys"]
@@ -129,6 +131,7 @@ def run_workload(config):
             json.dump(config, f)
         del config["fake_transactions"]
         # cmd2.append("--create-keyspace")
+        config["workload_type"] = workload_type
         config["max_concurrency"] = main_max_concurrency
         config["num_queries"] = main_num_queries
         config["num_keys"] = main_num_keys
@@ -166,7 +169,6 @@ def run_workload(config):
             text=True,
             env={**os.environ, "RUST_LOG": "error"},
         )
-
         try:
             # Wait for the main workload generator to finish
             stdout1, stderr1 = process1.communicate(

@@ -121,7 +121,7 @@ class Plotter:
             "output_path": f"{out_dir.joinpath(f'{y}_{facet_row}_{x}')}",
             "title": f"{', '.join([f'{k}={v}' for k, v in fixed_params.items()])}",
             "height": rows * 400,
-            "width": 500,
+            "width": 1500,
         }
         make_plots(figs, rows=rows, cols=cols, **figs_args)
 

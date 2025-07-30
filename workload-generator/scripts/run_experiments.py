@@ -17,10 +17,12 @@ from atomix_setup import atomix_setup
 
 def tradeoff_contention_vs_resolver_capacity_experiment(ray_logs_dir):
     BASELINES = [ADAPTIVE, PIPELINED, TRADITIONAL]
+    ZIPFIAN_CONSTANT = [0.0]
     NUM_ITERATIONS = 2
     NUM_QUERIES = [2500]
     NUM_KEYS = [50]
     MAX_CONCURRENCY = ["1", "5", "25", "50", "100", "200", "500"]
+    WORKLOAD_TYPE = ["custom"]
     RESOLVER_TX_LOAD = [
         {
             "max_concurrency": "0",  # zero extra load
@@ -41,6 +43,13 @@ def tradeoff_contention_vs_resolver_capacity_experiment(ray_logs_dir):
             "background_runtime_core_ids": [2, 3],
         },
     ]
+    fixed_params = {
+        "num_queries": NUM_QUERIES[0],
+        "zipf_exponent": ZIPFIAN_CONSTANT[0],
+        "num_keys": NUM_KEYS[0],
+    }
+    free_params = "resolver_tx_load_concurrency,max_concurrency"
+
     run_experiment(
         BASELINES,
         RESOLVER_TX_LOAD,
@@ -48,16 +57,22 @@ def tradeoff_contention_vs_resolver_capacity_experiment(ray_logs_dir):
         NUM_QUERIES,
         NUM_KEYS,
         MAX_CONCURRENCY,
+        ZIPFIAN_CONSTANT,
+        WORKLOAD_TYPE,
         ray_logs_dir,
+        fixed_params,
+        free_params,
     )
 
 
 def runtime_variations_contention_experiment(ray_logs_dir):
     BASELINES = [ADAPTIVE, PIPELINED, TRADITIONAL]
+    ZIPFIAN_CONSTANT = [0.0]
     NUM_ITERATIONS = 2
     NUM_QUERIES = [16000]
     NUM_KEYS = [50]
     MAX_CONCURRENCY = ["25:4000,500:4000,25:4000,500:4000"]
+    WORKLOAD_TYPE = ["custom"]
     RESOLVER_TX_LOAD = [
         {
             "max_concurrency": "0",
@@ -79,6 +94,14 @@ def runtime_variations_contention_experiment(ray_logs_dir):
         },
     ]
 
+    fixed_params = {
+        "num_queries": NUM_QUERIES[0],
+        "zipf_exponent": ZIPFIAN_CONSTANT[0],
+        "num_keys": NUM_KEYS[0],
+    }
+    free_params = "resolver_tx_load_concurrency,max_concurrency"
+
+
     run_experiment(
         BASELINES,
         RESOLVER_TX_LOAD,
@@ -86,16 +109,22 @@ def runtime_variations_contention_experiment(ray_logs_dir):
         NUM_QUERIES,
         NUM_KEYS,
         MAX_CONCURRENCY,
+        ZIPFIAN_CONSTANT,
+        WORKLOAD_TYPE,
         ray_logs_dir,
+        fixed_params,
+        free_params,
     )
+
 
 def runtime_variations_resolver_capacity_experiment(ray_logs_dir):
     BASELINES = [ADAPTIVE, PIPELINED, TRADITIONAL]
     NUM_ITERATIONS = 2
+    ZIPFIAN_CONSTANT = [0.0]
     NUM_QUERIES = [16000]
     NUM_KEYS = [50]
     MAX_CONCURRENCY = ["5", "50", "500"]
-
+    WORKLOAD_TYPE = ["custom"]
     RESOLVER_TX_LOAD = [
         {
             "max_concurrency": "1000:180000",
@@ -104,6 +133,12 @@ def runtime_variations_resolver_capacity_experiment(ray_logs_dir):
             "background_runtime_core_ids": [2, 3],
         }
     ]
+    fixed_params = {
+        "num_queries": NUM_QUERIES[0],
+        "zipf_exponent": ZIPFIAN_CONSTANT[0],
+        "num_keys": NUM_KEYS[0],
+    }
+    free_params = "resolver_tx_load_concurrency,max_concurrency"
 
     run_experiment(
         BASELINES,
@@ -112,16 +147,22 @@ def runtime_variations_resolver_capacity_experiment(ray_logs_dir):
         NUM_QUERIES,
         NUM_KEYS,
         MAX_CONCURRENCY,
+        ZIPFIAN_CONSTANT,
+        WORKLOAD_TYPE,
         ray_logs_dir,
+        fixed_params,
+        free_params,
     )
+
 
 def mixed_workload_experiment(ray_logs_dir):
     BASELINES = [ADAPTIVE, PIPELINED, TRADITIONAL]
+    ZIPFIAN_CONSTANT = [0.0]
     NUM_ITERATIONS = 2
     NUM_QUERIES = [16000]
     NUM_KEYS = [50]
     MAX_CONCURRENCY = ["25:8000;500:8000"]
-
+    WORKLOAD_TYPE = ["custom"]
     RESOLVER_TX_LOAD = [
         {
             "max_concurrency": "0",
@@ -142,6 +183,12 @@ def mixed_workload_experiment(ray_logs_dir):
             "background_runtime_core_ids": [2, 3],
         },
     ]
+    fixed_params = {
+        "num_queries": NUM_QUERIES[0],
+        "zipf_exponent": ZIPFIAN_CONSTANT[0],
+        "num_keys": NUM_KEYS[0],
+    }
+    free_params = "resolver_tx_load_concurrency,max_concurrency"
 
     run_experiment(
         BASELINES,
@@ -150,8 +197,64 @@ def mixed_workload_experiment(ray_logs_dir):
         NUM_QUERIES,
         NUM_KEYS,
         MAX_CONCURRENCY,
+        ZIPFIAN_CONSTANT,
+        WORKLOAD_TYPE,
         ray_logs_dir,
+        fixed_params,
+        free_params,
     )
+
+
+def ycsb_experiment(ray_logs_dir):
+    BASELINES = [ADAPTIVE, PIPELINED, TRADITIONAL]
+    NUM_ITERATIONS = 2
+    WORKLOAD_TYPE = ["ycsb"]
+    NUM_QUERIES = [5000]
+    NUM_KEYS = [50]
+    MAX_CONCURRENCY = ["50"]
+    ZIPFIAN_CONSTANT = [0.0, 0.5, 1.0]
+    RESOLVER_TX_LOAD = [
+        {
+            "max_concurrency": "0",  # zero extra load
+            "num_queries": None,
+            "num_keys": 100,
+            "background_runtime_core_ids": [2, 3],
+        },
+        {
+            "max_concurrency": "100",
+            "num_queries": None,
+            "num_keys": 100,
+            "background_runtime_core_ids": [2, 3],
+        },
+        {
+            "max_concurrency": "1000",
+            "num_queries": None,
+            "num_keys": 100,
+            "background_runtime_core_ids": [2, 3],
+        },
+    ]
+
+    fixed_params = {
+        "num_queries": NUM_QUERIES[0],
+        "max_concurrency": MAX_CONCURRENCY[0],
+        "num_keys": NUM_KEYS[0],
+    }
+    free_params = "resolver_tx_load_concurrency,zipf_exponent"
+
+    run_experiment(
+        BASELINES,
+        RESOLVER_TX_LOAD,
+        NUM_ITERATIONS,
+        NUM_QUERIES,
+        NUM_KEYS,
+        MAX_CONCURRENCY,
+        ZIPFIAN_CONSTANT,
+        WORKLOAD_TYPE,
+        ray_logs_dir,
+        fixed_params,
+        free_params,
+    )
+
 
 def run_experiment(
     BASELINES,
@@ -160,7 +263,11 @@ def run_experiment(
     NUM_QUERIES,
     NUM_KEYS,
     MAX_CONCURRENCY,
+    ZIPFIAN_CONSTANT,
+    WORKLOAD_TYPE,
     ray_logs_dir,
+    fixed_params,
+    free_params,
 ):
     namespace, name = generate_slug(2).split("-")
     experiment_name = f"{namespace}_{name}"
@@ -179,10 +286,11 @@ def run_experiment(
         "resolver_capacity": RESOLVER_CAPACITY,
         "resolver_tx_load": RESOLVER_TX_LOAD,
         "num_queries": NUM_QUERIES,
-        "zipf_exponent": [0],
+        "zipf_exponent": ZIPFIAN_CONSTANT,
         "namespace": [namespace],
         "name": [name],
         "background_runtime_core_ids": [list(range(3, 32))],
+        "workload_type": WORKLOAD_TYPE,
     }
     reporter = tune.CLIReporter(
         metric_columns=["throughput"],
@@ -194,6 +302,7 @@ def run_experiment(
             "resolver_cores",
             "resolver_tx_load_concurrency",
             "num_queries",
+            "zipf_exponent",
         ],
         max_report_frequency=20,
     )
@@ -233,15 +342,8 @@ def run_experiment(
             ray_logs_dir / experiment_name / f"{baseline}_results.csv"
         )
 
-    fixed_params = {
-        "num_queries": NUM_QUERIES[0],
-        "zipf_exponent": 0.0,
-        # "max_concurrency": MAX_CONCURRENCY[0],
-        "num_keys": NUM_KEYS[0],
-    }
-    free_params = "resolver_tx_load_concurrency,max_concurrency"
     plot_results_df(experiment_name, fixed_params, free_params)
-    
+
 
 def main():
     ray.init()
@@ -254,8 +356,10 @@ def main():
     # tradeoff_contention_vs_resolver_capacity_experiment(ray_logs_dir)
     # runtime_variations_contention_experiment(ray_logs_dir)
     # runtime_variations_resolver_capacity_experiment(ray_logs_dir)
-    mixed_workload_experiment(ray_logs_dir)
+    # mixed_workload_experiment(ray_logs_dir)
+    ycsb_experiment(ray_logs_dir)
     ray.shutdown()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Atomix experiments.")

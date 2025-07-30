@@ -4,7 +4,9 @@ use common::keyspace::Keyspace;
 use frontend::error::Error as FrontendError;
 use proto::frontend::frontend_client::FrontendClient;
 use proto::frontend::Keyspace as ProtoKeyspace;
-use proto::frontend::{CommitRequest, GetRequest, PutRequest, StartTransactionRequest};
+use proto::frontend::{
+    CommitRequest, GetRequest, PutRequest, ReadModifyWriteRequest, StartTransactionRequest,
+};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::info;
@@ -43,6 +45,7 @@ impl Transaction for RwTransaction {
         value_per_key: Arc<Mutex<HashMap<usize, u64>>>,
     ) -> Result<(), FrontendError> {
         let mut results = HashMap::new();
+        // let start_time = std::time::Instant::now();
 
         // Start a transaction
         let mut client_clone = self.client.clone();
@@ -133,7 +136,30 @@ impl Transaction for RwTransaction {
         //     "Committed transaction with keys: {:?} tx id: {:?}",
         //     self.writeset, transaction_id_int
         // );
-
+        // let duration = start_time.elapsed();
+        // info!("RW transaction took {} microseconds", duration.as_micros());
         Ok(())
     }
+
+    // async fn execute(
+    //     &self,
+    //     value_per_key: Arc<Mutex<HashMap<usize, u64>>>,
+    // ) -> Result<(), frontend::error::Error> {
+    //     let mut client_clone = self.client.clone();
+
+    //     // Send the read-modify-write request
+    //     let _response = client_clone
+    //         .read_modify_write(ReadModifyWriteRequest {
+    //             keyspace: Some(ProtoKeyspace {
+    //                 namespace: self.keyspace.namespace.clone(),
+    //                 name: self.keyspace.name.clone(),
+    //             }),
+    //             keys: self.readset.iter().map(|k| k.to_be_bytes().to_vec()).collect(),
+    //             value: 0.to_string().as_bytes().to_vec(),
+    //         })
+    //         .await
+    //         .unwrap();
+
+    //     Ok(())
+    // }
 }

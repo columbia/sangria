@@ -28,8 +28,8 @@ use coordinator_rangeclient::{
 use proto::frontend::frontend_server::{Frontend, FrontendServer};
 use proto::frontend::{
     AbortRequest, AbortResponse, CommitRequest, CommitResponse, DeleteRequest, DeleteResponse,
-    GetRequest, GetResponse, PutRequest, PutResponse, StartTransactionRequest,
-    StartTransactionResponse,
+    GetRequest, GetResponse, PutRequest, PutResponse, ReadModifyWriteRequest,
+    ReadModifyWriteResponse, StartTransactionRequest, StartTransactionResponse,
 };
 use proto::universe::universe_client::UniverseClient;
 use proto::universe::{CreateKeyspaceRequest, CreateKeyspaceResponse};
@@ -80,6 +80,78 @@ impl Frontend for ProtoServer {
         Ok(Response::new(CreateKeyspaceResponse {
             // status: "Create keyspace request processed succe!ssfully".to_string(),
             keyspace_id: keyspace_id.to_string(),
+        }))
+    }
+
+    /// Performs a read-modify-write operation in a single transaction.
+    ///
+    /// # Arguments
+    /// * `request` - The gRPC request containing keyspace, key, and value
+    ///
+    /// # Returns
+    /// * `Result<Response<PutResponse>, TStatus>` - A response containing:
+    ///   - status: Success message
+    ///   - committed: Whether the transaction was committed
+    #[instrument(skip(self))]
+    async fn read_modify_write(
+        &self,
+        request: Request<ReadModifyWriteRequest>,
+    ) -> Result<Response<ReadModifyWriteResponse>, TStatus> {
+        info!("Got a read_modify_write request: {:?}", request);
+
+        // Extract keyspace, key, value from request
+        let req = request.get_ref();
+        let keyspace_proto = req
+            .keyspace
+            .as_ref()
+            .ok_or_else(|| TStatus::invalid_argument("Missing keyspace"))?;
+        let keyspace = Keyspace {
+            namespace: keyspace_proto.namespace.clone(),
+            name: keyspace_proto.name.clone(),
+        };
+        let keys = req.keys.clone();
+        let value = req.value.clone();
+
+        // 1. Start transaction
+        let start_tx_req = StartTransactionRequest {
+            keyspace: Some(keyspace_proto.clone()),
+        };
+        let start_tx_resp = self
+            .start_transaction(Request::new(start_tx_req))
+            .await?
+            .into_inner();
+        let transaction_id = start_tx_resp.transaction_id;
+
+        // 2. Read all keys in the request
+        for key_bytes in &keys {
+            let get_req = GetRequest {
+                transaction_id: transaction_id.clone(),
+                keyspace: Some(keyspace_proto.clone()),
+                key: key_bytes.clone(),
+            };
+            let _get_resp = self.get(Request::new(get_req)).await?.into_inner();
+        }
+
+        // 3. Put the value for each key
+        for key_bytes in &keys {
+            let put_req = PutRequest {
+                transaction_id: transaction_id.clone(),
+                keyspace: Some(keyspace_proto.clone()),
+                key: key_bytes.clone(),
+                value: value.clone(),
+            };
+            let _put_resp = self.put(Request::new(put_req)).await?.into_inner();
+        }
+
+        // 4. Commit the transaction
+        let commit_req = CommitRequest {
+            transaction_id: transaction_id.clone(),
+        };
+        let commit_resp = self.commit(Request::new(commit_req)).await?.into_inner();
+
+        // 5. Return the result
+        Ok(Response::new(ReadModifyWriteResponse {
+            status: "Read-modify-write request processed successfully".to_string(),
         }))
     }
 

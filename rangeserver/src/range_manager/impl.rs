@@ -808,9 +808,9 @@ where
             CommitStrategy::Pipelined => true,
             CommitStrategy::Traditional => false,
             CommitStrategy::Adaptive => {
-                let contention_proxy = num_open_clients as f64;
                 match self.config.heuristic {
-                    Heuristic::LockContention => {
+                    Heuristic::OpenClients => {
+                        let contention_proxy = num_open_clients as f64;
                         if resolver_average_load >= 5000.0 {
                             // avoid resolver
                             return false;
@@ -830,7 +830,29 @@ where
                             // Always go to Resolver
                             return true;
                         }
-                    } // Heuristic::Static => map(state.range_info.range_id) -> Yes or No,
+                    }
+                    Heuristic::LockContention => {
+                        let contention_proxy = state.lock_table.get_num_waiters_and_pending().await;
+                        if resolver_average_load >= 5000.0 {
+                            // avoid resolver
+                            return false;
+                        } else if 200.0 <= resolver_average_load && resolver_average_load < 5000.0 {
+                            if contention_proxy > 40.0 {
+                                return true;
+                            } else {
+                                return false;
+                            }
+                        } else if 50.0 <= resolver_average_load && resolver_average_load < 200.0 {
+                            if contention_proxy > 20.0 {
+                                return true;
+                            } else {
+                                return false;
+                            }
+                        } else {
+                            // Always go to Resolver
+                            return true;
+                        }
+                    }
                 }
             }
         }

@@ -15,6 +15,12 @@ SECONDARY_RAY_WORKLOAD_CONFIG_PATH = (
     WORKLOAD_GENERATOR_DIR / "configs" / "workload-config-ray-secondary.json"
 )
 
+# YCSB-related paths
+YCSB_DIR = ROOT_DIR / "ycsb"
+YCSB_ATOMIX_PROPERTIES_PATH = (
+    YCSB_DIR / "atomix" / "src" / "main" / "conf" / "ray_atomix.properties"
+)
+
 TARGET_RUN_CMD = str(ROOT_DIR) + "/target/release/"
 
 BUILD_ATOMIX = True

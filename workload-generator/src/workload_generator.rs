@@ -64,10 +64,11 @@ pub struct WorkloadGenerator {
     value_per_key: Arc<Mutex<HashMap<usize, u64>>>, // For verification
     rng: Arc<Mutex<StdRng>>,
     pending_commit_table: Arc<RwLock<HashMap<usize, Uuid>>>,
+    ycsb_transactions: Arc<Mutex<Option<Vec<String>>>>,
 }
 
 impl WorkloadGenerator {
-    pub fn new(
+    pub async fn new(
         workload_config: Arc<WorkloadConfig>,
         client: FrontendClient<tonic::transport::Channel>,
         resolver_client: ResolverClient<tonic::transport::Channel>,
@@ -78,6 +79,35 @@ impl WorkloadGenerator {
             .unwrap_or_else(|| rand::thread_rng().gen());
         info!("Using seed: {}", seed);
         let rng = Arc::new(Mutex::new(StdRng::seed_from_u64(seed)));
+        let zipf_exponent = workload_config.zipf_exponent;
+        let workload_type = workload_config.workload_type.clone();
+        let mut ycsb_transactions: Arc<Mutex<Option<Vec<String>>>> = Arc::new(Mutex::new(None));
+        if workload_type == "ycsb" {
+            let zipf_str = format!("{:.1}", zipf_exponent);
+            let filename = format!(
+                "{}/ycsb_queries/workload_{}.txt",
+                std::env::current_dir().unwrap().display(),
+                zipf_str
+            );
+            match std::fs::read_to_string(&filename) {
+                Ok(contents) => {
+                    let txs: Vec<String> = contents
+                        .lines()
+                        .map(|line| line.trim().to_string())
+                        .filter(|line| !line.is_empty())
+                        .collect();
+                    *ycsb_transactions.lock().await = Some(txs);
+                    info!(
+                        "Loaded {} YCSB transactions from {}",
+                        ycsb_transactions.lock().await.as_ref().unwrap().len(),
+                        filename
+                    );
+                }
+                Err(e) => {
+                    error!("Failed to load YCSB workload file {}: {}", filename, e);
+                }
+            }
+        }
         Arc::new(Self {
             workload_config,
             client,
@@ -87,6 +117,7 @@ impl WorkloadGenerator {
             value_per_key: Arc::new(Mutex::new(HashMap::new())),
             rng,
             pending_commit_table: Arc::new(RwLock::new(HashMap::new())),
+            ycsb_transactions,
         })
     }
 
@@ -131,19 +162,42 @@ impl WorkloadGenerator {
         self: &Arc<Self>,
         workload_id: usize,
     ) -> Arc<dyn Transaction + Send + Sync> {
-        //  sample num_keys uniformly from {1, 2}
-        let num_keys = 2; //rng.gen_range(1..3);
-                          // let keys = self.zipf_sample_without_replacement(num_keys, &mut rng);
-                          // info!("{}", format!("Generated transaction with keys: {:?}", keys).blue());
-                          // sample num_keys without replacement from uniform distribution
-        let mut rng = self.rng.lock().await;
-        let mut keys: Vec<usize> = (0..self.workload_config.num_keys)
-            .choose_multiple(&mut *rng, num_keys)
-            .into_iter()
-            .map(|k| k as usize)
-            .collect();
-        drop(rng);
-        keys.sort();
+        use std::fs::File;
+        use std::io::{BufRead, BufReader};
+
+        let keys: Vec<usize> = match self.workload_config.workload_type.as_str() {
+            "custom" => {
+                // Sample num_keys uniformly from {1, 2}
+                let num_keys = 2;
+                let mut rng = self.rng.lock().await;
+                let mut keys: Vec<usize> = (0..self.workload_config.num_keys)
+                    .choose_multiple(&mut *rng, num_keys)
+                    .into_iter()
+                    .map(|k| k as usize)
+                    .collect();
+                drop(rng);
+                keys.sort();
+                keys
+            }
+            "ycsb" => {
+                // Get the next transaction from the YCSB workload
+                let mut txs = self.ycsb_transactions.lock().await;
+                let key: usize = txs
+                    .as_mut()
+                    .unwrap()
+                    .pop()
+                    .unwrap()
+                    .parse::<usize>()
+                    .unwrap();
+                vec![key]
+            }
+            _ => {
+                panic!(
+                    "Invalid workload type: {}",
+                    self.workload_config.workload_type
+                );
+            }
+        };
         let name = match workload_id {
             0 => self.workload_config.name.clone(),
             _ => format!("{}_{}", self.workload_config.name.clone(), workload_id),

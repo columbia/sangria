@@ -78,8 +78,9 @@ impl LockTable {
             let state = self.state.read().await;
             (state.soft_released.len(), state.waiting_to_acquire.len())
         };
-        // let sum = num_waiting_to_acquire as f64 + num_soft_released as f64;
-        num_waiting_to_acquire as f64
+        let sum = num_waiting_to_acquire as f64 + num_soft_released as f64;
+        sum
+        // num_waiting_to_acquire as f64
         // let mut statistics = self.statistics.write().await;
         // statistics.num_waiters.push((num_waiting_to_acquire) as i64);
         // statistics.num_pending_commits.push(num_soft_released as i64);

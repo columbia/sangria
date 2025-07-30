@@ -59,7 +59,8 @@ async fn run_workload(
         client,
         resolver_client,
         range_server_client,
-    );
+    )
+    .await;
     if create_keyspace {
         workload_generator
             .create_keyspace(
