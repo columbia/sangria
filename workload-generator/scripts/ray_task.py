@@ -97,7 +97,10 @@ def run_workload(config):
     ]
 
     if iteration == 0:
-        atomix_setup.servers_config["commit_strategy"] = baseline
+        if workload_type == "ycsb":
+            atomix_setup.servers_config["heuristic"] = "LockContention"
+        else:
+            atomix_setup.servers_config["heuristic"] = "OpenClients"
         atomix_setup.servers_config["resolver"][
             "cpu_percentage"
         ] = resolver_cpu_percentage

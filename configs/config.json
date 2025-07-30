@@ -1,6 +1,6 @@
 {
     "commit_strategy": "Pipelined",
-    "heuristic": "LockContention",
+    "heuristic": "OpenClients",
     "print_lock_table_state": false,
     "range_server": {
         "wal_buffer_capacity": 1000,
