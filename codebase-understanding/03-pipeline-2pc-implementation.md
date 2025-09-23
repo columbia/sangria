@@ -1,352 +1,390 @@
-# Pipeline 2PC Implementation
+# Pipeline 2PC Implementation - How Pipelined 2PC Actually Works
 
-## Overview
+## What Is "Pipelined" 2PC?
 
-Sangria implements an advanced pipelined two-phase commit protocol that optimizes transaction throughput through batching, dependency-based ordering, and adaptive commit strategies. The pipeline implementation centers around the **Group Commit** mechanism and intelligent commit strategy selection.
-
-## Group Commit Architecture (`resolver/src/core/group_commit.rs`)
-
-The Group Commit system is the core of the pipeline 2PC implementation, providing batching optimization for better throughput.
-
-### Key Data Structures
-
-#### Group Commit State
-```rust
-struct State {
-    // Transactions ready to commit grouped by participant range
-    group_per_participant: HashMap<FullRangeId, Arc<RwLock<Vec<TransactionInfo>>>>,
-}
-
-pub struct GroupCommit {
-    state: Arc<RwLock<State>>,
-    // Tracks pending commits per transaction across multiple ranges
-    num_pending_participant_commits_per_transaction: Arc<RwLock<HashMap<Uuid, u32>>>,
-    non_empty_groups: Arc<RwLock<HashSet<FullRangeId>>>,
-    range_client: Arc<RangeClient>,
-    tx_state_store: Arc<TxStateStoreClient>,
-    stats: Arc<RwLock<GroupCommitStats>>,
-    returned_transactions: Arc<RwLock<Vec<TransactionInfo>>>,
-}
+Traditional 2PC processes transactions one at a time:
+```
+Transaction A: Prepare → Commit → Done
+Transaction B:              Prepare → Commit → Done
+Transaction C:                          Prepare → Commit → Done
 ```
 
-### Pipeline Batching Mechanism
+Pipelined 2PC processes multiple transactions simultaneously:
+```
+Transaction A: Prepare → Commit → Done
+Transaction B:   Prepare → Commit → Done
+Transaction C:     Prepare → Commit → Done
+```
 
-#### Transaction Grouping (`add_transactions`, lines 152-225)
+Multiple transactions flow through different stages of 2PC at the same time, like cars on an assembly line.
 
-**Phase 1: Group by Participant Range**
+## How Pipelined 2PC Actually Works in Code
+
+Let's trace through what happens when multiple transactions hit the system simultaneously:
+
+### Step 1: Transaction Reaches Commit Decision Point
+
+**File**: `coordinator/src/transaction.rs:356-375`
+
+When a transaction is ready to commit, it makes a **smart routing decision**:
+
 ```rust
-// Group transactions by participant range
-let mut tmp_group_per_participant = HashMap::new();
-let mut tmp_num_pending_commits = HashMap::new();
-for transaction in transactions {
-    let mut num_pending_commits = 0;
-    for participant_range in transaction.participant_ranges_info.iter() {
-        // Only include ranges with writes - read-only participants don't need commits
-        if participant_range.has_writes {
-            num_pending_commits += 1;
-            tmp_group_per_participant
-                .entry(participant_range.participant_range)
-                .or_insert_with(|| Vec::new())
-                .push(transaction.clone());
-        }
+CommitStrategy::Adaptive | CommitStrategy::Pipelined => {
+    if !self.dependencies.is_empty() {
+        // HAS DEPENDENCIES -> Go through resolver (pipeline path)
+        info!("Delegating commit to resolver for transaction {}", self.id);
+        let participants_info = self.participant_ranges
+            .iter()
+            .map(|(range_id, info)| {
+                ParticipantRangeInfo::new(*range_id, !info.writeset.is_empty())
+            })
+            .collect();
+
+        self.resolver.commit(self.id, self.dependencies.clone(), participants_info).await?;
+    } else {
+        // NO DEPENDENCIES -> Direct commit (fast path)
+        info!("Committing transaction {:?} without Resolver", self.id);
+        // Skip the resolver entirely...
     }
-    tmp_num_pending_commits.insert(transaction.id, num_pending_commits);
 }
 ```
 
-**Key Optimizations:**
-- **Write-Only Grouping**: Only ranges with writes participate in commit groups
-- **Read-Only Optimization**: Read-only ranges are excluded from commit process
-- **Parallel Lock Acquisition**: Uses JoinSet to acquire locks for all groups concurrently
+**In English**:
+- **Has Dependencies**: "I need to wait for other transactions, so use the pipeline system"
+- **No Dependencies**: "I'm independent, so take the express lane"
 
-**Phase 2: Parallel Group Updates**
+### Step 2A: Fast Path (No Dependencies) - Parallel Processing
+
+**File**: `coordinator/src/transaction.rs:376-430`
+
+Independent transactions can commit **simultaneously**:
+
 ```rust
-// Spawning async tasks so that we try to acquire the locks for all groups in parallel
-for (participant_range, transactions) in tmp_group_per_participant.iter() {
-    join_set.spawn(async move {
-        let state = state_clone.read().await;
-        let mut group = state.group_per_participant.get(&participant_range);
-        match group {
-            Some(group) => {
-                let mut group = group.write().await;
-                group.extend(transactions.iter().cloned());
-            }
-            // ... error handling
-        }
-    });
+// NO DEPENDENCIES -> Direct commit (fast path)
+// 1. Record commit decision atomically
+let _ = self.tx_state_store.try_commit_transaction(self.id, 0).await.unwrap();
+self.state = State::Committed;
+
+// 2. Notify all participant ranges IN PARALLEL
+let mut commit_join_set = JoinSet::new();
+for (range_id, info) in self.participant_ranges.iter() {
+    let range_id = *range_id;
+    let has_writes = !info.writeset.is_empty();
+    if has_writes {
+        commit_join_set.spawn_on(async move {
+            range_client.commit_transactions(vec![transaction_info.id], &range_id, 0).await
+        }, &self.runtime);
+    }
 }
+while commit_join_set.join_next().await.is_some() {}
 ```
 
-#### Parallel Group Commit (`commit`, lines 227-359)
+**What Actually Happens**:
+- Multiple independent transactions can execute this code **simultaneously**
+- Each transaction commits to state store independently
+- Each transaction notifies its ranges in parallel with other transactions
+- **No coordination needed** between independent transactions
 
-**Phase 1: Parallel Range Commits**
+### Step 2B: Pipeline Path (Has Dependencies) - Batched Processing
+
+**File**: `resolver/src/core/resolver.rs:65-144`
+
+Dependent transactions enter the resolver pipeline:
+
 ```rust
-// For each non-empty group (participant range)
-for participant_range in non_empty_groups.iter() {
-    commit_join_set.spawn(async move {
-        // 1. Acquire write lock and extract all transactions
-        let mut group_clone = group_guard_clone.write().await;
-        let transactions = std::mem::take(&mut *group_clone);
+pub async fn commit(
+    resolver: Arc<Self>,
+    transaction_id: Uuid,
+    dependencies: HashSet<Uuid>,
+    participant_ranges_info: Vec<ParticipantRangeInfo>,
+    fake: bool,
+) -> Result<(), Error> {
+    let (s, r) = oneshot::channel();
 
-        // 2. Clear the group from non-empty tracking
-        non_empty_groups_clone.write().await.remove(&participant_range_clone);
-
-        // 3. Batch commit to transaction state store
-        if !fake {
-            tx_state_store_clone
-                .try_batch_commit_transactions(&tx_ids_vec, 0)
-                .await?;
-
-            // 4. Notify participant range to apply changes
-            range_client
-                .commit_transactions(tx_ids_vec, &participant_range_clone, 0)
-                .await?;
-        }
-
-        // 5. Track committed transactions for completion detection
-        returned_transactions_clone.write().await.extend(transactions);
-    });
-}
-```
-
-**Phase 2: Transaction Completion Detection**
-```rust
-// Determine which transactions have fully committed across all participant ranges
-for transaction in returned_transactions {
-    *num_pending_participant_commits_per_transaction
-        .get_mut(&transaction.id)
-        .unwrap() -= 1;
-
-    if *num_pending_participant_commits_per_transaction
-        .get_mut(&transaction.id)
-        .unwrap() == 0
     {
-        // Transaction has committed in all its participant ranges
-        num_pending_participant_commits_per_transaction.remove(&transaction.id);
-        finished_transactions.push(transaction);
-    }
-}
-```
+        let mut state = resolver.state.write().await;
 
-## Commit Strategy Implementation (`coordinator/src/transaction.rs`)
-
-### Strategy Selection Logic
-
-The pipeline 2PC uses three commit strategies with adaptive selection:
-
-#### 1. Traditional Strategy (lines 291-334)
-```rust
-CommitStrategy::Traditional => {
-    // Standard 2PC: State store first, then participants
-    match self.tx_state_store.try_commit_transaction(self.id, epoch).await? {
-        OpResult::TransactionIsCommitted(i) => {
-            self.state = State::Committed;
-            // Notify all participants to apply changes
-            for (range_id, info) in self.participant_ranges.iter() {
-                if has_writes {
-                    range_client.commit_transactions(
-                        vec![transaction_info.id],
-                        &range_id,
-                        epoch,
-                    ).await;
-                }
+        // Check dependencies and register transaction
+        for dependency in dependencies {
+            if !state.resolved_transactions.contains(&dependency) {
+                num_pending_dependencies += 1;
+                state.info_per_transaction
+                    .entry(dependency)
+                    .or_insert(TransactionInfo::default(dependency, fake))
+                    .dependents
+                    .insert(transaction_id);
             }
         }
-        OpResult::TransactionIsAborted => {
-            return Err(Error::TransactionAborted(TransactionAbortReason::Other));
+
+        if num_pending_dependencies == 0 {
+            // Ready to commit immediately! Add to batch.
+            resolver.group_commit.add_transactions(&vec![transaction_info.clone()]).await?;
+            resolver.bg_runtime.spawn(async move {
+                let _ = Self::trigger_commit(resolver_clone, vec![transaction_info]).await;
+            });
         }
     }
+
+    r.await.unwrap();  // Wait for commit to complete
 }
 ```
 
-#### 2. Adaptive/Pipelined Strategy (lines 356-433)
+**Key Insight**: Transactions that are ready to commit get **batched together** instead of committing individually!
 
-**With Dependencies (Pipeline through Resolver):**
+## The Pipeline Magic: Group Commit Batching
+
+### Step 3: Multiple Transactions Get Batched Together
+
+**File**: `resolver/src/core/group_commit.rs:152-191`
+
+Instead of committing transactions one by one, the resolver **groups them by range**:
+
 ```rust
-if !self.dependencies.is_empty() {
-    // Use resolver for dependency-based ordering and group commit
-    info!("Delegating commit to resolver for transaction {}", self.id);
-    let participants_info = self.participant_ranges
-        .iter()
-        .map(|(range_id, info)| {
-            ParticipantRangeInfo::new(*range_id, !info.writeset.is_empty())
-        })
-        .collect();
+pub async fn add_transactions(&self, transactions: &Vec<TransactionInfo>) -> Result<(), Error> {
+    // Group transactions by participant range
+    info!("Grouping transactions by participant range");
+    let mut tmp_group_per_participant = HashMap::new();
 
-    // Resolver handles dependency ordering and group commit
-    self.resolver
-        .commit(self.id, self.dependencies.clone(), participants_info)
-        .await?;
-}
-```
-
-**Without Dependencies (Optimized Direct Path):**
-```rust
-else {
-    // Direct commit optimization - bypass resolver for independent transactions
-    info!("Committing transaction {:?} without Resolver", self.id);
-
-    // 1. Direct commit to state store
-    let _ = self.tx_state_store.try_commit_transaction(self.id, 0).await.unwrap();
-    self.state = State::Committed;
-
-    // 2. Parallel participant notification
-    let mut commit_join_set = JoinSet::new();
-    for (range_id, info) in self.participant_ranges.iter() {
-        if has_writes {
-            commit_join_set.spawn_on(async move {
-                range_client.commit_transactions(
-                    vec![transaction_info.id],
-                    &range_id,
-                    0,
-                ).await
-            }, &self.runtime);
+    for transaction in transactions {
+        for participant_range in transaction.participant_ranges_info.iter() {
+            if participant_range.has_writes {
+                tmp_group_per_participant
+                    .entry(participant_range.participant_range)  // Range A, B, C, etc.
+                    .or_insert_with(|| Vec::new())
+                    .push(transaction.clone());  // Add transaction to this range's batch
+            }
         }
     }
-    while commit_join_set.join_next().await.is_some() {}
 
-    // 3. Late registration with resolver for early lock release coordination
-    if any_early_lock_releases {
-        let resolver = self.resolver.clone();
-        let tx_id = self.id;
-        self.runtime.spawn(async move {
-            let _ = resolver.register_committed_transactions(vec![tx_id]).await;
+    // Add all batches to their respective ranges IN PARALLEL
+    let mut join_set = JoinSet::<()>::new();
+    for (participant_range, transactions) in tmp_group_per_participant.iter() {
+        let participant_range = participant_range.clone();
+        let transactions = transactions.clone();
+
+        join_set.spawn(async move {
+            let state = state_clone.read().await;
+            let mut group = state.group_per_participant
+                .get(&participant_range)
+                .unwrap()
+                .write().await;
+            group.extend(transactions.iter().cloned());  // Add to range's batch
         });
     }
+    while let Some(_) = join_set.join_next().await {}
 }
 ```
 
-## Pipeline Optimizations
+**Example**: If we have 5 transactions ready to commit:
+- **Transaction 1**: writes to Range A, Range B
+- **Transaction 2**: writes to Range B, Range C
+- **Transaction 3**: writes to Range A
+- **Transaction 4**: writes to Range C
+- **Transaction 5**: writes to Range A, Range C
+
+The batching creates:
+- **Range A batch**: [Transaction 1, Transaction 3, Transaction 5]
+- **Range B batch**: [Transaction 1, Transaction 2]
+- **Range C batch**: [Transaction 2, Transaction 4, Transaction 5]
+
+### Step 4: Parallel Batch Execution
+
+**File**: `resolver/src/core/group_commit.rs:227-325`
+
+Now the real pipeline magic happens - **all ranges commit their batches simultaneously**:
+
+```rust
+pub async fn commit(&self) -> Result<Vec<TransactionInfo>, Error> {
+    let mut commit_join_set = JoinSet::<Result<(), Error>>::new();
+
+    // For each range with pending transactions
+    for participant_range in non_empty_groups.iter() {
+        let participant_range_clone = participant_range.clone();
+        let tx_state_store_clone = self.tx_state_store.clone();
+        let range_client = self.range_client.clone();
+
+        // Spawn parallel task for each range
+        commit_join_set.spawn(async move {
+            // 1. Get all transactions for this range
+            let mut group_clone = group_guard_clone.write().await;
+            let transactions = std::mem::take(&mut *group_clone);  // Extract batch
+            drop(group_clone);
+
+            if transactions.is_empty() {
+                return Ok(());
+            }
+
+            let tx_ids_vec = transactions.iter().map(|tx| tx.id).collect();
+
+            // 2. Batch commit to transaction state store
+            tx_state_store_clone.try_batch_commit_transactions(&tx_ids_vec, 0).await?;
+
+            // 3. Notify range to apply all changes at once
+            range_client.commit_transactions(tx_ids_vec, &participant_range_clone, 0).await?;
+
+            Ok(())
+        });
+    }
+
+    // Wait for all ranges to complete their batches
+    while let Some(res) = commit_join_set.join_next().await {}
+}
+```
+
+**What Actually Happens**:
+```
+Time →
+Range A: Batch commits [Tx1, Tx3, Tx5] ←─┐
+Range B: Batch commits [Tx1, Tx2]      ←─┼─ All happening in parallel!
+Range C: Batch commits [Tx2, Tx4, Tx5] ←─┘
+```
+
+## Pipeline Flow Example
+
+Let's trace through a concrete example with 3 transactions:
+
+### Initial State
+```
+Transaction A: WRITE key1="hello"    (no dependencies, ready immediately)
+Transaction B: WRITE key2="world"    (no dependencies, ready immediately)
+Transaction C: WRITE key3="!"        (depends on A, must wait)
+```
+
+### Pipeline Execution Timeline
+
+**T=0: All transactions start committing**
+- **Transaction A**: Takes fast path (no dependencies)
+- **Transaction B**: Takes fast path (no dependencies)
+- **Transaction C**: Goes to resolver, waits for A
+
+**T=1: Fast path transactions execute in parallel**
+```rust
+// A and B execute simultaneously
+Transaction A: tx_state_store.try_commit_transaction(A.id, 0).await
+Transaction B: tx_state_store.try_commit_transaction(B.id, 0).await
+
+// Both notify their ranges in parallel
+Transaction A: range_client.commit_transactions([A.id], range_1, 0).await
+Transaction B: range_client.commit_transactions([B.id], range_2, 0).await
+```
+
+**T=2: Transaction A finishes, wakes up C**
+```rust
+// A registers as committed
+resolver.register_committed_transactions(vec![A.id]).await;
+
+// C becomes ready (A was its only dependency)
+new_ready_to_commit = vec![C];
+resolver.group_commit.add_transactions(&new_ready_to_commit).await;
+```
+
+**T=3: Pipeline processes C**
+```rust
+// C gets added to group commit batch (might batch with other newly ready transactions)
+resolver.trigger_commit(resolver_clone, vec![C]).await;
+```
+
+### The "Pipeline" Visualization
+
+```
+Timeline →
+
+Fast Path (A,B):    [Prepare] → [Commit] → [Done]
+                    [Prepare] → [Commit] → [Done]
+
+Pipeline Path (C):     [Wait] → [Batch] → [Commit] → [Done]
+
+Dependency Flow:    A finishes → Wakes C → C batches with others → C commits
+```
+
+## Key Pipeline Optimizations in Code
 
 ### 1. Early Lock Release
 
-**Range Server Optimization:**
-- Ranges can release locks before receiving final commit confirmation
-- Requires coordination with resolver for dependency tracking
-- Improves concurrency but requires careful state management
+**File**: `coordinator/src/transaction.rs:422-430`
 
-**Implementation:**
 ```rust
-// During prepare phase
-if res.released_lock_early {
-    any_early_lock_releases = true;
-}
-
-// After direct commit
 if any_early_lock_releases {
-    // Register with resolver asynchronously
+    info!("At least one early lock release happened, registering transaction as committed in the resolver");
+    // Spawn async and don't wait for it to complete.
+    let resolver = self.resolver.clone();
+    let tx_id = self.id;
     self.runtime.spawn(async move {
         let _ = resolver.register_committed_transactions(vec![tx_id]).await;
     });
 }
 ```
 
-### 2. Dependency-Based Routing
+**What This Means**: Range servers can release locks **before** getting final confirmation, improving concurrency. The resolver is notified asynchronously to maintain dependency tracking.
 
-**Smart Commit Path Selection:**
-- **No Dependencies**: Direct commit path bypassing resolver
-- **With Dependencies**: Route through resolver for ordering
-- **Adaptive**: Dynamic selection based on transaction characteristics
+### 2. Batch State Store Operations
 
-### 3. Batch Transaction State Store Operations
+**File**: `resolver/src/core/group_commit.rs:285-287`
 
-**Group Commit to State Store:**
 ```rust
-// Batch commit multiple transactions to state store simultaneously
-tx_state_store_clone
-    .try_batch_commit_transactions(&tx_ids_vec, 0)
-    .await?;
+// Instead of individual commits:
+// tx_state_store.try_commit_transaction(tx1.id, 0).await;
+// tx_state_store.try_commit_transaction(tx2.id, 0).await;
+// tx_state_store.try_commit_transaction(tx3.id, 0).await;
+
+// Batch multiple transactions together:
+tx_state_store_clone.try_batch_commit_transactions(&tx_ids_vec, 0).await?;
 ```
 
-**Benefits:**
-- Reduces state store round trips
-- Improves throughput for transaction-heavy workloads
-- Maintains atomicity within each participant range
+**Performance Gain**: One database round-trip instead of N round-trips for N transactions.
 
-### 4. Parallel Participant Range Operations
+### 3. Parallel Range Processing
 
-**Concurrent Range Notifications:**
+**File**: `resolver/src/core/group_commit.rs:190-213`
+
 ```rust
-// Parallel commits across all participant ranges
-let mut commit_join_set = JoinSet::<Result<(), Error>>::new();
-for participant_range in non_empty_groups.iter() {
-    commit_join_set.spawn(async move {
-        // Process each range concurrently
-        // 1. Batch commit to state store
-        // 2. Notify range to apply changes
-        // 3. Update statistics
-    });
-}
-```
-
-## Concurrency and Lock Management
-
-### Fine-Grained Locking Strategy
-
-**Three-Level Lock Hierarchy:**
-1. **Global State Lock**: Protects the main group_per_participant HashMap
-2. **Per-Range Locks**: Each participant range has its own RwLock
-3. **Non-Empty Groups Lock**: Tracks which ranges have pending transactions
-
-**Lock Acquisition Patterns:**
-```rust
-// Pattern 1: Double-checked locking for new participant ranges
-{
-    let state = self.state.read().await;  // Read lock first
-    if !state.group_per_participant.contains_key(&participant_range) {
-        // Need to add new range
-    }
-}
-if !participants_to_insert.is_empty() {
-    let mut state = self.state.write().await;  // Write lock only if needed
-    // Insert new ranges
-}
-
-// Pattern 2: Parallel group processing
-for (participant_range, transactions) in groups {
+// Add transactions to ALL ranges simultaneously
+let mut join_set = JoinSet::<()>::new();
+for (participant_range, transactions) in tmp_group_per_participant.iter() {
     join_set.spawn(async move {
-        let state = state_clone.read().await;
-        let mut group = state.group_per_participant.get(&participant_range)?.write().await;
-        // Process group while holding minimal locks
+        // Each range processes its batch concurrently
+        let mut group = state.group_per_participant.get(&participant_range).unwrap().write().await;
+        group.extend(transactions.iter().cloned());
     });
 }
+while let Some(_) = join_set.join_next().await {}
 ```
 
-### Transaction Completion Tracking
+**Concurrency Gain**: Lock acquisition for different ranges happens in parallel instead of sequentially.
 
-**Multi-Range Transaction Handling:**
+### 4. Dependency-Based Smart Routing
+
+The routing decision happens **before** any expensive operations:
+
 ```rust
-// Track how many ranges each transaction needs to commit in
-let mut num_pending_commits = 0;
-for participant_range in transaction.participant_ranges_info.iter() {
-    if participant_range.has_writes {
-        num_pending_commits += 1;
-    }
-}
-tmp_num_pending_commits.insert(transaction.id, num_pending_commits);
-
-// On each range commit completion
-*num_pending_participant_commits_per_transaction.get_mut(&transaction.id).unwrap() -= 1;
-if *num_pending_participant_commits_per_transaction.get_mut(&transaction.id).unwrap() == 0 {
-    // Transaction fully committed across all ranges
-    finished_transactions.push(transaction);
+if !self.dependencies.is_empty() {
+    // Route to pipeline (will batch with others)
+} else {
+    // Route to fast path (immediate execution)
 }
 ```
 
-## Performance Benefits
+**Efficiency**: Independent transactions skip the resolver entirely, while dependent transactions get proper ordering through batching.
 
-### Throughput Improvements
-1. **Batching**: Multiple transactions committed together reduces per-transaction overhead
-2. **Parallelism**: Concurrent operations across participant ranges
-3. **Direct Path**: Independent transactions bypass dependency resolution
-4. **Early Lock Release**: Improved concurrency through optimistic locking
+## Why Pipelined 2PC Is Faster
 
-### Latency Considerations
-1. **Group Formation Delay**: Transactions may wait for batch formation
-2. **Dependency Resolution**: Complex dependency chains increase latency
-3. **Lock Contention**: Fine-grained locking reduces contention points
+### Traditional 2PC Bottlenecks
+1. **Serial Processing**: One transaction at a time
+2. **Individual State Store Writes**: One round-trip per transaction
+3. **Range Notification Delays**: Each transaction notifies ranges separately
 
-### Adaptive Behavior
-- **Load-Aware**: Considers resolver load and system conditions
-- **Dependency-Aware**: Routes transactions based on dependency characteristics
-- **Write-Pattern Aware**: Optimizes based on read/write patterns
+### Pipeline 2PC Solutions
+1. **Parallel Processing**: Independent transactions execute simultaneously
+2. **Batch State Store Writes**: Multiple transactions per round-trip
+3. **Batch Range Notifications**: Multiple transactions notify each range together
+4. **Smart Routing**: Bypass pipeline for independent transactions
+
+### Performance Numbers (Conceptual)
+```
+Traditional: 3 transactions × 2 phases × 10ms = 60ms total
+Pipelined:   3 transactions ÷ 2 batch size × 10ms = 15ms total
+```
+
+The pipeline keeps the system busy with multiple transactions in different phases instead of idle time between individual transaction commits.
+
+This is how Sangria achieves high throughput while maintaining the correctness guarantees of 2PC!
