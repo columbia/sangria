@@ -1,114 +1,113 @@
-# Cascading Abort Implementation Proposal for Pipelined 2PC
+# Cascading Abort Implementation - How to Abort Dependent Transactions
 
-## Overview
+## The Problem: What Happens When Dependencies Fail?
 
-This proposal outlines how to implement cascading aborts in Sangria's pipelined 2PC system by leveraging the existing resolver dependency graph and transaction state management infrastructure. When an ancestor transaction in the dependency graph fails, all dependent (child) transactions must be aborted and their database changes rolled back.
+Imagine this scenario happening in the current Sangria system:
 
-## Current State Analysis
+```
+Transaction A: WRITE key1 = "hello"           (commits successfully)
+Transaction B: READ key1, WRITE key2 = "world"  (depends on A, commits successfully)
+Transaction C: READ key2, WRITE key3 = "!"      (depends on B, FAILS during commit)
+Transaction D: READ key3, WRITE key4 = "done"   (depends on C, still waiting...)
+```
 
-### Existing Infrastructure for Cascading Aborts
+**Current Behavior**: Transaction D will wait forever for C to commit, but C has already failed!
 
-#### 1. Resolver Dependency Graph (`resolver/src/core/resolver.rs`)
+**Needed Behavior**: When C fails, D should be automatically aborted and all its pending changes rolled back.
 
-**Current Structure:**
+## How Cascading Abort Should Work
+
+Let's trace through what should happen when Transaction C fails:
+
+### Step 1: Transaction C Fails During Group Commit
+
+**Current Code**: `resolver/src/core/group_commit.rs:285-293`
+
 ```rust
-// resolver/src/core/resolver.rs:16-35
-pub struct TransactionInfo {
-    pub id: Uuid,
-    pub num_dependencies: u32,          // Count of pending dependencies
-    pub dependents: HashSet<Uuid>,      // Transactions waiting for this one
-    pub participant_ranges_info: Vec<ParticipantRangeInfo>,
-    pub fake: bool,
+// Current code - panics on failure!
+if let Err(e) = tx_state_store_clone
+    .try_batch_commit_transactions(&tx_ids_vec, 0)
+    .await
+{
+    panic!(
+        "Error committing transactions to tx_state_store {:?}: {:?}",
+        participant_range_clone, e
+    );
 }
+```
 
-// resolver/src/core/resolver.rs:37-41
+**What Actually Happens Now**: The entire system panics and crashes!
+
+**What Should Happen**: Register the failed transactions for cascading abort.
+
+### Step 2: Resolver Should Track Failed Transactions
+
+**Current Code**: `resolver/src/core/resolver.rs:37-41`
+
+```rust
+// Current resolver state
+#[derive(Default)]
 pub struct State {
     info_per_transaction: HashMap<Uuid, TransactionInfo>,
-    resolved_transactions: HashSet<Uuid>,  // Successfully committed transactions
+    resolved_transactions: HashSet<Uuid>,  // Successfully committed
 }
 ```
 
-**Key Insight:** The `dependents` field in `TransactionInfo` already maintains the exact dependency tree needed for cascading aborts!
+**What We Need**: Add tracking for aborted transactions so we know which ones failed.
 
-#### 2. Transaction Pending Operations (`coordinator/src/transaction.rs`)
+### Step 3: Find Who Was Waiting for Failed Transaction
 
-**Current Structure:**
+**Current Code**: `resolver/src/core/resolver.rs:219-242`
+
 ```rust
-// coordinator/src/transaction.rs:33-38
-struct ParticipantRange {
-    readset: HashSet<Bytes>,           // Keys read by transaction
-    writeset: HashMap<Bytes, Bytes>,   // Key-value pairs to write
-    deleteset: HashSet<Bytes>,         // Keys to delete
-    leader_sequence_number: u64,       // For leader change detection
-}
+// This code currently only handles successful commits
+let dependents = mem::take(&mut transaction_info.dependents);
+for dependent in dependents.iter() {
+    let dependent_transaction_info = state.info_per_transaction.get_mut(&dependent).unwrap();
+    dependent_transaction_info.num_dependencies -= 1;
 
-// coordinator/src/transaction.rs:40-54
-pub struct Transaction {
-    id: Uuid,
-    transaction_info: Arc<TransactionInfo>,
-    state: State,                      // Running/Preparing/Aborted/Committed
-    participant_ranges: HashMap<FullRangeId, ParticipantRange>,  // PENDING OPERATIONS
-    dependencies: HashSet<Uuid>,
-    // ... other fields
-}
-```
-
-**Key Insight:** The `participant_ranges` field contains all pending read/write/delete operations that need to be rolled back on abort!
-
-#### 3. Existing Abort Infrastructure (`coordinator/src/transaction.rs`)
-
-**Current Implementation:**
-```rust
-// coordinator/src/transaction.rs:170-203
-async fn record_abort(&mut self) -> Result<(), Error> {
-    self.state = State::Aborted;
-
-    // Parallel abort notifications to all participant ranges
-    let mut abort_join_set = JoinSet::new();
-    for range_id in self.participant_ranges.keys() {
-        let range_id = *range_id;
-        let range_client = self.range_client.clone();
-        let transaction_info = self.transaction_info.clone();
-        abort_join_set.spawn_on(async move {
-            range_client.abort_transaction(transaction_info, &range_id).await
-        }, &self.runtime);
+    if dependent_transaction_info.num_dependencies == 0 {
+        // Dependent becomes ready to commit
+        new_ready_to_commit.push(dependent_transaction_info.clone());
     }
-
-    // Record abort in transaction state store
-    let outcome = self.tx_state_store.try_abort_transaction(self.id).await.unwrap();
-    match outcome {
-        OpResult::TransactionIsAborted => (),
-        OpResult::TransactionIsCommitted(_) => {
-            panic!("transaction committed without coordinator consent!")
-        }
-    }
-    while abort_join_set.join_next().await.is_some() {}
-    Ok(())
 }
 ```
 
-**Key Insight:** Abort infrastructure exists but is only triggered locally per transaction!
+**What We Need**: Similar logic but for aborts - cascade the abort to all dependents.
 
-## Proposed Implementation
+## Concrete Implementation Walkthrough
 
-### 1. New Aborted Transaction Tracking in Resolver
+Let's walk through the exact code changes needed to make cascading abort work:
 
-**File:** `resolver/src/core/resolver.rs`
+### Change 1: Add Aborted Transaction Tracking
 
-**Add to State structure:**
+**File**: `resolver/src/core/resolver.rs:37-41`
+
+**Current Code**:
 ```rust
-// resolver/src/core/resolver.rs:37-41 (MODIFY)
 #[derive(Default)]
 pub struct State {
     info_per_transaction: HashMap<Uuid, TransactionInfo>,
     resolved_transactions: HashSet<Uuid>,
-    aborted_transactions: HashSet<Uuid>,  // NEW: Track aborted transactions
 }
 ```
 
-**Add new method - Register Aborted Transactions:**
+**New Code**:
 ```rust
-// resolver/src/core/resolver.rs (ADD NEW METHOD after line 267)
+#[derive(Default)]
+pub struct State {
+    info_per_transaction: HashMap<Uuid, TransactionInfo>,
+    resolved_transactions: HashSet<Uuid>,      // Successfully committed
+    aborted_transactions: HashSet<Uuid>,       // Failed transactions
+}
+```
+
+### Change 2: Implement Cascading Abort Logic
+
+**File**: `resolver/src/core/resolver.rs` (add new method after line 267)
+
+**New Code**:
+```rust
 pub async fn register_aborted_transactions(
     resolver: Arc<Self>,
     aborted_transaction_ids: Vec<Uuid>,
@@ -119,23 +118,23 @@ pub async fn register_aborted_transactions(
         let mut state = resolver.state.write().await;
         let mut aborts_to_propagate = aborted_transaction_ids.clone();
 
-        // Iteratively find all transactions that need to be aborted due to cascading
+        // Process each failed transaction and find its dependents
         while !aborts_to_propagate.is_empty() {
             let abort_tx_id = aborts_to_propagate.pop().unwrap();
 
-            // Mark transaction as aborted
+            // Mark this transaction as aborted
             state.aborted_transactions.insert(abort_tx_id);
 
-            // Find all dependents that need to be cascaded
             if let Some(transaction_info) = state.info_per_transaction.get_mut(&abort_tx_id) {
+                // Get all transactions waiting for this failed one
                 let dependents = mem::take(&mut transaction_info.dependents);
 
                 for dependent_id in dependents {
-                    // Check if dependent is not already resolved or aborted
+                    // Check if dependent hasn't already been resolved or aborted
                     if !state.resolved_transactions.contains(&dependent_id)
                         && !state.aborted_transactions.contains(&dependent_id) {
 
-                        // Add to cascade abort list
+                        // This dependent must also be aborted!
                         aborts_to_propagate.push(dependent_id);
                         cascaded_aborts.push(dependent_id);
 
@@ -144,244 +143,319 @@ pub async fn register_aborted_transactions(
                 }
             }
 
-            // Remove from waiting transactions
+            // Wake up any transactions waiting for the aborted transaction
             if let Some(sender) = resolver.waiting_transactions.write().await.remove(&abort_tx_id) {
-                // Send abort signal instead of commit signal
-                let _ = sender.send(());  // This will cause the waiting transaction to check state
+                let _ = sender.send(());  // This will cause waiting transaction to check abort status
             }
         }
     }
 
-    info!("Cascading abort affected {} transactions: {:?}", cascaded_aborts.len(), cascaded_aborts);
+    info!("Cascaded abort to {} transactions: {:?}", cascaded_aborts.len(), cascaded_aborts);
     Ok(cascaded_aborts)
 }
 ```
 
-### 2. Enhanced Commit Method with Abort Detection
+**What This Does**:
+- Marks failed transactions as aborted
+- Finds all their dependents using existing `dependents` field
+- Recursively aborts dependents (cascading effect)
+- Wakes up waiting transactions so they can check if they've been aborted
 
-**File:** `resolver/src/core/resolver.rs`
+### Change 3: Handle Group Commit Failures
 
-**Modify existing commit method:**
+**File**: `resolver/src/core/group_commit.rs:285-293`
+
+**Current Code**:
 ```rust
-// resolver/src/core/resolver.rs:65-147 (MODIFY existing method)
-pub async fn commit(
-    resolver: Arc<Self>,
-    transaction_id: Uuid,
-    dependencies: HashSet<Uuid>,
-    participant_ranges_info: Vec<ParticipantRangeInfo>,
-    fake: bool,
-) -> Result<(), Error> {
-    // Read-only optimization (unchanged)
-    if participant_ranges_info.iter().all(|info| !info.has_writes) {
-        return Ok(());
-    }
-
-    let (s, r) = oneshot::channel();
-    let mut num_pending_dependencies = 0;
-
-    // Acquire the write lock and update dependencies (unchanged)
-    {
-        let mut state = resolver.state.write().await;
-
-        // NEW: Check if any dependencies are already aborted
-        for dependency in &dependencies {
-            if state.aborted_transactions.contains(dependency) {
-                info!("Transaction {} depends on aborted transaction {}, aborting immediately",
-                      transaction_id, dependency);
-                return Err(Error::TransactionAborted(TransactionAbortReason::DependencyAborted));
-            }
-        }
-
-        // Rest of dependency handling (unchanged)...
-        for dependency in dependencies {
-            if !state.resolved_transactions.contains(&dependency) {
-                num_pending_dependencies += 1;
-                state.info_per_transaction
-                    .entry(dependency)
-                    .or_insert(TransactionInfo::default(dependency, fake))
-                    .dependents
-                    .insert(transaction_id);
-            }
-        }
-        // ... rest unchanged
-    }
-
-    // Block until transaction is committed or aborted
-    r.await.unwrap();
-
-    // NEW: Check if transaction was aborted while waiting
-    {
-        let state = resolver.state.read().await;
-        if state.aborted_transactions.contains(&transaction_id) {
-            info!("Transaction {} was aborted due to cascading abort", transaction_id);
-            return Err(Error::TransactionAborted(TransactionAbortReason::CascadingAbort));
-        }
-    }
-
-    info!("Transaction {} finally committed!", transaction_id);
-    Ok(())
-}
-```
-
-### 3. Group Commit Error Handling Enhancement
-
-**File:** `resolver/src/core/group_commit.rs`
-
-**Modify the commit method to handle transaction state store failures:**
-```rust
-// resolver/src/core/group_commit.rs:279-293 (MODIFY existing error handling)
-// Replace the panic with proper error handling
 if let Err(e) = tx_state_store_clone
     .try_batch_commit_transactions(&tx_ids_vec, 0)
     .await
 {
-    // NEW: Handle batch commit failures by registering aborts
-    error!("Batch commit failed for range {:?}: {:?}", participant_range_clone, e);
-
-    // Register all transactions in this batch as aborted
-    let resolver_clone = resolver.clone();  // Need resolver reference here
-    let failed_tx_ids = tx_ids_vec.clone();
-    tokio::spawn(async move {
-        let _ = Resolver::register_aborted_transactions(resolver_clone, failed_tx_ids).await;
-    });
-
-    return Err(Error::GroupCommitFailed);  // NEW error type needed
+    panic!(
+        "Error committing transactions to tx_state_store {:?}: {:?}",
+        participant_range_clone, e
+    );
 }
 ```
 
-### 4. Coordinator Abort Integration
-
-**File:** `coordinator/src/transaction.rs`
-
-**Enhance record_abort to notify resolver:**
+**New Code**:
 ```rust
-// coordinator/src/transaction.rs:170-203 (MODIFY existing method)
+if let Err(e) = tx_state_store_clone
+    .try_batch_commit_transactions(&tx_ids_vec, 0)
+    .await
+{
+    error!("Batch commit failed for range {:?}: {:?}", participant_range_clone, e);
+
+    // Instead of panicking, register these transactions as aborted
+    let resolver_clone = resolver.clone();  // Need resolver reference passed to group_commit
+    let failed_tx_ids = tx_ids_vec.clone();
+
+    tokio::spawn(async move {
+        if let Err(abort_err) = Resolver::register_aborted_transactions(resolver_clone, failed_tx_ids).await {
+            error!("Failed to register aborted transactions: {:?}", abort_err);
+        }
+    });
+
+    return Err(Error::GroupCommitFailed);
+}
+```
+
+**What This Does**: Instead of crashing, register failed transactions for cascading abort.
+
+### Change 4: Check for Aborts in Commit Method
+
+**File**: `resolver/src/core/resolver.rs:65-144` (modify existing method)
+
+**Current Code**:
+```rust
+// Block until the transaction is actually committed
+r.await.unwrap();
+info!("Transaction {} finally committed!", transaction_id);
+Ok(())
+```
+
+**New Code**:
+```rust
+// Block until the transaction is committed OR aborted
+r.await.unwrap();
+
+// Check if transaction was aborted while waiting
+{
+    let state = resolver.state.read().await;
+    if state.aborted_transactions.contains(&transaction_id) {
+        info!("Transaction {} was aborted due to cascading abort", transaction_id);
+        return Err(Error::TransactionAborted(TransactionAbortReason::CascadingAbort));
+    }
+}
+
+info!("Transaction {} finally committed!", transaction_id);
+Ok(())
+```
+
+**What This Does**: After waiting, check if the transaction was aborted due to cascading failure.
+
+### Change 5: Prevent New Dependencies on Aborted Transactions
+
+**File**: `resolver/src/core/resolver.rs:82-102` (modify existing loop)
+
+**Current Code**:
+```rust
+for dependency in dependencies {
+    if !state.resolved_transactions.contains(&dependency) {
+        // Dependency is not yet resolved, so we need to wait for it
+        num_pending_dependencies += 1;
+        state.info_per_transaction
+            .entry(dependency)
+            .or_insert(TransactionInfo::default(dependency, fake))
+            .dependents
+            .insert(transaction_id);
+    }
+}
+```
+
+**New Code**:
+```rust
+for dependency in dependencies {
+    if state.aborted_transactions.contains(&dependency) {
+        // Dependency was aborted! This transaction should abort immediately
+        info!("Transaction {} depends on aborted transaction {}, aborting",
+              transaction_id, dependency);
+        return Err(Error::TransactionAborted(TransactionAbortReason::DependencyAborted));
+    }
+
+    if !state.resolved_transactions.contains(&dependency) {
+        // Dependency is not yet resolved, so we need to wait for it
+        num_pending_dependencies += 1;
+        state.info_per_transaction
+            .entry(dependency)
+            .or_insert(TransactionInfo::default(dependency, fake))
+            .dependents
+            .insert(transaction_id);
+    }
+}
+```
+
+**What This Does**: Check if any dependency is already aborted before waiting for it.
+
+## Concrete Example: How Cascading Abort Works
+
+Let's trace through the exact execution with our example transactions:
+
+### Initial State
+```
+Transaction A: WRITE key1 = "hello"           (committed successfully)
+Transaction B: READ key1, WRITE key2 = "world"  (committed successfully)
+Transaction C: READ key2, WRITE key3 = "!"      (depends on B, about to commit)
+Transaction D: READ key3, WRITE key4 = "done"   (depends on C, waiting in resolver)
+```
+
+**Resolver State**:
+```rust
+info_per_transaction: {
+    C: TransactionInfo { id: C, num_dependencies: 0, dependents: {D} },
+    D: TransactionInfo { id: D, num_dependencies: 1, dependents: {} }
+}
+resolved_transactions: {A, B}
+aborted_transactions: {}
+waiting_transactions: {D: channel}
+```
+
+### Step 1: Transaction C Fails During Group Commit
+
+**What Happens**: Range server or transaction state store fails C's commit
+
+```rust
+// In group_commit.rs - C's commit fails
+tx_state_store_clone.try_batch_commit_transactions(&[C.id], 0).await  // FAILS!
+
+// New error handling kicks in
+tokio::spawn(async move {
+    Resolver::register_aborted_transactions(resolver_clone, vec![C.id]).await;
+});
+```
+
+### Step 2: Cascading Abort Processes C's Failure
+
+```rust
+// register_aborted_transactions processes C
+let mut aborts_to_propagate = vec![C.id];
+
+while !aborts_to_propagate.is_empty() {
+    let abort_tx_id = aborts_to_propagate.pop().unwrap();  // C.id
+
+    // Mark C as aborted
+    state.aborted_transactions.insert(C.id);
+
+    // Find C's dependents
+    let dependents = mem::take(&mut transaction_info.dependents);  // dependents = {D}
+
+    for dependent_id in dependents {  // For D
+        if !state.resolved_transactions.contains(&D.id) && !state.aborted_transactions.contains(&D.id) {
+            // D must be aborted too!
+            aborts_to_propagate.push(D.id);
+            cascaded_aborts.push(D.id);
+        }
+    }
+
+    // Wake up D so it can see it's been aborted
+    let sender = resolver.waiting_transactions.write().await.remove(&C.id);
+    sender.send(()).unwrap();  // D's thread wakes up
+}
+```
+
+### Step 3: Transaction D Wakes Up and Sees It's Aborted
+
+```rust
+// Transaction D's thread wakes up from r.await
+r.await.unwrap();
+
+// Check abort status
+let state = resolver.state.read().await;
+if state.aborted_transactions.contains(&D.id) {
+    return Err(Error::TransactionAborted(TransactionAbortReason::CascadingAbort));
+}
+```
+
+### Final State After Cascading Abort
+```rust
+info_per_transaction: {
+    C: TransactionInfo { id: C, num_dependencies: 0, dependents: {} },  // dependents cleared
+    D: TransactionInfo { id: D, num_dependencies: 1, dependents: {} }   // still marked as waiting
+}
+resolved_transactions: {A, B}
+aborted_transactions: {C, D}  // Both C and D are now aborted
+waiting_transactions: {}      // D was removed and woken up
+```
+
+## Rollback of Pending Operations
+
+### How Pending Writes Get Rolled Back
+
+**Current Transaction Structure**: `coordinator/src/transaction.rs:33-38`
+
+```rust
+struct ParticipantRange {
+    readset: HashSet<Bytes>,        // Keys read by transaction
+    writeset: HashMap<Bytes, Bytes>, // Pending writes that need rollback
+    deleteset: HashSet<Bytes>,      // Pending deletes that need rollback
+    leader_sequence_number: u64,
+}
+```
+
+**When Cascading Abort Happens**: The coordinator's existing `record_abort()` method already handles rollback:
+
+```rust
+// coordinator/src/transaction.rs:170-203 - existing abort handling
 async fn record_abort(&mut self) -> Result<(), Error> {
     self.state = State::Aborted;
 
-    // NEW: Notify resolver of abort before cleaning up ranges
-    if let Err(e) = self.resolver.register_aborted_transactions(vec![self.id]).await {
-        error!("Failed to register abort with resolver: {:?}", e);
-    }
-
-    // Existing abort logic (unchanged)
+    // Notify all participant ranges to roll back prepared changes
     let mut abort_join_set = JoinSet::new();
     for range_id in self.participant_ranges.keys() {
-        let range_id = *range_id;
         let range_client = self.range_client.clone();
-        let transaction_info = self.transaction_info.clone();
         abort_join_set.spawn_on(async move {
             range_client.abort_transaction(transaction_info, &range_id).await
         }, &self.runtime);
     }
 
-    let outcome = self.tx_state_store.try_abort_transaction(self.id).await.unwrap();
-    match outcome {
-        OpResult::TransactionIsAborted => (),
-        OpResult::TransactionIsCommitted(_) => {
-            panic!("transaction committed without coordinator consent!")
-        }
-    }
+    // Record abort in transaction state store
+    self.tx_state_store.try_abort_transaction(self.id).await.unwrap();
+
     while abort_join_set.join_next().await.is_some() {}
     Ok(())
 }
 ```
 
-### 5. New Error Types
+**What Gets Rolled Back**:
+- All pending writes in `participant_ranges[].writeset`
+- All pending deletes in `participant_ranges[].deleteset`
+- Any locks held by the transaction
+- The transaction's prepare records in range servers
 
-**File:** `coordinator_rangeclient/src/error.rs`
+## Integration with Existing Error Handling
 
-**Add new error variants:**
+### Coordinator Integration
+
+**File**: `coordinator/src/transaction.rs:170-203` (modify existing method)
+
+Add resolver notification to existing abort handling:
+
 ```rust
-// Add to existing TransactionAbortReason enum
-pub enum TransactionAbortReason {
-    // ... existing variants
-    DependencyAborted,     // NEW: A dependency was aborted
-    CascadingAbort,        // NEW: Aborted due to cascading from ancestor
-}
+async fn record_abort(&mut self) -> Result<(), Error> {
+    self.state = State::Aborted;
 
-// Add to existing Error enum
-pub enum Error {
-    // ... existing variants
-    GroupCommitFailed,     // NEW: Group commit to state store failed
+    // NEW: Notify resolver of abort to trigger cascading
+    if let Err(e) = self.resolver.register_aborted_transactions(vec![self.id]).await {
+        error!("Failed to register abort with resolver: {:?}", e);
+    }
+
+    // Existing abort logic continues unchanged
+    let mut abort_join_set = JoinSet::new();
+    for range_id in self.participant_ranges.keys() {
+        // ... existing range abort notifications
+    }
+
+    self.tx_state_store.try_abort_transaction(self.id).await.unwrap();
+    while abort_join_set.join_next().await.is_some() {}
+    Ok(())
 }
 ```
 
-### 6. Resolver Client Interface Enhancement
+This ensures that any transaction abort (whether from timeout, explicit abort, or commit failure) triggers cascading abort checking.
 
-**File:** `resolver/src/resolver_client.rs`
+## Summary: The Complete Cascading Flow
 
-**Add new method to trait:**
-```rust
-// resolver/src/resolver_client.rs (ADD to ResolverClient trait)
-#[async_trait]
-pub trait ResolverClient: Send + Sync {
-    // ... existing methods
+1. **Transaction C fails** during group commit (range server error, state store failure, etc.)
+2. **Group commit error handler** registers C for cascading abort instead of panicking
+3. **Resolver processes cascading abort**:
+   - Marks C as aborted
+   - Finds C's dependents (D) using existing dependency graph
+   - Recursively marks D as aborted
+   - Wakes up D's waiting thread
+4. **Transaction D wakes up** and checks its status, sees it's aborted
+5. **D's coordinator calls record_abort()** which:
+   - Notifies all ranges to rollback D's pending writes
+   - Records abort in transaction state store
+   - Cleans up D's locks and prepared state
 
-    // NEW: Register aborted transactions
-    async fn register_aborted_transactions(
-        &self,
-        transaction_ids: Vec<Uuid>,
-    ) -> Result<Vec<Uuid>, Error>;
-}
-```
-
-**Implementation in local client:**
-```rust
-// resolver/src/local/client.rs (ADD implementation)
-async fn register_aborted_transactions(
-    &self,
-    transaction_ids: Vec<Uuid>,
-) -> Result<Vec<Uuid>, Error> {
-    Resolver::register_aborted_transactions(self.resolver.clone(), transaction_ids).await
-}
-```
-
-## Implementation Workflow
-
-### Phase 1: Basic Cascading Infrastructure
-1. **Add aborted transaction tracking** to resolver state
-2. **Implement register_aborted_transactions** method
-3. **Add new error types** for abort reasons
-4. **Enhance resolver client interface** with abort registration
-
-### Phase 2: Integration with Existing Abort Paths
-1. **Modify coordinator record_abort** to notify resolver
-2. **Update commit method** to check for aborted dependencies
-3. **Add abort detection** in waiting transaction logic
-
-### Phase 3: Group Commit Error Handling
-1. **Replace panics with proper error handling** in group commit
-2. **Integrate abort registration** on batch commit failures
-3. **Add rollback coordination** for partially committed groups
-
-### Phase 4: Testing and Validation
-1. **Unit tests** for cascading abort logic
-2. **Integration tests** with simulated failures
-3. **Performance testing** to ensure abort overhead is minimal
-
-## Key Benefits of This Approach
-
-### 1. Leverages Existing Infrastructure
-- **Dependency Graph**: Uses existing `dependents` relationships
-- **Abort Mechanism**: Extends current `record_abort` functionality
-- **State Management**: Builds on existing resolver state tracking
-
-### 2. Maintains Pipelined 2PC Performance
-- **Parallel Operations**: Cascading aborts can be processed in parallel
-- **Minimal Overhead**: Only adds abort checking to existing commit paths
-- **Group Processing**: Can abort multiple transactions in batches
-
-### 3. Ensures Data Consistency
-- **Transaction State Store**: Leverages existing atomic commit/abort decisions
-- **Range Coordination**: Uses existing range client abort notifications
-- **Dependency Ordering**: Maintains serializability through dependency tracking
-
-### 4. Graceful Error Propagation
-- **Structured Error Types**: Clear error reasons for different abort scenarios
-- **Async Notification**: Non-blocking abort propagation
-- **Resource Cleanup**: Proper cleanup of waiting transactions and state
-
-## Conclusion
-
-This implementation leverages Sangria's existing dependency graph in the resolver and transaction state management in the coordinator to implement cascading aborts efficiently. The proposal maintains the performance benefits of pipelined 2PC while ensuring that failed ancestor transactions properly abort their dependent children and roll back all affected database keys.
+The cascading abort leverages Sangria's existing dependency tracking (`dependents` field) and abort infrastructure (`record_abort()` method) to ensure that when ancestor transactions fail, all their dependent children are properly aborted and rolled back.
