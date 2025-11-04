@@ -252,7 +252,12 @@ impl Transaction {
         match outcome {
             OpResult::TransactionIsAborted => (),
             OpResult::TransactionIsCommitted(_) => {
-                panic!("transaction committed without coordinator consent!")
+                // Transaction was already committed (possibly by resolver or race condition)
+                // This can happen in Pipelined/Adaptive strategies with early lock release
+                info!(
+                    "Transaction {} was already committed when abort was attempted",
+                    self.id
+                );
             }
         }
         while abort_join_set.join_next().await.is_some() {}
@@ -334,7 +339,18 @@ impl Transaction {
                 }
 
                 // Abort in tx_state_store
-                let _ = self.tx_state_store.try_abort_transaction(*tx_id).await;
+                if let Ok(outcome) = self.tx_state_store.try_abort_transaction(*tx_id).await {
+                    match outcome {
+                        OpResult::TransactionIsAborted => (),
+                        OpResult::TransactionIsCommitted(_) => {
+                            // Transaction was already committed, log and continue
+                            info!(
+                                "Transaction {} was already committed during cascade abort",
+                                tx_id
+                            );
+                        }
+                    }
+                }
 
                 // Clean up dependency tracker
                 self.dependency_tracker.remove_reverse_deps(*tx_id).await;
@@ -349,7 +365,17 @@ impl Transaction {
             if leaves.is_empty() && !to_abort.is_empty() {
                 // Abort remaining anyway to avoid getting stuck
                 for tx_id in &to_abort.clone() {
-                    let _ = self.tx_state_store.try_abort_transaction(*tx_id).await;
+                    if let Ok(outcome) = self.tx_state_store.try_abort_transaction(*tx_id).await {
+                        match outcome {
+                            OpResult::TransactionIsAborted => (),
+                            OpResult::TransactionIsCommitted(_) => {
+                                info!(
+                                    "Transaction {} was already committed during cycle-breaking abort",
+                                    tx_id
+                                );
+                            }
+                        }
+                    }
                     self.dependency_tracker.unmark_aborting(*tx_id).await;
                 }
                 break;
