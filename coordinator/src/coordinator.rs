@@ -178,3 +178,75 @@ impl Coordinator {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    /// Test cascading abort: when T1 aborts, all dependent transactions (T2, T3) should be marked as aborting
+    #[tokio::test]
+    async fn test_cascading_abort_marks_all_dependents() {
+        let tracker = DependencyTracker::new();
+        
+        // Create a dependency chain: T1 <- T2 <- T3
+        // (T2 depends on T1, T3 depends on T2)
+        let tx1 = Uuid::new_v4();
+        let tx2 = Uuid::new_v4();
+        let tx3 = Uuid::new_v4();
+
+        // Set up reverse dependencies
+        tracker.add_reverse_dep(tx1, tx2).await;  // T2 depends on T1
+        tracker.add_reverse_dep(tx2, tx3).await;  // T3 depends on T2
+
+        // Initially, no transactions are aborting
+        assert!(!tracker.is_aborting(tx1).await);
+        assert!(!tracker.is_aborting(tx2).await);
+        assert!(!tracker.is_aborting(tx3).await);
+
+        // Simulate cascading abort: T1 aborts
+        tracker.mark_aborting(&[tx1]).await;
+        assert!(tracker.is_aborting(tx1).await);
+
+        // Get T1's direct dependents (should be T2)
+        let deps_of_tx1 = tracker.get_dependents(tx1).await;
+        assert!(deps_of_tx1.is_some());
+        let deps_of_tx1 = deps_of_tx1.unwrap();
+        assert_eq!(deps_of_tx1.len(), 1);
+        assert!(deps_of_tx1.contains(&tx2));
+
+        // Mark T2 as aborting (cascade continues)
+        tracker.mark_aborting(&[tx2]).await;
+        assert!(tracker.is_aborting(tx2).await);
+
+        // Get T2's direct dependents (should be T3)
+        let deps_of_tx2 = tracker.get_dependents(tx2).await;
+        assert!(deps_of_tx2.is_some());
+        let deps_of_tx2 = deps_of_tx2.unwrap();
+        assert_eq!(deps_of_tx2.len(), 1);
+        assert!(deps_of_tx2.contains(&tx3));
+
+        // Mark T3 as aborting (cascade completes)
+        tracker.mark_aborting(&[tx3]).await;
+        assert!(tracker.is_aborting(tx3).await);
+
+        // All transactions should now be marked as aborting
+        assert!(tracker.is_aborting(tx1).await);
+        assert!(tracker.is_aborting(tx2).await);
+        assert!(tracker.is_aborting(tx3).await);
+
+        // Clean up
+        tracker.remove_reverse_deps(tx1).await;
+        tracker.remove_reverse_deps(tx2).await;
+        tracker.unmark_aborting(tx1).await;
+        tracker.unmark_aborting(tx2).await;
+        tracker.unmark_aborting(tx3).await;
+
+        // Verify cleanup worked
+        assert!(tracker.get_dependents(tx1).await.is_none());
+        assert!(tracker.get_dependents(tx2).await.is_none());
+        assert!(!tracker.is_aborting(tx1).await);
+        assert!(!tracker.is_aborting(tx2).await);
+        assert!(!tracker.is_aborting(tx3).await);
+    }
+}
