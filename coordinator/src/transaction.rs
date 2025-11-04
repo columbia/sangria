@@ -23,6 +23,8 @@ use resolver::participant_range_info::ParticipantRangeInfo;
 use resolver::resolver_client::ResolverClient;
 use tx_state_store::client::{Client as TxStateStoreClient, OpResult};
 
+use crate::coordinator::DependencyTracker;
+
 enum State {
     Running,
     Preparing,
@@ -51,6 +53,7 @@ pub struct Transaction {
     commit_strategy: CommitStrategy,
     resolver: Arc<dyn ResolverClient>,
     pub keyspace: Keyspace,
+    dependency_tracker: Arc<DependencyTracker>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
@@ -445,6 +448,7 @@ impl Transaction {
         resolver: Arc<dyn ResolverClient>,
         commit_strategy: CommitStrategy,
         keyspace: Keyspace,
+        dependency_tracker: Arc<DependencyTracker>,
     ) -> Transaction {
         Transaction {
             id: transaction_info.id,
@@ -460,6 +464,7 @@ impl Transaction {
             commit_strategy,
             resolver,
             keyspace,
+            dependency_tracker,
         }
     }
 }
