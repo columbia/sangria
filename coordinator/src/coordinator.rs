@@ -117,6 +117,7 @@ pub struct Coordinator {
     commit_strategy: CommitStrategy,
     pub resolver: Arc<dyn ResolverClient>,
     pub dependency_tracker: Arc<DependencyTracker>,
+    enable_cascading_abort: bool,
 }
 
 impl Coordinator {
@@ -148,6 +149,7 @@ impl Coordinator {
             commit_strategy: config.commit_strategy.clone(),
             resolver,
             dependency_tracker,
+            enable_cascading_abort: config.enable_cascading_abort,
         }
     }
 
@@ -172,6 +174,7 @@ impl Coordinator {
             self.commit_strategy.clone(),
             keyspace,
             self.dependency_tracker.clone(),
+            self.enable_cascading_abort,
         )
     }
 }

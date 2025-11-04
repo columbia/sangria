@@ -54,6 +54,7 @@ pub struct Transaction {
     resolver: Arc<dyn ResolverClient>,
     pub keyspace: Keyspace,
     dependency_tracker: Arc<DependencyTracker>,
+    enable_cascading_abort: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
@@ -435,9 +436,14 @@ impl Transaction {
         while let Some(res) = prepare_join_set.join_next().await {
             let res = match res {
                 Err(_) => {
-                    // Only cascade abort if we've released locks early (could have dependents)
-                    // Otherwise use record_abort (no dependents possible yet)
-                    if self.commit_strategy != CommitStrategy::Traditional && any_early_lock_releases {
+                    // Only cascade abort if:
+                    // 1. Cascading abort is enabled
+                    // 2. Using Pipelined/Adaptive strategy
+                    // 3. We've released locks early (could have dependents)
+                    if self.enable_cascading_abort
+                        && self.commit_strategy != CommitStrategy::Traditional
+                        && any_early_lock_releases
+                    {
                         let _ = self.cascade_abort().await;
                     } else {
                         let _ = self.record_abort().await;
@@ -635,6 +641,7 @@ impl Transaction {
         commit_strategy: CommitStrategy,
         keyspace: Keyspace,
         dependency_tracker: Arc<DependencyTracker>,
+        enable_cascading_abort: bool,
     ) -> Transaction {
         Transaction {
             id: transaction_info.id,
@@ -651,6 +658,7 @@ impl Transaction {
             resolver,
             keyspace,
             dependency_tracker,
+            enable_cascading_abort,
         }
     }
 }
