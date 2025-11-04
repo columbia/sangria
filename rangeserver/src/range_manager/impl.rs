@@ -478,6 +478,35 @@ where
                     });
                     receiver.await.unwrap().unwrap();
                 }
+
+                // Clean up version chain and pending state for Pipelined/Adaptive strategies
+                if self.config.commit_strategy != CommitStrategy::Traditional {
+                    let mut pending_state = state.pending_state.write().await;
+
+                    // Get the keys this transaction wrote to
+                    if let Some(prepare_record) = pending_state.pending_prepare_records.get(&tx.id) {
+                        for key in prepare_record.changes.keys() {
+                            // Remove this transaction from the version chain
+                            if let Some(chain) = pending_state.key_version_chain.get_mut(key) {
+                                chain.retain(|&id| id != tx.id);
+
+                                // Update pending_commit_table to the previous version
+                                if let Some(&prev_tx) = chain.last() {
+                                    // There's still a previous transaction in the chain
+                                    pending_state.pending_commit_table.insert(key.clone(), prev_tx);
+                                } else {
+                                    // No more pending writes, clear both tables
+                                    pending_state.pending_commit_table.remove(key);
+                                    pending_state.key_version_chain.remove(key);
+                                }
+                            }
+                        }
+                    }
+
+                    // Remove prepare record
+                    pending_state.pending_prepare_records.remove(&tx.id);
+                }
+
                 state.lock_table.release(None).await;
 
                 // let _ = self
