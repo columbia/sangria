@@ -25,6 +25,8 @@ pub struct DependencyTracker {
     reverse_deps: RwLock<HashMap<Uuid, HashSet<Uuid>>>,
     /// Set of transactions currently aborting (prevents new dependencies)
     aborting_transactions: RwLock<HashSet<Uuid>>,
+    /// Maps transaction_id -> set of participant ranges
+    participant_ranges: RwLock<HashMap<Uuid, HashSet<common::full_range_id::FullRangeId>>>,
 }
 
 impl DependencyTracker {
@@ -32,6 +34,7 @@ impl DependencyTracker {
         Arc::new(DependencyTracker {
             reverse_deps: RwLock::new(HashMap::new()),
             aborting_transactions: RwLock::new(HashSet::new()),
+            participant_ranges: RwLock::new(HashMap::new()),
         })
     }
 
@@ -74,6 +77,34 @@ impl DependencyTracker {
     pub async fn remove_reverse_deps(&self, tx_id: Uuid) {
         let mut reverse_deps = self.reverse_deps.write().await;
         reverse_deps.remove(&tx_id);
+    }
+
+    /// Register a participant range for a transaction
+    pub async fn add_participant_range(
+        &self,
+        tx_id: Uuid,
+        range_id: common::full_range_id::FullRangeId,
+    ) {
+        let mut participant_ranges = self.participant_ranges.write().await;
+        participant_ranges
+            .entry(tx_id)
+            .or_insert_with(HashSet::new)
+            .insert(range_id);
+    }
+
+    /// Get participant ranges for a transaction
+    pub async fn get_participant_ranges(
+        &self,
+        tx_id: Uuid,
+    ) -> Option<HashSet<common::full_range_id::FullRangeId>> {
+        let participant_ranges = self.participant_ranges.read().await;
+        participant_ranges.get(&tx_id).cloned()
+    }
+
+    /// Remove participant ranges for a transaction
+    pub async fn remove_participant_ranges(&self, tx_id: Uuid) {
+        let mut participant_ranges = self.participant_ranges.write().await;
+        participant_ranges.remove(&tx_id);
     }
 }
 

@@ -62,6 +62,36 @@ pub struct FullRecordKey {
     pub key: Bytes,
 }
 
+/// Recursively finds all transactions that depend on the given transaction.
+/// Uses cycle detection to handle circular dependencies.
+async fn find_all_dependents(
+    dependency_tracker: &DependencyTracker,
+    tx_id: Uuid,
+    visited: &mut HashSet<Uuid>,
+) -> HashSet<Uuid> {
+    // Cycle detection: if we've already visited this transaction, return empty set
+    if visited.contains(&tx_id) {
+        return HashSet::new();
+    }
+    visited.insert(tx_id);
+
+    let mut all_dependents = HashSet::new();
+
+    // Get direct dependents
+    if let Some(direct_dependents) = dependency_tracker.get_dependents(tx_id).await {
+        for &dependent in &direct_dependents {
+            // Add this dependent
+            all_dependents.insert(dependent);
+            // Recursively find dependents of this dependent
+            let transitive_dependents =
+                find_all_dependents(dependency_tracker, dependent, visited).await;
+            all_dependents.extend(transitive_dependents);
+        }
+    }
+
+    all_dependents
+}
+
 impl Transaction {
     async fn resolve_full_record_key(
         &mut self,
@@ -132,6 +162,25 @@ impl Transaction {
             self.id, self.dependencies
         );
 
+        // Register reverse dependencies and check for aborting transactions
+        // (only for Pipelined/Adaptive strategies)
+        if self.commit_strategy != CommitStrategy::Traditional {
+            // Register our participant range so others can cascade abort us
+            self.dependency_tracker
+                .add_participant_range(self.id, full_record_key.range_id)
+                .await;
+
+            for &dep_tx in &get_result.dependencies {
+                // Check if dependency is currently aborting
+                if self.dependency_tracker.is_aborting(dep_tx).await {
+                    let _ = self.cascade_abort().await;
+                    return Err(Error::TransactionAborted(TransactionAbortReason::Other));
+                }
+                // Register reverse dependency: dep_tx <- self.id
+                self.dependency_tracker.add_reverse_dep(dep_tx, self.id).await;
+            }
+        }
+
         let participant_range = self.get_participant_range(full_record_key.range_id);
         let current_range_leader_seq_num = get_result.leader_sequence_number;
         if current_range_leader_seq_num != constants::INVALID_LEADER_SEQUENCE_NUMBER
@@ -141,7 +190,12 @@ impl Transaction {
             participant_range.leader_sequence_number = current_range_leader_seq_num as u64;
         };
         if current_range_leader_seq_num != participant_range.leader_sequence_number as i64 {
-            let _ = self.record_abort().await;
+            // Use cascade abort for Pipelined/Adaptive to abort dependent transactions
+            if self.commit_strategy != CommitStrategy::Traditional {
+                let _ = self.cascade_abort().await;
+            } else {
+                let _ = self.record_abort().await;
+            }
             return Err(Error::TransactionAborted(
                 TransactionAbortReason::RangeLeadershipChanged,
             ));
@@ -212,7 +266,99 @@ impl Transaction {
                 self.check_still_running()?;
             }
         };
-        self.record_abort().await
+        // Use cascade abort for Pipelined/Adaptive to abort dependent transactions
+        if self.commit_strategy != CommitStrategy::Traditional {
+            self.cascade_abort().await
+        } else {
+            self.record_abort().await
+        }
+    }
+
+    /// Cascade abort: aborts this transaction and all dependent transactions
+    /// Only used for Pipelined/Adaptive strategies
+    async fn cascade_abort(&mut self) -> Result<(), Error> {
+        // Find all transactions that depend on this one (directly or transitively)
+        let mut visited = HashSet::new();
+        let all_dependents = find_all_dependents(&self.dependency_tracker, self.id, &mut visited).await;
+
+        // Build full set: self + all dependents
+        let mut to_abort = all_dependents.clone();
+        to_abort.insert(self.id);
+
+        // Mark ALL as aborting FIRST (prevents new dependencies during cascade)
+        let to_abort_vec: Vec<Uuid> = to_abort.iter().cloned().collect();
+        self.dependency_tracker.mark_aborting(&to_abort_vec).await;
+
+        // Abort in leaves-to-root order (transactions with no dependents first)
+        while !to_abort.is_empty() {
+            // Find leaves: transactions with no dependents in the to_abort set
+            let mut leaves = Vec::new();
+            for &tx_id in &to_abort {
+                let has_dependent_in_set = if let Some(deps) = self.dependency_tracker.get_dependents(tx_id).await {
+                    deps.iter().any(|d| to_abort.contains(d))
+                } else {
+                    false
+                };
+                if !has_dependent_in_set {
+                    leaves.push(tx_id);
+                }
+            }
+
+            // Abort all leaves
+            for tx_id in &leaves {
+                // Get participant ranges for this transaction
+                if let Some(ranges) = self.dependency_tracker.get_participant_ranges(*tx_id).await {
+                    // Create TransactionInfo for the transaction being aborted
+                    let tx_info = Arc::new(TransactionInfo {
+                        id: *tx_id,
+                        started: chrono::Utc::now(),
+                        overall_timeout: std::time::Duration::from_secs(60),
+                    });
+
+                    // Spawn abort tasks for each range
+                    let mut abort_join_set = JoinSet::new();
+                    for range_id in ranges {
+                        let range_client = self.range_client.clone();
+                        let transaction_info = tx_info.clone();
+                        abort_join_set.spawn_on(
+                            async move {
+                                range_client
+                                    .abort_transaction(transaction_info, &range_id)
+                                    .await
+                            },
+                            &self.runtime,
+                        );
+                    }
+                    // Wait for all abort tasks to complete
+                    while abort_join_set.join_next().await.is_some() {}
+                }
+
+                // Abort in tx_state_store
+                let _ = self.tx_state_store.try_abort_transaction(*tx_id).await;
+
+                // Clean up dependency tracker
+                self.dependency_tracker.remove_reverse_deps(*tx_id).await;
+                self.dependency_tracker.remove_participant_ranges(*tx_id).await;
+                self.dependency_tracker.unmark_aborting(*tx_id).await;
+
+                // Remove from to_abort set
+                to_abort.remove(tx_id);
+            }
+
+            // If no leaves found but set not empty, we have a cycle (shouldn't happen with cycle detection)
+            if leaves.is_empty() && !to_abort.is_empty() {
+                // Abort remaining anyway to avoid getting stuck
+                for tx_id in &to_abort.clone() {
+                    let _ = self.tx_state_store.try_abort_transaction(*tx_id).await;
+                    self.dependency_tracker.unmark_aborting(*tx_id).await;
+                }
+                break;
+            }
+        }
+
+        // Mark self as aborted
+        self.state = State::Aborted;
+        Ok(())
     }
 
     fn error_from_rangeclient_error(_err: rangeclient::client::Error) -> Error {
@@ -229,6 +375,16 @@ impl Transaction {
 
         // 1. --- PREPARE PHASE ---
         self.state = State::Preparing;
+
+        // Register all participant ranges for cascading abort support (Pipelined/Adaptive only)
+        if self.commit_strategy != CommitStrategy::Traditional {
+            for range_id in self.participant_ranges.keys() {
+                self.dependency_tracker
+                    .add_participant_range(self.id, *range_id)
+                    .await;
+            }
+        }
+
         let mut prepare_join_set = JoinSet::new();
         for (range_id, info) in &self.participant_ranges {
             let range_id = *range_id;
@@ -266,7 +422,12 @@ impl Transaction {
         while let Some(res) = prepare_join_set.join_next().await {
             let res = match res {
                 Err(_) => {
-                    let _ = self.record_abort().await;
+                    // Use cascade abort for Pipelined/Adaptive to abort dependent transactions
+                    if self.commit_strategy != CommitStrategy::Traditional {
+                        let _ = self.cascade_abort().await;
+                    } else {
+                        let _ = self.record_abort().await;
+                    }
                     return Err(Error::TransactionAborted(
                         TransactionAbortReason::PrepareFailed,
                     ));
@@ -276,6 +437,21 @@ impl Transaction {
             let res = res.map_err(Self::error_from_rangeclient_error)?;
             // Update transaction's dependencies with those returned by the Prepare in each range.
             self.dependencies.extend(res.dependencies);
+
+            // Register reverse dependencies and check for aborting transactions
+            // (only for Pipelined/Adaptive strategies)
+            if self.commit_strategy != CommitStrategy::Traditional {
+                for &dep_tx in &res.dependencies {
+                    // Check if dependency is currently aborting
+                    if self.dependency_tracker.is_aborting(dep_tx).await {
+                        let _ = self.cascade_abort().await;
+                        return Err(Error::TransactionAborted(TransactionAbortReason::Other));
+                    }
+                    // Register reverse dependency: dep_tx <- self.id
+                    self.dependency_tracker.add_reverse_dep(dep_tx, self.id).await;
+                }
+            }
+
             if res.released_lock_early {
                 any_early_lock_releases = true;
             }
