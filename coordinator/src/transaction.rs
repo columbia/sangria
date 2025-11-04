@@ -68,7 +68,7 @@ fn find_all_dependents<'a>(
     dependency_tracker: &'a DependencyTracker,
     tx_id: Uuid,
     visited: &'a mut HashSet<Uuid>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = HashSet<Uuid>> + 'a>> {
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = HashSet<Uuid>> + Send + 'a>> {
     Box::pin(async move {
         // Cycle detection: if we've already visited this transaction, return empty set
         if visited.contains(&tx_id) {
