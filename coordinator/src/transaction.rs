@@ -64,32 +64,34 @@ pub struct FullRecordKey {
 
 /// Recursively finds all transactions that depend on the given transaction.
 /// Uses cycle detection to handle circular dependencies.
-async fn find_all_dependents(
-    dependency_tracker: &DependencyTracker,
+fn find_all_dependents<'a>(
+    dependency_tracker: &'a DependencyTracker,
     tx_id: Uuid,
-    visited: &mut HashSet<Uuid>,
-) -> HashSet<Uuid> {
-    // Cycle detection: if we've already visited this transaction, return empty set
-    if visited.contains(&tx_id) {
-        return HashSet::new();
-    }
-    visited.insert(tx_id);
-
-    let mut all_dependents = HashSet::new();
-
-    // Get direct dependents
-    if let Some(direct_dependents) = dependency_tracker.get_dependents(tx_id).await {
-        for &dependent in &direct_dependents {
-            // Add this dependent
-            all_dependents.insert(dependent);
-            // Recursively find dependents of this dependent
-            let transitive_dependents =
-                find_all_dependents(dependency_tracker, dependent, visited).await;
-            all_dependents.extend(transitive_dependents);
+    visited: &'a mut HashSet<Uuid>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = HashSet<Uuid>> + 'a>> {
+    Box::pin(async move {
+        // Cycle detection: if we've already visited this transaction, return empty set
+        if visited.contains(&tx_id) {
+            return HashSet::new();
         }
-    }
+        visited.insert(tx_id);
 
-    all_dependents
+        let mut all_dependents = HashSet::new();
+
+        // Get direct dependents
+        if let Some(direct_dependents) = dependency_tracker.get_dependents(tx_id).await {
+            for &dependent in &direct_dependents {
+                // Add this dependent
+                all_dependents.insert(dependent);
+                // Recursively find dependents of this dependent
+                let transitive_dependents =
+                    find_all_dependents(dependency_tracker, dependent, visited).await;
+                all_dependents.extend(transitive_dependents);
+            }
+        }
+
+        all_dependents
+    })
 }
 
 impl Transaction {
@@ -155,13 +157,6 @@ impl Transaction {
             .await
             .unwrap();
 
-        //  Update the transaction's dependencies with those returned by the Get in the range.
-        self.dependencies.extend(get_result.dependencies);
-        info!(
-            "Transaction {} has dependencies: {:?}",
-            self.id, self.dependencies
-        );
-
         // Register reverse dependencies and check for aborting transactions
         // (only for Pipelined/Adaptive strategies)
         if self.commit_strategy != CommitStrategy::Traditional {
@@ -180,6 +175,13 @@ impl Transaction {
                 self.dependency_tracker.add_reverse_dep(dep_tx, self.id).await;
             }
         }
+
+        //  Update the transaction's dependencies with those returned by the Get in the range.
+        self.dependencies.extend(get_result.dependencies);
+        info!(
+            "Transaction {} has dependencies: {:?}",
+            self.id, self.dependencies
+        );
 
         let participant_range = self.get_participant_range(full_record_key.range_id);
         let current_range_leader_seq_num = get_result.leader_sequence_number;
@@ -314,11 +316,10 @@ impl Transaction {
                 // Get participant ranges for this transaction
                 if let Some(ranges) = self.dependency_tracker.get_participant_ranges(*tx_id).await {
                     // Create TransactionInfo for the transaction being aborted
-                    let tx_info = Arc::new(TransactionInfo {
-                        id: *tx_id,
-                        started: chrono::Utc::now(),
-                        overall_timeout: std::time::Duration::from_secs(60),
-                    });
+                    // Use same started/timeout as self since they're being aborted together
+                    let mut tx_info_clone = (*self.transaction_info).clone();
+                    tx_info_clone.id = *tx_id;
+                    let tx_info = Arc::new(tx_info_clone);
 
                     // Spawn abort tasks for each range
                     let mut abort_join_set = JoinSet::new();
@@ -461,8 +462,6 @@ impl Transaction {
                 Ok(res) => res,
             };
             let res = res.map_err(Self::error_from_rangeclient_error)?;
-            // Update transaction's dependencies with those returned by the Prepare in each range.
-            self.dependencies.extend(res.dependencies);
 
             // Register reverse dependencies and check for aborting transactions
             // (only for Pipelined/Adaptive strategies)
@@ -477,6 +476,9 @@ impl Transaction {
                     self.dependency_tracker.add_reverse_dep(dep_tx, self.id).await;
                 }
             }
+
+            // Update transaction's dependencies with those returned by the Prepare in each range.
+            self.dependencies.extend(res.dependencies);
 
             if res.released_lock_early {
                 any_early_lock_releases = true;
