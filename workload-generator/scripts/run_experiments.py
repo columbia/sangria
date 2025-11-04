@@ -353,11 +353,11 @@ def main():
     if BUILD_ATOMIX:
         atomix_setup.build_servers()
 
-    # tradeoff_contention_vs_resolver_capacity_experiment(ray_logs_dir)
+    tradeoff_contention_vs_resolver_capacity_experiment(ray_logs_dir)
     # runtime_variations_contention_experiment(ray_logs_dir)
     # runtime_variations_resolver_capacity_experiment(ray_logs_dir)
     # mixed_workload_experiment(ray_logs_dir)
-    ycsb_experiment(ray_logs_dir)
+    #ycsb_experiment(ray_logs_dir)
     ray.shutdown()
 
 
