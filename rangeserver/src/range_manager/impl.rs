@@ -35,6 +35,9 @@ struct PendingState {
     pending_prepare_records: HashMap<Uuid, Arc<PrepareRecord>>,
     // key -> id of the last transaction that has updated this key
     pending_commit_table: HashMap<Bytes, Uuid>,
+    // key -> ordered list of transactions that wrote to this key (for cascading aborts)
+    // Only used for Pipelined/Adaptive strategies
+    key_version_chain: HashMap<Bytes, Vec<Uuid>>,
 }
 
 struct LoadedState {
@@ -724,6 +727,7 @@ where
                     pending_state: RwLock::new(PendingState {
                         pending_prepare_records: HashMap::new(),
                         pending_commit_table: HashMap::new(),
+                        key_version_chain: HashMap::new(),
                     }),
                 })
             })
