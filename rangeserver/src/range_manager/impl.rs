@@ -483,22 +483,27 @@ where
                 if self.config.commit_strategy != CommitStrategy::Traditional {
                     let mut pending_state = state.pending_state.write().await;
 
-                    // Get the keys this transaction wrote to
-                    if let Some(prepare_record) = pending_state.pending_prepare_records.get(&tx.id) {
-                        for key in prepare_record.changes.keys() {
-                            // Remove this transaction from the version chain
-                            if let Some(chain) = pending_state.key_version_chain.get_mut(key) {
-                                chain.retain(|&id| id != tx.id);
+                    // Collect the keys first to avoid borrow checker issues
+                    let keys_to_cleanup: Vec<Bytes> = if let Some(prepare_record) = pending_state.pending_prepare_records.get(&tx.id) {
+                        prepare_record.changes.keys().cloned().collect()
+                    } else {
+                        Vec::new()
+                    };
 
-                                // Update pending_commit_table to the previous version
-                                if let Some(&prev_tx) = chain.last() {
-                                    // There's still a previous transaction in the chain
-                                    pending_state.pending_commit_table.insert(key.clone(), prev_tx);
-                                } else {
-                                    // No more pending writes, clear both tables
-                                    pending_state.pending_commit_table.remove(key);
-                                    pending_state.key_version_chain.remove(key);
-                                }
+                    // Now we can mutate pending_state without holding immutable borrow
+                    for key in keys_to_cleanup {
+                        // Remove this transaction from the version chain
+                        if let Some(chain) = pending_state.key_version_chain.get_mut(&key) {
+                            chain.retain(|&id| id != tx.id);
+
+                            // Update pending_commit_table to the previous version
+                            if let Some(&prev_tx) = chain.last() {
+                                // There's still a previous transaction in the chain
+                                pending_state.pending_commit_table.insert(key.clone(), prev_tx);
+                            } else {
+                                // No more pending writes, clear both tables
+                                pending_state.pending_commit_table.remove(&key);
+                                pending_state.key_version_chain.remove(&key);
                             }
                         }
                     }
