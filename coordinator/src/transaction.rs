@@ -168,7 +168,8 @@ impl Transaction {
             for &dep_tx in &get_result.dependencies {
                 // Check if dependency is currently aborting
                 if self.dependency_tracker.is_aborting(dep_tx).await {
-                    let _ = self.cascade_abort().await;
+                    // Use record_abort (not cascade) because this transaction hasn't released locks yet
+                    let _ = self.record_abort().await;
                     return Err(Error::TransactionAborted(TransactionAbortReason::Other));
                 }
                 // Register reverse dependency: dep_tx <- self.id
@@ -192,12 +193,8 @@ impl Transaction {
             participant_range.leader_sequence_number = current_range_leader_seq_num as u64;
         };
         if current_range_leader_seq_num != participant_range.leader_sequence_number as i64 {
-            // Use cascade abort for Pipelined/Adaptive to abort dependent transactions
-            if self.commit_strategy != CommitStrategy::Traditional {
-                let _ = self.cascade_abort().await;
-            } else {
-                let _ = self.record_abort().await;
-            }
+            // Use record_abort (not cascade) because transaction hasn't released locks yet
+            let _ = self.record_abort().await;
             return Err(Error::TransactionAborted(
                 TransactionAbortReason::RangeLeadershipChanged,
             ));
@@ -449,8 +446,9 @@ impl Transaction {
         while let Some(res) = prepare_join_set.join_next().await {
             let res = match res {
                 Err(_) => {
-                    // Use cascade abort for Pipelined/Adaptive to abort dependent transactions
-                    if self.commit_strategy != CommitStrategy::Traditional {
+                    // Only cascade abort if we've released locks early (could have dependents)
+                    // Otherwise use record_abort (no dependents possible yet)
+                    if self.commit_strategy != CommitStrategy::Traditional && any_early_lock_releases {
                         let _ = self.cascade_abort().await;
                     } else {
                         let _ = self.record_abort().await;
@@ -469,7 +467,8 @@ impl Transaction {
                 for &dep_tx in &res.dependencies {
                     // Check if dependency is currently aborting
                     if self.dependency_tracker.is_aborting(dep_tx).await {
-                        let _ = self.cascade_abort().await;
+                        // Use record_abort (not cascade) because prepare isn't complete yet
+                        let _ = self.record_abort().await;
                         return Err(Error::TransactionAborted(TransactionAbortReason::Other));
                     }
                     // Register reverse dependency: dep_tx <- self.id
