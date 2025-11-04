@@ -382,6 +382,13 @@ where
                                 pending_state
                                     .pending_commit_table
                                     .insert(key.clone(), tx.id);
+
+                                // Add to version chain for cascading abort support
+                                pending_state
+                                    .key_version_chain
+                                    .entry(key.clone())
+                                    .or_insert_with(Vec::new)
+                                    .push(tx.id);
                             } else {
                                 // If at least one key does not release the lock early, we flush the WAL buffer immediately to avoid delaying while holding the lock
                                 flush = true;
