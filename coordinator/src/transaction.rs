@@ -595,9 +595,15 @@ impl Transaction {
                 if !self.dependencies.is_empty() {
                     // CRITICAL: Check if any dependency is aborting before sending to resolver
                     // aborting_transactions set is now persistent (never cleared)
+                    info!(
+                        "🔍 Checking dependencies for tx {}: {:?}, enable_cascading_abort={}",
+                        self.id, self.dependencies, self.enable_cascading_abort
+                    );
                     if self.enable_cascading_abort {
                         for &dep in &self.dependencies {
-                            if self.dependency_tracker.is_aborting(dep).await {
+                            let is_aborting = self.dependency_tracker.is_aborting(dep).await;
+                            info!("  → Dependency {} is_aborting: {}", dep, is_aborting);
+                            if is_aborting {
                                 info!(
                                     "Transaction {} has aborting dependency {}, cascading abort",
                                     self.id, dep
