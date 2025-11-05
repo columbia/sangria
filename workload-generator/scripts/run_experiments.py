@@ -260,6 +260,13 @@ def cascading_abort_experiment(ray_logs_dir):
     """
     Test cascading abort performance by varying artificial abort rates.
     Uses artificial_abort_rate to randomly fail transactions during PREPARE.
+
+    Results saved to: cascading_abort_experiment_results/
+    - CSV files: spectacular_ant_cascading_abort_Pipelined_*pct_results.csv
+    - Plot: cascading_abort_results.png
+    - Plotter script: plot_cascading_abort_simple.py
+
+    Last run: 2025-11-05 (spectacular_ant experiment)
     """
     BASELINES = [PIPELINED]
     NUM_ITERATIONS = 2  # Full test with 2 iterations
