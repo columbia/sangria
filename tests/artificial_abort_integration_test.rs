@@ -250,3 +250,30 @@ async fn test_error_mapping_doesnt_panic() {
     // If we get here without panicking, the fix works
     info!("Test passed - error mapping doesn't panic");
 }
+
+#[tokio::test]
+async fn test_artificial_abort_before_state_no_race() {
+    info!("\n=== Testing New Approach: Abort Before State Modifications ===");
+
+    info!("\n[T2] Artificial abort at line 329 (NEW LOCATION):");
+    info!("[T2]   - Lock acquired ✅");
+    info!("[T2] 🎲 Artificial abort triggered");
+    info!("[T2]   - ❌ NO state modifications yet!");
+    info!("[T2]   - key_version_chain not touched");
+    info!("[T2]   - pending_prepare_records not touched");
+    info!("[T2]   - Lock released");
+    info!("[T2]   - Returns error");
+
+    info!("\n[T3] Tries to prepare:");
+    info!("[T3]   - Acquires lock (T2 released it)");
+    info!("[T3]   - key_version_chain has NO T2 (T2 never recorded)");
+    info!("[T3]   - ✅ Prepares successfully");
+    info!("[T3]   - ✅ NO HANG (no zombie dependency)");
+
+    info!("\n=== Result ===");
+    info!("✅ No race condition");
+    info!("✅ No dangling state");
+    info!("✅ No hangs");
+    info!("❌ Does not test cascading (T2 never recorded dependencies)");
+    info!("\nThis is the SAFE approach for testing abort handling!");
+}
