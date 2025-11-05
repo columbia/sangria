@@ -256,18 +256,6 @@ where
                 return Err(Error::RangeIsNotLoaded)
             }
             State::Loaded(state) => {
-                // Artificial abort injection for testing cascading aborts
-                if self.config.artificial_abort_rate > 0.0 {
-                    let mut rng = rand::thread_rng();
-                    let random_value: f64 = rng.gen();
-                    if random_value < self.config.artificial_abort_rate {
-                        // Artificially fail this prepare
-                        return Err(Error::TransactionAborted(
-                            TransactionAbortReason::PrepareFailed,
-                        ));
-                    }
-                }
-
                 // Check if transaction has no writes
                 let has_writes = !(prepare.puts().unwrap_or_default().is_empty()
                     && prepare.deletes().unwrap_or_default().is_empty());
@@ -414,6 +402,19 @@ where
                         "Dependencies for transaction {:?}: {:?}",
                         tx.id, dependencies
                     );
+
+                    // Artificial abort injection for testing cascading aborts
+                    // Injected AFTER dependencies are recorded so cascading can work properly
+                    if self.config.artificial_abort_rate > 0.0 {
+                        let mut rng = rand::thread_rng();
+                        let random_value: f64 = rng.gen();
+                        if random_value < self.config.artificial_abort_rate {
+                            // Artificially fail this prepare (simulates write failure)
+                            return Err(Error::TransactionAborted(
+                                TransactionAbortReason::PrepareFailed,
+                            ));
+                        }
+                    }
 
                     // 5) Append prepare record to WAL's buffer while still holding the lock
                     let receiver = self
