@@ -203,21 +203,27 @@ where
                     // First, check if operation has any dependencies with another transaction
                     let pending_state = state.pending_state.read().await;
                     if let Some(dependency) = pending_state.pending_commit_table.get(&key) {
-                        get_result.dependencies = vec![dependency.clone()];
-                        // Read the value from the pending_prepare_record of the dependee transaction
-                        info!(
-                            "Reading value from pending_prepare_record of transaction {:?}",
-                            dependency
-                        );
-                        let prepare_record = pending_state
-                            .pending_prepare_records
-                            .get(&dependency)
-                            .unwrap();
-                        if prepare_record.changes.contains_key(&key) {
-                            get_result.val = prepare_record.changes.get(&key).unwrap().clone();
-                            return Ok(get_result);
+                        // Check if the dependency's prepare record still exists
+                        // It may have been removed if the dependency aborted and cleaned up
+                        if let Some(prepare_record) = pending_state.pending_prepare_records.get(&dependency) {
+                            get_result.dependencies = vec![dependency.clone()];
+                            info!(
+                                "Reading value from pending_prepare_record of transaction {:?}",
+                                dependency
+                            );
+                            if prepare_record.changes.contains_key(&key) {
+                                get_result.val = prepare_record.changes.get(&key).unwrap().clone();
+                                return Ok(get_result);
+                            } else {
+                                panic!("Key not found in pending_prepare_records but dependency found");
+                            }
                         } else {
-                            panic!("Key not found in pending_prepare_records but dependency found");
+                            // Dependency aborted and cleaned up before we could read it
+                            // Fall through to read from Cassandra instead
+                            info!(
+                                "Dependency {:?} not found in pending_prepare_records (likely aborted), reading from Cassandra",
+                                dependency
+                            );
                         }
                     }
                 }
