@@ -326,6 +326,20 @@ where
                 // 2) Acquire the range lock if it hasn't already been acquired by previous Gets
                 self.acquire_range_lock(state, tx.clone()).await?;
 
+                // Artificial abort injection for testing cascading aborts
+                // Injected AFTER lock is acquired but BEFORE any state modifications
+                // This ensures locks are held (realistic scenario) but no dangling state
+                if self.config.artificial_abort_rate > 0.0 {
+                    let mut rng = rand::thread_rng();
+                    let random_value: f64 = rng.gen();
+                    if random_value < self.config.artificial_abort_rate {
+                        // Artificially fail this prepare (simulates early validation failure)
+                        return Err(Error::TransactionAborted(
+                            TransactionAbortReason::Other,
+                        ));
+                    }
+                }
+
                 let mut flush = true;
                 let mut dependencies = HashSet::new();
                 let mut released_lock_early = false;
@@ -402,19 +416,6 @@ where
                         "Dependencies for transaction {:?}: {:?}",
                         tx.id, dependencies
                     );
-
-                    // Artificial abort injection for testing cascading aborts
-                    // Injected AFTER dependencies are recorded so cascading can work properly
-                    if self.config.artificial_abort_rate > 0.0 {
-                        let mut rng = rand::thread_rng();
-                        let random_value: f64 = rng.gen();
-                        if random_value < self.config.artificial_abort_rate {
-                            // Artificially fail this prepare (simulates write failure)
-                            return Err(Error::TransactionAborted(
-                                TransactionAbortReason::Other,
-                            ));
-                        }
-                    }
 
                     // 5) Append prepare record to WAL's buffer while still holding the lock
                     let receiver = self
