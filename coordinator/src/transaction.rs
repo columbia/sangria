@@ -377,23 +377,27 @@ impl Transaction {
 
     fn error_from_rangeclient_error(err: rangeclient::client::Error) -> Error {
         // Convert rangeserver::Error to coordinator_rangeclient::error::Error
+        // Note: rangeclient::client::Error is a type alias for rangeserver::error::Error,
+        // but coordinator crate doesn't have direct access to rangeserver types.
+        // The abort reason is lost through flatbuf serialization anyway (always becomes Other).
+        use rangeclient::client::Error as RCError;
+
         match err {
-            rangeclient::client::Error::TransactionAborted(reason) => {
-                // Map rangeserver::TransactionAbortReason to coordinator_rangeclient::TransactionAbortReason
-                let mapped_reason = match reason {
-                    rangeserver::transaction_abort_reason::TransactionAbortReason::WaitDie =>
-                        TransactionAbortReason::DeadlockPrevention,
-                    rangeserver::transaction_abort_reason::TransactionAbortReason::TransactionLockLost =>
-                        TransactionAbortReason::TransactionLockLost,
-                    rangeserver::transaction_abort_reason::TransactionAbortReason::Other =>
-                        TransactionAbortReason::Other,
-                };
-                Error::TransactionAborted(mapped_reason)
+            RCError::TransactionAborted(_) => {
+                // Artificial aborts and all rangeserver aborts come through here
+                // Map to coordinator's TransactionAborted(Other)
+                Error::TransactionAborted(TransactionAbortReason::Other)
             }
-            rangeclient::client::Error::Timeout => Error::Timeout,
-            rangeclient::client::Error::UnknownTransaction => Error::TransactionNoLongerRunning,
-            // For all other errors, wrap as InternalError
-            _ => Error::InternalError(Arc::new(err)),
+            RCError::Timeout => Error::Timeout,
+            RCError::UnknownTransaction => Error::TransactionNoLongerRunning,
+            // For all other errors, convert to string and wrap as InternalError
+            _ => {
+                let err_string = format!("Rangeserver error: {:?}", err);
+                Error::InternalError(Arc::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    err_string
+                )))
+            }
         }
     }
 
