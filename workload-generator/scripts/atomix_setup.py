@@ -57,8 +57,17 @@ class AtomixSetup:
         return main_servers if servers is None else servers
 
     def build_servers(self):
+        print("Checking if servers are built...")
+        # Check if binaries already exist
+        workload_gen_path = TARGET_RUN_CMD + "workload-generator"
+        if os.path.exists(workload_gen_path):
+            print("✓ Servers already built, skipping build step")
+            return
+
         print("Building Atomix servers...")
-        subprocess.run(["cargo", "build", "--release"], cwd=ROOT_DIR)
+        # Use shell=True to inherit PATH with cargo
+        subprocess.run("source ~/.cargo/env && cargo build --release",
+                      cwd=ROOT_DIR, shell=True, executable="/bin/bash")
 
     def dump_servers_config(self):
         with open(RAY_SERVERS_CONFIG_PATH, "w") as f:
