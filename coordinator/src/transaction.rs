@@ -475,7 +475,27 @@ impl Transaction {
                 }
                 Ok(res) => res,
             };
-            let res = res.map_err(Self::error_from_rangeclient_error)?;
+
+            // Handle prepare errors (including artificial aborts)
+            let res = match res {
+                Ok(prepare_result) => prepare_result,
+                Err(err) => {
+                    // Prepare failed (e.g., artificial abort, validation error, etc.)
+                    let mapped_err = Self::error_from_rangeclient_error(err);
+
+                    // Clean up before returning error
+                    if self.enable_cascading_abort
+                        && self.commit_strategy != CommitStrategy::Traditional
+                        && any_early_lock_releases
+                    {
+                        let _ = self.cascade_abort().await;
+                    } else {
+                        let _ = self.record_abort().await;
+                    }
+
+                    return Err(mapped_err);
+                }
+            };
 
             // Register reverse dependencies for cascading abort support
             // (only for Pipelined/Adaptive strategies)
