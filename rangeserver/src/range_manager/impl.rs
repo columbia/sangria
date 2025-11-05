@@ -407,18 +407,24 @@ where
                     // Injected AFTER dependencies are recorded in key_version_chain
                     // This ensures cascading abort dependencies are properly tracked
                     // The lock is explicitly released before error return to prevent deadlock
-                    if self.config.artificial_abort_rate > 0.0 {
-                        let mut rng = rand::thread_rng();
-                        let random_value: f64 = rng.gen();
-                        if random_value < self.config.artificial_abort_rate {
-                            // Release the lock before returning error to prevent deadlock
-                            // The coordinator will call abort() to clean up pending_prepare_records
-                            // and key_version_chain entries
-                            state.lock_table.release(None).await;
-                            return Err(Error::TransactionAborted(
-                                TransactionAbortReason::Other,
-                            ));
-                        }
+                    let should_artificially_abort = if self.config.artificial_abort_rate > 0.0 {
+                        let random_value: f64 = {
+                            let mut rng = rand::thread_rng();
+                            rng.gen()
+                        }; // RNG dropped here, before await
+                        random_value < self.config.artificial_abort_rate
+                    } else {
+                        false
+                    };
+
+                    if should_artificially_abort {
+                        // Release the lock before returning error to prevent deadlock
+                        // The coordinator will call abort() to clean up pending_prepare_records
+                        // and key_version_chain entries
+                        state.lock_table.release(None).await;
+                        return Err(Error::TransactionAborted(
+                            TransactionAbortReason::Other,
+                        ));
                     }
 
                     // 5) Append prepare record to WAL's buffer while still holding the lock
