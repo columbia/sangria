@@ -406,6 +406,12 @@ where
                     // Artificial abort injection for cascading abort testing
                     // CRITICAL: Dependencies have been recorded, so cascading can work
                     // KEY FIX: Clean up synchronously BEFORE releasing lock (prevents race)
+
+                    // Log config to verify it's loaded (do this rarely to avoid spam)
+                    if tx.id.as_u128() % 100 == 0 {
+                        info!("🔧 Config check: artificial_abort_rate = {}", self.config.artificial_abort_rate);
+                    }
+
                     let should_artificially_abort = if self.config.artificial_abort_rate > 0.0 {
                         let random_value: f64 = {
                             let mut rng = rand::thread_rng();
@@ -417,37 +423,35 @@ where
                     };
 
                     if should_artificially_abort {
-                        info!("🎲 Artificial abort triggered for transaction {:?}", tx.id);
+                        info!("🎲 ABORT TRIGGERED for tx {:?}", tx.id);
 
-                        // SYNCHRONOUS CLEANUP (before releasing lock)
-                        // This prevents race where other transactions see zombie entries
-                        let mut pending_state = state.pending_state.write().await;
+                        // FAST synchronous cleanup (minimize time holding write lock)
+                        {
+                            let mut pending_state = state.pending_state.write().await;
 
-                        // Remove from pending_prepare_records
-                        pending_state.pending_prepare_records.remove(&tx.id);
-                        info!("  - Removed from pending_prepare_records");
+                            // Remove from pending_prepare_records
+                            pending_state.pending_prepare_records.remove(&tx.id);
 
-                        // Remove from key_version_chain and update pending_commit_table
-                        let keys_to_cleanup: Vec<Bytes> = prepare_record.changes.keys().cloned().collect();
-                        for key in keys_to_cleanup {
-                            if let Some(chain) = pending_state.key_version_chain.get_mut(&key) {
-                                chain.retain(|&id| id != tx.id);
-                                info!("  - Removed from key_version_chain for key {:?}", key);
+                            // Remove from key_version_chain and update pending_commit_table
+                            for key in prepare_record.changes.keys() {
+                                if let Some(chain) = pending_state.key_version_chain.get_mut(key) {
+                                    chain.retain(|&id| id != tx.id);
 
-                                // Update pending_commit_table to previous version
-                                if let Some(&prev_tx) = chain.last() {
-                                    pending_state.pending_commit_table.insert(key.clone(), prev_tx);
-                                } else {
-                                    pending_state.pending_commit_table.remove(&key);
-                                    pending_state.key_version_chain.remove(&key);
+                                    // Update pending_commit_table to previous version
+                                    if let Some(&prev_tx) = chain.last() {
+                                        pending_state.pending_commit_table.insert(key.clone(), prev_tx);
+                                    } else {
+                                        pending_state.pending_commit_table.remove(key);
+                                        pending_state.key_version_chain.remove(key);
+                                    }
                                 }
                             }
+                            // pending_state dropped here (write lock released)
                         }
 
-                        drop(pending_state);
-                        info!("  - Cleanup complete, releasing lock");
+                        info!("  ✅ Cleanup done, releasing lock");
 
-                        // Now release lock (state is clean)
+                        // Release lock after cleanup
                         state.lock_table.release(None).await;
 
                         return Err(Error::TransactionAborted(TransactionAbortReason::Other));
