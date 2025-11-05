@@ -591,20 +591,31 @@ impl Transaction {
             // }
             CommitStrategy::Adaptive | CommitStrategy::Pipelined => {
                 if !self.dependencies.is_empty() {
-                    // CRITICAL: Check if any dependency is being aborted before sending to resolver
-                    // If a dependency aborted after our prepare, we must not send to resolver
+                    // CRITICAL: Check if any dependency was aborted before sending to resolver
+                    // Check tx_state_store (persistent) rather than aborting set (transient)
                     if self.enable_cascading_abort {
                         for &dep in &self.dependencies {
-                            if self.dependency_tracker.is_aborting(dep).await {
-                                info!(
-                                    "Transaction {} has aborting dependency {}, cascading abort",
-                                    self.id, dep
-                                );
-                                // Cascade abort this transaction since dependency aborted
-                                let _ = self.cascade_abort().await;
-                                return Err(Error::TransactionAborted(
-                                    TransactionAbortReason::CascadingAbort,
-                                ));
+                            match self.tx_state_store.try_abort_transaction(dep).await {
+                                Ok(OpResult::TransactionIsAborted) => {
+                                    // Dependency was already aborted!
+                                    info!(
+                                        "Transaction {} has aborted dependency {}, cascading abort",
+                                        self.id, dep
+                                    );
+                                    // Cascade abort this transaction since dependency aborted
+                                    let _ = self.cascade_abort().await;
+                                    return Err(Error::TransactionAborted(
+                                        TransactionAbortReason::CascadingAbort,
+                                    ));
+                                }
+                                Ok(OpResult::TransactionIsCommitted(_)) => {
+                                    // Dependency committed, all good
+                                    continue;
+                                }
+                                Err(_) => {
+                                    // Dependency still running, all good
+                                    continue;
+                                }
                             }
                         }
                     }
