@@ -222,6 +222,10 @@ impl Transaction {
         // We can directly set the state to Aborted here since given a transaction
         //  cannot commit on its own without us deciding to commit it.
         self.state = State::Aborted;
+
+        // Mark this transaction as aborting so other transactions can detect it
+        self.dependency_tracker.mark_aborting(&[self.id]).await;
+
         // Record the abort.
         // TODO(tamer): handle errors here.
         let mut abort_join_set = JoinSet::new();
