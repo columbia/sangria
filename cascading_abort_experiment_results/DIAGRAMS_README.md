@@ -27,8 +27,11 @@ Walk through in order:
 5. `04_cascade.md` - Cascade abort propagation (T2→T3)
 6. `05_summary_sequence.md` - Complete sequence diagram
 7. `06_implementation_details.md` - Critical fixes explained
+8. `07_key_version_chain_cleanup.md` - **Advanced: Multi-writer cleanup mechanism**
 
 **Result:** T1 ✗ (artificial) → T2 ✗ (cascading) → T3 ✗ (cascading)
+
+**Note:** File #8 covers an advanced scenario (multiple transactions writing to the same key) that wasn't shown in the main flow diagrams, which use simple non-overlapping writes (T1→A, T2→B, T3→C) for clarity.
 
 ## How to View
 
@@ -73,9 +76,16 @@ Each phase diagram shows:
 - Requires tracking structures
 
 ### Dependency Tracking
-- `pending_commit_table[key] = last_writer_txn`
+- `pending_commit_table[key] = last_uncommitted_writer_txn`
 - Used during GET to find dependencies
 - If writer still in `pending_prepare_records` → dependency created
+- Removed when transaction commits (line 693)
+
+### Cleanup with key_version_chain
+- `key_version_chain[key] = [tx1, tx2, tx3, ...]` ordered list of all writers
+- When transaction aborts, revert `pending_commit_table` to previous uncommitted writer
+- Critical for multi-writer scenarios (see `abort_path/07_key_version_chain_cleanup.md`)
+- Example: T1, T2, T3 write A → T3 aborts → revert to T2
 
 ### Cascading Abort Protection
 **The critical fix:**
