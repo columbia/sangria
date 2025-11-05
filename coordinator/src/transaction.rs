@@ -591,6 +591,24 @@ impl Transaction {
             // }
             CommitStrategy::Adaptive | CommitStrategy::Pipelined => {
                 if !self.dependencies.is_empty() {
+                    // CRITICAL: Check if any dependency is being aborted before sending to resolver
+                    // If a dependency aborted after our prepare, we must not send to resolver
+                    if self.enable_cascading_abort {
+                        for &dep in &self.dependencies {
+                            if self.dependency_tracker.is_aborting(dep).await {
+                                info!(
+                                    "Transaction {} has aborting dependency {}, cascading abort",
+                                    self.id, dep
+                                );
+                                // Cascade abort this transaction since dependency aborted
+                                let _ = self.cascade_abort().await;
+                                return Err(Error::TransactionAborted(
+                                    TransactionAbortReason::CascadingAbort,
+                                ));
+                            }
+                        }
+                    }
+
                     info!(
                         "{}",
                         format!("Delegating commit to resolver for transaction {}", self.id)
