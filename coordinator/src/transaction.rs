@@ -343,7 +343,9 @@ impl Transaction {
                 // Clean up dependency tracker
                 self.dependency_tracker.remove_reverse_deps(*tx_id).await;
                 self.dependency_tracker.remove_participant_ranges(*tx_id).await;
-                self.dependency_tracker.unmark_aborting(*tx_id).await;
+                // NOTE: We do NOT unmark_aborting() here!
+                // Keep the transaction in aborting_transactions set permanently
+                // so other transactions can check if their dependencies were aborted.
 
                 // Remove from to_abort set
                 to_abort.remove(tx_id);
@@ -591,31 +593,20 @@ impl Transaction {
             // }
             CommitStrategy::Adaptive | CommitStrategy::Pipelined => {
                 if !self.dependencies.is_empty() {
-                    // CRITICAL: Check if any dependency was aborted before sending to resolver
-                    // Check tx_state_store (persistent) rather than aborting set (transient)
+                    // CRITICAL: Check if any dependency is aborting before sending to resolver
+                    // aborting_transactions set is now persistent (never cleared)
                     if self.enable_cascading_abort {
                         for &dep in &self.dependencies {
-                            match self.tx_state_store.try_abort_transaction(dep).await {
-                                Ok(OpResult::TransactionIsAborted) => {
-                                    // Dependency was already aborted!
-                                    info!(
-                                        "Transaction {} has aborted dependency {}, cascading abort",
-                                        self.id, dep
-                                    );
-                                    // Cascade abort this transaction since dependency aborted
-                                    let _ = self.cascade_abort().await;
-                                    return Err(Error::TransactionAborted(
-                                        TransactionAbortReason::CascadingAbort,
-                                    ));
-                                }
-                                Ok(OpResult::TransactionIsCommitted(_)) => {
-                                    // Dependency committed, all good
-                                    continue;
-                                }
-                                Err(_) => {
-                                    // Dependency still running, all good
-                                    continue;
-                                }
+                            if self.dependency_tracker.is_aborting(dep).await {
+                                info!(
+                                    "Transaction {} has aborting dependency {}, cascading abort",
+                                    self.id, dep
+                                );
+                                // Cascade abort this transaction since dependency aborted
+                                let _ = self.cascade_abort().await;
+                                return Err(Error::TransactionAborted(
+                                    TransactionAbortReason::CascadingAbort,
+                                ));
                             }
                         }
                     }
