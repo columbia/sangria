@@ -1,11 +1,31 @@
 # Cascading Abort Experiment
 
 ## Overview
-This experiment tests the performance of cascading abort functionality by varying contention levels in Pipelined and Adaptive commit strategies.
+This experiment tests the performance of cascading abort functionality by varying **artificial abort rates** in Pipelined and Adaptive commit strategies.
 
 ## What Was Added
 
-### 1. New Experiment Function (`run_experiments.py`)
+### 1. Artificial Abort Rate Configuration
+
+**Location:** `common/src/config.rs`
+
+**New field:** `artificial_abort_rate: f64`
+
+**What it does:**
+- Controls the probability that a transaction will fail during PREPARE phase
+- Value range: 0.0 (no failures) to 1.0 (all transactions fail)
+- Example: 0.2 means 20% of transactions will randomly abort during PREPARE
+
+### 2. Random Failure Injection (`rangeserver/src/range_manager/impl.rs`)
+
+**Location:** Line 259-269 in `prepare()` function
+
+**What it does:**
+- Before processing any transaction, checks `artificial_abort_rate`
+- Generates random number and compares to abort rate
+- If random < abort_rate, artificially fails with `TransactionAbortReason::PrepareFailed`
+
+### 3. New Experiment Function (`run_experiments.py`)
 
 **Location:** `workload-generator/scripts/run_experiments.py`
 
@@ -13,37 +33,33 @@ This experiment tests the performance of cascading abort functionality by varyin
 
 **What it does:**
 - Tests **Pipelined** and **Adaptive** strategies only (Traditional doesn't support cascading abort)
-- Varies contention to create different abort rates:
-  - **Low contention**: 100 keys, 10 concurrent txns
-  - **Medium-low**: 50 keys, 25 concurrent txns
-  - **Medium**: 30 keys, 50 concurrent txns
-  - **Medium-high**: 20 keys, 75 concurrent txns
-  - **High contention**: 10 keys, 100 concurrent txns
+- Uses **fixed workload**: 100 keys, 50 concurrent transactions
+- Varies **artificial abort rate**: 10%, 20%, 30%, 50%
 - Enables cascading abort: `enable_cascading_abort=True`
 - Runs 3000 queries per configuration
 - 2 iterations for statistical significance
 
-**Key insight:** Fewer keys + more concurrency = more conflicts = more aborts = higher chance of cascading aborts
+**Key insight:** Higher abort rate = more cascading aborts = lower throughput
 
-### 2. Custom Plotter (`run_experiments.py`)
+### 4. Custom Plotter (`run_experiments.py`)
 
 **Function:** `plot_cascading_abort_results(experiment_name, ray_logs_dir)`
 
 **Generates:**
-1. **Throughput vs Contention graph** (PNG):
-   - X-axis: Contention level (fewer keys = more contention)
+1. **Throughput vs Abort Rate graph** (PNG):
+   - X-axis: Artificial abort rate (%)
    - Y-axis: Throughput (txn/s)
    - Shows Pipelined vs Adaptive performance
 
 2. **Summary table** (CSV):
-   - Pivot table showing throughput for each strategy at each contention level
+   - Pivot table showing throughput for each strategy at each abort rate
 
-### 3. Updated Configuration Handling (`ray_task.py`)
+### 5. Updated Configuration Handling (`ray_task.py`)
 
 **Changes:**
-- Extracts `enable_cascading_abort` parameter from config
-- Sets it in `atomix_setup.servers_config["enable_cascading_abort"]`
-- Properly cleans up the parameter after use
+- Extracts `enable_cascading_abort` and `artificial_abort_rate` from config
+- Sets them in `atomix_setup.servers_config`
+- Properly cleans up parameters after use
 
 ## How to Run
 
@@ -71,7 +87,7 @@ python run_experiments.py
 ## What to Expect
 
 ### During Execution:
-- Experiment will test 5 contention levels × 2 baselines × 2 iterations = **20 trials**
+- Experiment will test **4 abort rates × 2 baselines × 2 iterations = 16 trials**
 - Each trial runs 3000 transactions
 - Cassandra is cleaned between trials
 - Servers are restarted for each configuration
@@ -81,25 +97,27 @@ python run_experiments.py
 **Results directory:** `workload-generator/experiments/ray_logs/<experiment_name>_cascading_abort/`
 
 **Files generated:**
-1. `<experiment_name>_Pipelined_<X>keys_<Y>conc_results.csv` - Raw results for each configuration
-2. `<experiment_name>_throughput_vs_contention.png` - Performance graph
-3. `<experiment_name>_summary.csv` - Summary table
+1. `<experiment_name>_Pipelined_<X>pct_results.csv` - Raw results for each abort rate
+2. `<experiment_name>_Adaptive_<X>pct_results.csv` - Raw results for each abort rate
+3. `<experiment_name>_throughput_vs_abort_rate.png` - Performance graph
+4. `<experiment_name>_summary.csv` - Summary table
 
 ### Expected Results:
 
 **Hypothesis:**
-- **Low contention**: High throughput, few aborts, minimal cascading
-- **High contention**: Lower throughput, more aborts, more cascading
-- **Pipelined vs Adaptive**: May show different performance characteristics under cascading abort load
+- **10% abort rate**: Moderate throughput reduction, some cascading
+- **20% abort rate**: More significant throughput drop, increased cascading
+- **30% abort rate**: Substantial performance impact
+- **50% abort rate**: Severe throughput degradation, many cascading aborts
+- **Pipelined vs Adaptive**: May show different resilience to cascading aborts
 
 ## Metrics Collected
 
 For each trial:
 - **Throughput** (txn/s)
 - **Baseline** (Pipelined/Adaptive)
-- **num_keys** (contention parameter)
-- **max_concurrency** (contention parameter)
-- **zipf_exponent** (access pattern skew)
+- **artificial_abort_rate** (probability of random abort)
+- **num_queries** (total transactions)
 - **iteration** (for averaging)
 
 ## Troubleshooting
@@ -133,6 +151,8 @@ sudo docker exec -i cassandra cqlsh -k atomix < ~/sangria/schema/cassandra/atomi
 ## Notes
 
 - Cascading abort is **disabled by default** (`enable_cascading_abort=false`)
-- This experiment **explicitly enables it** to test the feature
+- Artificial abort rate is **0.0 by default** (no random failures)
+- This experiment **explicitly enables both** to test cascading abort behavior
 - Traditional 2PC does NOT support cascading abort (not tested)
-- The experiment uses **natural aborts** from contention, not artificial injection
+- The experiment uses **artificial random failures**, not natural contention-based aborts
+- Random failures are injected in `rangeserver/src/range_manager/impl.rs:prepare()`

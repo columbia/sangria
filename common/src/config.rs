@@ -179,6 +179,8 @@ pub struct Config {
     pub print_lock_table_state: bool,
     #[serde(default)]
     pub enable_cascading_abort: bool,
+    #[serde(default)]
+    pub artificial_abort_rate: f64,
     pub range_server: RangeServerConfig,
     pub epoch: EpochConfig,
     pub universe: UniverseConfig,

@@ -258,24 +258,21 @@ def ycsb_experiment(ray_logs_dir):
 
 def cascading_abort_experiment(ray_logs_dir):
     """
-    Test cascading abort performance by varying contention levels.
-    Higher contention (fewer keys + more concurrency) = more aborts.
+    Test cascading abort performance by varying artificial abort rates.
+    Uses artificial_abort_rate to randomly fail transactions during PREPARE.
     """
     BASELINES = [PIPELINED, ADAPTIVE]  # Traditional doesn't support cascading abort
     NUM_ITERATIONS = 2
     NUM_QUERIES = [3000]
     WORKLOAD_TYPE = ["custom"]
-    ZIPFIAN_CONSTANT = [0.5]  # Use some skew to increase hot key contention
+    ZIPFIAN_CONSTANT = [0.0]  # No skew needed
 
-    # Vary contention to create different abort rates
-    # Fewer keys + more concurrency = more conflicts = more aborts
-    CONTENTION_CONFIGS = [
-        {"num_keys": [100], "max_concurrency": ["10"]},   # Low contention
-        {"num_keys": [50], "max_concurrency": ["25"]},    # Medium-low
-        {"num_keys": [30], "max_concurrency": ["50"]},    # Medium
-        {"num_keys": [20], "max_concurrency": ["75"]},    # Medium-high
-        {"num_keys": [10], "max_concurrency": ["100"]},   # High contention
-    ]
+    # Fixed workload parameters
+    NUM_KEYS = [100]
+    MAX_CONCURRENCY = ["50"]
+
+    # Vary artificial abort rate: 10%, 20%, 30%, 50%
+    ABORT_RATES = [0.1, 0.2, 0.3, 0.5]
 
     RESOLVER_TX_LOAD = [
         {
@@ -289,13 +286,10 @@ def cascading_abort_experiment(ray_logs_dir):
     namespace, name = generate_slug(2).split("-")
     experiment_name = f"{namespace}_{name}_cascading_abort"
 
-    # Run experiment for each baseline and contention level
+    # Run experiment for each baseline and abort rate
     for baseline in BASELINES:
-        for i, contention_config in enumerate(CONTENTION_CONFIGS):
-            NUM_KEYS = contention_config["num_keys"]
-            MAX_CONCURRENCY = contention_config["max_concurrency"]
-
-            contention_label = f"{NUM_KEYS[0]}keys_{MAX_CONCURRENCY[0]}conc"
+        for abort_rate in ABORT_RATES:
+            abort_rate_label = f"{int(abort_rate * 100)}pct"
 
             RESOLVER_CAPACITY = [
                 {
@@ -317,17 +311,16 @@ def cascading_abort_experiment(ray_logs_dir):
                 "background_runtime_core_ids": [list(range(3, 32))],
                 "workload_type": WORKLOAD_TYPE,
                 "enable_cascading_abort": [True],  # Enable cascading abort
+                "artificial_abort_rate": [abort_rate],  # Inject random aborts
             }
 
             reporter = tune.CLIReporter(
                 metric_columns=["throughput"],
                 parameter_columns=[
                     "baseline",
-                    "num_keys",
-                    "max_concurrency",
+                    "artificial_abort_rate",
                     "iteration",
                     "num_queries",
-                    "zipf_exponent",
                 ],
                 max_report_frequency=20,
             )
@@ -350,7 +343,7 @@ def cascading_abort_experiment(ray_logs_dir):
             )
 
             # Save results with descriptive filename
-            output_path = ray_logs_dir / experiment_name / f"{experiment_name}_{baseline}_{contention_label}_results.csv"
+            output_path = ray_logs_dir / experiment_name / f"{experiment_name}_{baseline}_{abort_rate_label}_results.csv"
             analysis.results_df.to_csv(output_path)
 
     # Generate custom plots for cascading abort results
@@ -361,7 +354,7 @@ def plot_cascading_abort_results(experiment_name, ray_logs_dir):
     """
     Custom plotter for cascading abort experiment results.
     Creates:
-    1. Throughput vs Contention graph
+    1. Throughput vs Abort Rate graph
     2. Summary table
     """
     import pandas as pd
@@ -384,39 +377,37 @@ def plot_cascading_abort_results(experiment_name, ray_logs_dir):
 
     combined_df = pd.concat(all_results, ignore_index=True)
 
-    # Extract baseline and contention info
-    # Group by baseline and num_keys (contention indicator)
-    summary = combined_df.groupby(["config/baseline", "config/num_keys", "config/max_concurrency"])["throughput"].mean().reset_index()
+    # Extract baseline and abort rate
+    summary = combined_df.groupby(["config/baseline", "config/artificial_abort_rate"])["throughput"].mean().reset_index()
 
-    # Create contention label (fewer keys = higher contention)
-    summary["contention"] = summary["config/num_keys"].astype(str) + " keys, " + summary["config/max_concurrency"].astype(str) + " conc"
-    summary = summary.sort_values("config/num_keys", ascending=False)  # Sort by num_keys descending (low to high contention)
+    # Create abort rate label
+    summary["abort_rate_pct"] = (summary["config/artificial_abort_rate"] * 100).astype(int).astype(str) + "%"
+    summary = summary.sort_values("config/artificial_abort_rate")  # Sort by abort rate ascending
 
-    # Plot throughput vs contention
+    # Plot throughput vs abort rate
     plt.figure(figsize=(12, 6))
 
     for baseline in summary["config/baseline"].unique():
         baseline_data = summary[summary["config/baseline"] == baseline]
-        plt.plot(baseline_data["contention"], baseline_data["throughput"],
+        plt.plot(baseline_data["abort_rate_pct"], baseline_data["throughput"],
                 marker='o', label=baseline, linewidth=2, markersize=8)
 
-    plt.xlabel("Contention Level (fewer keys = higher contention)", fontsize=12)
+    plt.xlabel("Artificial Abort Rate (%)", fontsize=12)
     plt.ylabel("Throughput (txn/s)", fontsize=12)
-    plt.title("Throughput vs Contention - Cascading Abort Enabled", fontsize=14, fontweight='bold')
+    plt.title("Throughput vs Abort Rate - Cascading Abort Enabled", fontsize=14, fontweight='bold')
     plt.legend(fontsize=11)
     plt.grid(True, alpha=0.3)
-    plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
 
     # Save plot
-    plot_path = experiment_dir / f"{experiment_name}_throughput_vs_contention.png"
+    plot_path = experiment_dir / f"{experiment_name}_throughput_vs_abort_rate.png"
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     print(f"Plot saved to: {plot_path}")
     plt.close()
 
     # Create summary table
     pivot_table = summary.pivot_table(
-        index="contention",
+        index="abort_rate_pct",
         columns="config/baseline",
         values="throughput",
         aggfunc="mean"

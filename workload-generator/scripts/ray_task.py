@@ -72,6 +72,7 @@ def run_workload(config):
     main_background_runtime_core_ids = config["background_runtime_core_ids"]
     workload_type = config["workload_type"]
     enable_cascading_abort = config.get("enable_cascading_abort", False)
+    artificial_abort_rate = config.get("artificial_abort_rate", 0.0)
 
     del config["iteration"]
     del config["baseline"]
@@ -81,6 +82,8 @@ def run_workload(config):
     del config["resolver_tx_load_concurrency"]
     if "enable_cascading_abort" in config:
         del config["enable_cascading_abort"]
+    if "artificial_abort_rate" in config:
+        del config["artificial_abort_rate"]
 
     # Main workload generator -- used to collect performance metrics
     cmd1 = [
@@ -111,6 +114,7 @@ def run_workload(config):
             "background_runtime_core_ids"
         ] = resolver_background_runtime_core_ids
         atomix_setup.servers_config["enable_cascading_abort"] = enable_cascading_abort
+        atomix_setup.servers_config["artificial_abort_rate"] = artificial_abort_rate
         atomix_setup.dump_servers_config()
         atomix_setup.kill_servers()
         atomix_setup.reset_cassandra()

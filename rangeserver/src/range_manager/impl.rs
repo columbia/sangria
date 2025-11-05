@@ -26,6 +26,7 @@ use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tonic::async_trait;
 use tracing::info;
+use rand::Rng;
 
 struct PrepareRecord {
     changes: HashMap<Bytes, Option<Bytes>>, // key to change -> new value
@@ -255,6 +256,18 @@ where
                 return Err(Error::RangeIsNotLoaded)
             }
             State::Loaded(state) => {
+                // Artificial abort injection for testing cascading aborts
+                if self.config.artificial_abort_rate > 0.0 {
+                    let mut rng = rand::thread_rng();
+                    let random_value: f64 = rng.gen();
+                    if random_value < self.config.artificial_abort_rate {
+                        // Artificially fail this prepare
+                        return Err(Error::TransactionAborted(
+                            TransactionAbortReason::PrepareFailed,
+                        ));
+                    }
+                }
+
                 // Check if transaction has no writes
                 let has_writes = !(prepare.puts().unwrap_or_default().is_empty()
                     && prepare.deletes().unwrap_or_default().is_empty());
