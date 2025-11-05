@@ -144,8 +144,8 @@ impl Transaction for RwTransaction {
                     // This is expected behavior, not an error
                     // info!("Transaction aborted: {:?}", status.message());
                 } else {
-                    // Unexpected error - propagate it
-                    return Err(status.into());
+                    // Unexpected error - panic since we can't handle it
+                    panic!("Unexpected commit error: {:?}", status);
                 }
             }
         }
