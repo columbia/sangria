@@ -375,9 +375,26 @@ impl Transaction {
         Ok(())
     }
 
-    fn error_from_rangeclient_error(_err: rangeclient::client::Error) -> Error {
-        // TODO(tamer): handle
-        panic!("encountered rangeclient error, translation not yet implemented.")
+    fn error_from_rangeclient_error(err: rangeclient::client::Error) -> Error {
+        // Convert rangeserver::Error to coordinator_rangeclient::error::Error
+        match err {
+            rangeclient::client::Error::TransactionAborted(reason) => {
+                // Map rangeserver::TransactionAbortReason to coordinator_rangeclient::TransactionAbortReason
+                let mapped_reason = match reason {
+                    rangeserver::transaction_abort_reason::TransactionAbortReason::WaitDie =>
+                        TransactionAbortReason::DeadlockPrevention,
+                    rangeserver::transaction_abort_reason::TransactionAbortReason::TransactionLockLost =>
+                        TransactionAbortReason::TransactionLockLost,
+                    rangeserver::transaction_abort_reason::TransactionAbortReason::Other =>
+                        TransactionAbortReason::Other,
+                };
+                Error::TransactionAborted(mapped_reason)
+            }
+            rangeclient::client::Error::Timeout => Error::Timeout,
+            rangeclient::client::Error::UnknownTransaction => Error::TransactionNoLongerRunning,
+            // For all other errors, wrap as InternalError
+            _ => Error::InternalError(Arc::new(err)),
+        }
     }
 
     pub async fn commit(
