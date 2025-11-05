@@ -74,6 +74,18 @@ def run_workload(config):
     enable_cascading_abort = config.get("enable_cascading_abort", False)
     artificial_abort_rate = config.get("artificial_abort_rate", 0.0)
 
+    # DIAGNOSTIC LOGGING
+    print(f"\n{'='*80}")
+    print(f"🔧 WORKLOAD CONFIG:")
+    print(f"  Baseline: {baseline}")
+    print(f"  Iteration: {iteration}")
+    print(f"  Num transactions: {main_num_queries}")
+    print(f"  Num keys: {main_num_keys}")
+    print(f"  Concurrency: {main_max_concurrency}")
+    print(f"  Enable cascading abort: {enable_cascading_abort}")
+    print(f"  Artificial abort rate: {artificial_abort_rate} ({artificial_abort_rate*100:.0f}%)")
+    print(f"{'='*80}\n")
+
     del config["iteration"]
     del config["baseline"]
     del config["resolver_capacity"]
@@ -158,6 +170,9 @@ def run_workload(config):
     print("cmd2: ", cmd2)
 
     try:
+        print("🚀 Starting workload generator processes...")
+        start_time = time.time()
+
         process2 = None
         if resolver_tx_load["max_concurrency"] != "0":
             process2 = subprocess.Popen(
@@ -168,6 +183,7 @@ def run_workload(config):
                 text=True,
                 env={**os.environ, "RUST_LOG": "error"},
             )
+            print("  ✓ Secondary workload generator started")
 
         # Let it run for a while
         time.sleep(2)
@@ -180,14 +196,19 @@ def run_workload(config):
             text=True,
             env={**os.environ, "RUST_LOG": "error"},
         )
+        print("  ✓ Main workload generator started")
+        print(f"\n⏳ Waiting for {main_num_queries} transactions to complete...")
+
         try:
             # Wait for the main workload generator to finish
             stdout1, stderr1 = process1.communicate(
                 timeout=60 * 60
             )  # 60 minutes timeout
+            elapsed = time.time() - start_time
+            print(f"\n✅ Workload completed in {elapsed:.1f} seconds")
             print(stderr1)
             metrics = parse_metrics(stdout1)
-            print("Finished main workload generator")
+            print(f"📊 Throughput: {metrics.get('throughput', 0):.2f} txn/s")
 
             # Send interrupt signal to the secondary workload generator
             if process2:

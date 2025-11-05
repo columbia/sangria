@@ -261,18 +261,28 @@ def cascading_abort_experiment(ray_logs_dir):
     Test cascading abort performance by varying artificial abort rates.
     Uses artificial_abort_rate to randomly fail transactions during PREPARE.
     """
-    BASELINES = [PIPELINED, ADAPTIVE]  # Traditional doesn't support cascading abort
-    NUM_ITERATIONS = 2
-    NUM_QUERIES = [3000]
+    BASELINES = [PIPELINED]  # Start with just Pipelined for quick test
+    NUM_ITERATIONS = 1  # Reduced for faster testing
+    NUM_QUERIES = [300]  # Reduced from 3000 for quick test
     WORKLOAD_TYPE = ["custom"]
     ZIPFIAN_CONSTANT = [0.0]  # No skew needed
 
     # Fixed workload parameters
     NUM_KEYS = [100]
-    MAX_CONCURRENCY = ["50"]
+    MAX_CONCURRENCY = ["10"]  # Reduced from 50 for clearer debugging
 
-    # Vary artificial abort rate: 10%, 20%, 30%, 50%
-    ABORT_RATES = [0.1, 0.2, 0.3, 0.5]
+    # Test just one abort rate first
+    ABORT_RATES = [0.1]  # Just 10% for quick test
+
+    print("\n" + "="*80)
+    print("🧪 DIAGNOSTIC TEST - Reduced workload for faster debugging")
+    print(f"  Transactions: {NUM_QUERIES[0]} (was 3000)")
+    print(f"  Concurrency: {MAX_CONCURRENCY[0]} (was 50)")
+    print(f"  Abort rates: {ABORT_RATES} (was [0.1, 0.2, 0.3, 0.5])")
+    print(f"  Iterations: {NUM_ITERATIONS} (was 2)")
+    print("  Expected time: ~30-60 seconds if working correctly")
+    print("  If it hangs for >2 minutes, there's a deadlock!")
+    print("="*80 + "\n")
 
     RESOLVER_TX_LOAD = [
         {
