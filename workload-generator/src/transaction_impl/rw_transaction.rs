@@ -126,12 +126,29 @@ impl Transaction for RwTransaction {
 
         // Commit the transaction
         let mut client_clone = self.client.clone();
-        client_clone
+        let commit_result = client_clone
             .commit(CommitRequest {
                 transaction_id: transaction_id.to_string(),
             })
-            .await
-            .unwrap();
+            .await;
+
+        // Handle commit result - transaction aborts are expected with cascading abort
+        match commit_result {
+            Ok(_) => {
+                // Successful commit
+            }
+            Err(status) => {
+                // Check if this is a transaction abort (expected behavior)
+                if status.message().contains("TransactionAborted") {
+                    // Transaction was aborted (either artificially or cascading)
+                    // This is expected behavior, not an error
+                    // info!("Transaction aborted: {:?}", status.message());
+                } else {
+                    // Unexpected error - propagate it
+                    return Err(status.into());
+                }
+            }
+        }
         // info!(
         //     "Committed transaction with keys: {:?} tx id: {:?}",
         //     self.writeset, transaction_id_int
