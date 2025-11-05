@@ -411,7 +411,7 @@ where
                         if random_value < self.config.artificial_abort_rate {
                             // Artificially fail this prepare (simulates write failure)
                             return Err(Error::TransactionAborted(
-                                TransactionAbortReason::PrepareFailed,
+                                TransactionAbortReason::Other,
                             ));
                         }
                     }
