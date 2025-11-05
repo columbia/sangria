@@ -326,6 +326,27 @@ where
                 // 2) Acquire the range lock if it hasn't already been acquired by previous Gets
                 self.acquire_range_lock(state, tx.clone()).await?;
 
+                // Artificial abort injection for testing abort handling
+                // CRITICAL: Injected AFTER lock acquisition but BEFORE any state modifications
+                // This prevents race conditions where other transactions see partial state
+                // NOTE: This does NOT test cascading aborts (no dependencies recorded yet)
+                // For cascading abort testing, use deterministic manual tests
+                let should_artificially_abort = if self.config.artificial_abort_rate > 0.0 {
+                    let random_value: f64 = {
+                        let mut rng = rand::thread_rng();
+                        rng.gen()
+                    };
+                    random_value < self.config.artificial_abort_rate
+                } else {
+                    false
+                };
+
+                if should_artificially_abort {
+                    // Release lock before returning (no state was modified, so no cleanup needed)
+                    state.lock_table.release(None).await;
+                    return Err(Error::TransactionAborted(TransactionAbortReason::Other));
+                }
+
                 let mut flush = true;
                 let mut dependencies = HashSet::new();
                 let mut released_lock_early = false;
@@ -402,30 +423,6 @@ where
                         "Dependencies for transaction {:?}: {:?}",
                         tx.id, dependencies
                     );
-
-                    // Artificial abort injection for testing cascading aborts
-                    // Injected AFTER dependencies are recorded in key_version_chain
-                    // This ensures cascading abort dependencies are properly tracked
-                    // The lock is explicitly released before error return to prevent deadlock
-                    let should_artificially_abort = if self.config.artificial_abort_rate > 0.0 {
-                        let random_value: f64 = {
-                            let mut rng = rand::thread_rng();
-                            rng.gen()
-                        }; // RNG dropped here, before await
-                        random_value < self.config.artificial_abort_rate
-                    } else {
-                        false
-                    };
-
-                    if should_artificially_abort {
-                        // Release the lock before returning error to prevent deadlock
-                        // The coordinator will call abort() to clean up pending_prepare_records
-                        // and key_version_chain entries
-                        state.lock_table.release(None).await;
-                        return Err(Error::TransactionAborted(
-                            TransactionAbortReason::Other,
-                        ));
-                    }
 
                     // 5) Append prepare record to WAL's buffer while still holding the lock
                     let receiver = self
