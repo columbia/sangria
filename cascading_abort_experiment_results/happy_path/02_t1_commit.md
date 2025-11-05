@@ -9,8 +9,8 @@ graph TB
 
     subgraph "Range0 - After COMMIT"
         PrepRec2["<b>pending_prepare_records</b><br/>{}  ← T1 removed"]
-        CommitTbl2["<b>pending_commit_table</b><br/>{A: T1}  ← still here!"]
-        VerChain2["<b>key_version_chain</b><br/>{A: [T1]}  ← still here!"]
+        CommitTbl2["<b>pending_commit_table</b><br/>{}  ← A removed (T1 committed!)"]
+        VerChain2["<b>key_version_chain</b><br/>{A: [T1]}  ← stays for cascading abort tracking"]
     end
 
     subgraph "Cassandra"
@@ -29,9 +29,11 @@ graph TB
 2. Coordinator commits T1 in tx_state_store
 3. Coordinator sends COMMIT to Range0
 4. Range0 removes T1 from `pending_prepare_records`
-5. T1's value written to Cassandra (durable)
+5. Range0 **removes A from `pending_commit_table`** (line 693) - no longer uncommitted!
+6. Range0 **keeps T1 in `key_version_chain`** - used for cascading abort tracking
+7. T1's value written to Cassandra (durable)
 
-**Key Insight:** `pending_commit_table` and `key_version_chain` still contain T1 for tracking future dependencies.
+**Key Insight:** `pending_commit_table` tracks UNCOMMITTED writes only. Once committed, the entry is removed. But `key_version_chain` remains for cascading abort detection.
 
 ---
 

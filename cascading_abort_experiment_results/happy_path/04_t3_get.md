@@ -11,8 +11,8 @@ graph TB
 
     subgraph "Range0"
         PrepRec4["<b>pending_prepare_records</b><br/>{T2: PrepareRecord{B:2}}  ← T2 uncommitted"]
-        CommitTbl4["<b>pending_commit_table</b><br/>{A: T1, B: T2}"]
-        VerChain4["<b>key_version_chain</b><br/>{A: [T1], B: [T2]}"]
+        CommitTbl4["<b>pending_commit_table</b><br/>{B: T2}  ← Only uncommitted writes tracked"]
+        VerChain4["<b>key_version_chain</b><br/>{A: [T1], B: [T2]}  ← Full history kept"]
         Check4["<b>T3 GET(B) Processing</b><br/>1. Check commit_table[B] → T2<br/>2. Check prepare_records[T2] → Found!<br/>3. T2 uncommitted! Read from prepare"]
     end
 

@@ -62,8 +62,8 @@ sequenceDiagram
 
     Note over C,Cass: T2: Read A, Write B
     C->>R0: GET(A)
-    R0->>R0: Check: T1 in commit_table but not in prepare_records
-    R0->>Cass: Read A (T1 committed)
+    R0->>R0: Check: A not in commit_table (T1 committed)
+    R0->>Cass: Read A from Cassandra
     R0-->>C: GetResult{val:1, deps:[]}
     C->>R0: PREPARE(T2, write B:2)
     R0-->>C: PrepareResult{deps:[]}

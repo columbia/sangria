@@ -10,8 +10,8 @@ graph TB
 
     subgraph "Range0"
         PrepRec3["<b>pending_prepare_records</b><br/>{}  ← T1 gone"]
-        CommitTbl3["<b>pending_commit_table</b><br/>{A: T1}"]
-        Check["<b>GET(A) Processing</b><br/>1. Check commit_table[A] → T1<br/>2. Check prepare_records[T1] → None<br/>3. T1 committed! Read from Cassandra"]
+        CommitTbl3["<b>pending_commit_table</b><br/>{}  ← A removed when T1 committed"]
+        Check["<b>GET(A) Processing</b><br/>1. Check commit_table[A] → None<br/>2. No uncommitted dependency!<br/>3. Read from Cassandra"]
     end
 
     subgraph "Cassandra"
@@ -30,12 +30,12 @@ graph TB
 
 **What happened:**
 1. T2 does GET(A)
-2. Range0 checks: `pending_commit_table[A] = T1` ✓
-3. Range0 checks: `pending_prepare_records[T1]` → **None** (T1 committed!)
-4. Since T1 committed, read from Cassandra instead
+2. Range0 checks: `pending_commit_table[A]` → **None** (line 205)
+3. A is not in pending_commit_table → no uncommitted writer exists
+4. Read from Cassandra (committed data)
 5. Return: `GetResult{val: 1, dependencies: []}`
 
-**Key Insight:** T2 has **NO dependency** on T1 because T1 already committed. No entry in reverse_deps.
+**Key Insight:** Since T1 committed, A was **removed from pending_commit_table** (line 693). This means T2 finds no uncommitted dependency and reads directly from Cassandra. No entry created in reverse_deps.
 
 ---
 
