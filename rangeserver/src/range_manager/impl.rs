@@ -473,13 +473,13 @@ where
                 // At this point, the transaction is fully visible to others:
                 // - PrepareRecord is saved, WAL is flushed, pending_commit_table is updated
                 // - Other transactions can already see and depend on this transaction
-                if self.config.artificial_abort_rate > 0.0 {
+                if self.config.range_server.artificial_abort_rate > 0.0 {
                     use rand::Rng;
                     let mut rng = rand::thread_rng();
-                    if rng.gen::<f64>() < self.config.artificial_abort_rate {
+                    if rng.gen::<f64>() < self.config.range_server.artificial_abort_rate {
                         info!(
                             "Artificially aborting transaction {:?} (abort_rate={:.2})",
-                            tx.id, self.config.artificial_abort_rate
+                            tx.id, self.config.range_server.artificial_abort_rate
                         );
                         return Err(Error::TransactionAborted(
                             TransactionAbortReason::ArtificialAbort,
