@@ -70,18 +70,18 @@ pkill -f "target/release/resolver" || true
 pkill -f "target/release/universe" || true
 sleep 2
 
-# Start servers in correct order with proper wait logic
+# Start servers in correct order (matching atomix_setup.py)
 echo "Starting universe..."
 RUST_LOG=info target/release/universe --config configs/config.json > /tmp/universe.log 2>&1 &
 wait_for_port 50056 "universe" || exit 1
 
-echo "Starting resolver..."
-RUST_LOG=info target/release/resolver --config configs/config.json > /tmp/resolver.log 2>&1 &
-wait_for_port 50059 "resolver" || exit 1
-
 echo "Starting rangeserver..."
 RUST_LOG=info target/release/rangeserver --config configs/config.json > /tmp/rangeserver.log 2>&1 &
 wait_for_port 50054 "rangeserver" || exit 1
+
+echo "Starting resolver..."
+RUST_LOG=info target/release/resolver --config configs/config.json > /tmp/resolver.log 2>&1 &
+wait_for_port 50059 "resolver" || exit 1
 
 echo "Starting frontend..."
 RUST_LOG=info target/release/frontend --config configs/config.json > /tmp/frontend.log 2>&1 &
