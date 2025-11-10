@@ -212,9 +212,17 @@ impl Transaction {
         self.record_abort().await
     }
 
-    fn error_from_rangeclient_error(_err: rangeclient::client::Error) -> Error {
-        // TODO(tamer): handle
-        panic!("encountered rangeclient error, translation not yet implemented.")
+    fn error_from_rangeclient_error(err: rangeclient::client::Error) -> Error {
+        match err {
+            rangeclient::client::Error::TransactionAborted(reason) => {
+                Error::TransactionAborted(reason)
+            }
+            rangeclient::client::Error::Timeout => Error::Timeout,
+            rangeclient::client::Error::RangeOwnershipLost => {
+                Error::InternalError(Arc::new(err))
+            }
+            _ => Error::InternalError(Arc::new(err)),
+        }
     }
 
     pub async fn commit(
