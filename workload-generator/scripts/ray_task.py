@@ -71,6 +71,7 @@ def run_workload(config):
     main_name = config["name"]
     main_background_runtime_core_ids = config["background_runtime_core_ids"]
     workload_type = config["workload_type"]
+    abort_rate = config.get("abort_rate", 0.0)  # Get abort_rate, default to 0.0
 
     del config["iteration"]
     del config["baseline"]
@@ -78,6 +79,8 @@ def run_workload(config):
     del config["resolver_cores"]
     del config["resolver_tx_load"]
     del config["resolver_tx_load_concurrency"]
+    if "abort_rate" in config:
+        del config["abort_rate"]  # Remove from workload config, will be set in server config
 
     # Main workload generator -- used to collect performance metrics
     cmd1 = [
@@ -107,6 +110,10 @@ def run_workload(config):
         atomix_setup.servers_config["resolver"][
             "background_runtime_core_ids"
         ] = resolver_background_runtime_core_ids
+        # Set artificial abort rate for cascading abort experiments
+        atomix_setup.servers_config["range_server"][
+            "artificial_abort_rate"
+        ] = abort_rate
         atomix_setup.dump_servers_config()
         atomix_setup.kill_servers()
         atomix_setup.reset_cassandra()
@@ -146,6 +153,7 @@ def run_workload(config):
     config["baseline"] = baseline
     config["resolver_cores"] = resolver_cores
     config["resolver_tx_load_concurrency"] = resolver_tx_load["max_concurrency"]
+    config["abort_rate"] = abort_rate
     print("cmd1: ", cmd1)
     print("cmd2: ", cmd2)
 
