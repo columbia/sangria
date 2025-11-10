@@ -11,7 +11,7 @@ use crate::{
     core::{group_commit::GroupCommit, statistics::StatisticsTracker},
     participant_range_info::ParticipantRangeInfo,
 };
-use coordinator_rangeclient::error::Error;
+use coordinator_rangeclient::error::{Error, TransactionAbortReason};
 
 #[derive(Clone, Debug)]
 pub struct TransactionInfo {
@@ -325,7 +325,7 @@ impl Resolver {
             for transaction_id in &transaction_ids {
                 if let Some(sender) = waiting_transactions.remove(transaction_id) {
                     let _ = sender.send(Err(Error::TransactionAborted(
-                        coordinator_rangeclient::transaction_abort_reason::TransactionAbortReason::DependencyAborted
+                        TransactionAbortReason::DependencyAborted
                     )));  // Send error to indicate abort
                     info!("Notified transaction {:?} of abort", transaction_id);
                 }
