@@ -20,12 +20,16 @@ def parse_metrics(output):
     # Regular expressions to match the metrics
     patterns = {
         "throughput": r"Throughput: ([\d\.]+) transactions/second",
+        "commit_throughput": r"Commit Throughput: ([\d\.]+) transactions/second",
+        "total_transactions": r"Total Transactions: (\d+)",
+        "committed_transactions": r"Committed Transactions: (\d+)",
+        "aborted_transactions": r"Aborted Transactions: (\d+)",
+        "abort_rate": r"Abort Rate: ([\d\.]+)%",
         "avg_latency": r"Average Latency: ([\d\.]+[µnm]?s)",
         "p50_latency": r"P50 Latency: ([\d\.]+[µnm]?s)",
         "p95_latency": r"P95 Latency: ([\d\.]+[µnm]?s)",
         "p99_latency": r"P99 Latency: ([\d\.]+[µnm]?s)",
         "total_duration": r"Total Duration: ([\d\.]+[µnm]?s)",
-        "total_transactions": r"Total Transactions: (\d+)",
         "resolver_stats": r"Resolver stats: (.*)",
         "range_server_stats": r"Range server stats: (.*)",
     }
