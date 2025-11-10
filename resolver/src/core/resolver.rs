@@ -269,6 +269,94 @@ impl Resolver {
         Ok(())
     }
 
+    pub async fn abort(
+        resolver: Arc<Self>,
+        transaction_id: Uuid,
+    ) -> Result<(), Error> {
+        info!("Aborting transaction {:?} and cascading to dependents", transaction_id);
+
+        // Walk the dependency graph to find ALL transitive dependents
+        let mut transactions_to_abort = HashSet::new();
+        transactions_to_abort.insert(transaction_id);
+
+        {
+            let state = resolver.state.read().await;
+            let mut to_explore = vec![transaction_id];
+
+            while let Some(tx_id) = to_explore.pop() {
+                if let Some(tx_info) = state.info_per_transaction.get(&tx_id) {
+                    for dependent in &tx_info.dependents {
+                        if transactions_to_abort.insert(*dependent) {
+                            info!("Cascading abort to dependent transaction {:?}", dependent);
+                            to_explore.push(*dependent);  // Recursively find their dependents
+                        }
+                    }
+                }
+            }
+        }
+
+        info!("Collected {} transactions to abort (including dependents)", transactions_to_abort.len());
+
+        // Register all as aborted
+        Self::register_aborted_transactions(resolver, transactions_to_abort.into_iter().collect()).await
+    }
+
+    pub async fn register_aborted_transactions(
+        resolver: Arc<Self>,
+        transaction_ids: Vec<Uuid>,
+    ) -> Result<(), Error> {
+        info!("Registering {} transactions as aborted", transaction_ids.len());
+
+        {
+            let mut state = resolver.state.write().await;
+
+            // Mark all as resolved but NOT committed
+            for transaction_id in &transaction_ids {
+                state.resolved_transactions.insert(*transaction_id);
+                // Explicitly do NOT add to committed_transactions
+                info!("Transaction {:?} marked as resolved (aborted)", transaction_id);
+            }
+
+            // Unblock waiting transactions (notify them they're done, even though aborted)
+            let mut waiting_transactions = resolver.waiting_transactions.write().await;
+            for transaction_id in &transaction_ids {
+                if let Some(sender) = waiting_transactions.remove(transaction_id) {
+                    let _ = sender.send(());  // Unblock the transaction
+                    info!("Notified transaction {:?} of abort", transaction_id);
+                }
+            }
+
+            // Check if any dependents can now proceed (or must also abort)
+            // For each aborted transaction, check its dependents
+            let mut new_ready_to_check = Vec::new();
+            for transaction_id in &transaction_ids {
+                if let Some(tx_info) = state.info_per_transaction.get(transaction_id) {
+                    for dependent in &tx_info.dependents {
+                        new_ready_to_check.push(*dependent);
+                    }
+                }
+            }
+
+            // For each dependent, decrement their pending count and check if they should abort
+            let mut new_aborts = Vec::new();
+            for dependent_id in new_ready_to_check {
+                if let Some(dependent_info) = state.info_per_transaction.get_mut(&dependent_id) {
+                    if dependent_info.num_dependencies > 0 {
+                        dependent_info.num_dependencies -= 1;
+
+                        if dependent_info.num_dependencies == 0 {
+                            // All dependencies resolved - but were they committed?
+                            // We need to check if this dependent should also abort
+                            // For now, we've already cascaded the abort in abort(), so this is handled
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     // ---------------------- Statistics ----------------------
     pub async fn sample_waiting_transactions(&self) {
         let mut stats_tracker = self.stats_tracker.write().await;

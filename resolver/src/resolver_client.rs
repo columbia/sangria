@@ -24,4 +24,8 @@ pub trait ResolverClient: Send + Sync + 'static {
         &self,
         transaction_ids: Vec<Uuid>,
     ) -> Result<(), Error>;
+    async fn abort(
+        &self,
+        transaction_id: Uuid,
+    ) -> Result<(), Error>;
 }

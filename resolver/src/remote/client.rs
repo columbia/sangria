@@ -136,4 +136,12 @@ impl ResolverClientTrait for ResolverClient {
         assert!(response.into_inner().status == "Register committed transactions ok".to_string());
         Ok(())
     }
+
+    async fn abort(
+        &self,
+        transaction_id: Uuid,
+    ) -> Result<(), Error> {
+        // TODO: Implement remote abort RPC when proto is updated
+        unimplemented!("Remote abort not yet implemented - use local resolver")
+    }
 }

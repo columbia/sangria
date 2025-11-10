@@ -85,4 +85,11 @@ impl ResolverClientTrait for ResolverClient {
     ) -> Result<(), Error> {
         Resolver::spawn_register_committed_transactions(self.resolver.clone(), transaction_ids)
     }
+
+    async fn abort(
+        &self,
+        transaction_id: Uuid,
+    ) -> Result<(), Error> {
+        Resolver::abort(self.resolver.clone(), transaction_id).await
+    }
 }

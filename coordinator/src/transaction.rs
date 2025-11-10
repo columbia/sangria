@@ -264,6 +264,10 @@ impl Transaction {
             let res = match res {
                 Err(_) => {
                     let _ = self.record_abort().await;
+                    // Notify resolver about the abort (for cascading aborts)
+                    if self.commit_strategy != CommitStrategy::Traditional {
+                        let _ = self.resolver.abort(self.id).await;
+                    }
                     return Err(Error::TransactionAborted(
                         TransactionAbortReason::PrepareFailed,
                     ));
