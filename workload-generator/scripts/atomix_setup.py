@@ -148,7 +148,7 @@ class AtomixSetup:
                         text=True,
                         stdout=log_file,
                         stderr=log_file,
-                        env={**os.environ, "RUST_LOG": "error"},
+                        env={**os.environ, "RUST_LOG": "info"},
                     )
                 time.sleep(1)
                 if p.poll() is not None:
