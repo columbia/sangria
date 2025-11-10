@@ -44,7 +44,7 @@ pub struct State {
 pub struct Resolver {
     state: RwLock<State>,
     group_commit: GroupCommit,
-    waiting_transactions: RwLock<HashMap<Uuid, oneshot::Sender<()>>>,
+    waiting_transactions: RwLock<HashMap<Uuid, oneshot::Sender<Result<(), Error>>>>,
     bg_runtime: tokio::runtime::Handle,
     stats_tracker: RwLock<StatisticsTracker>,
 }
@@ -142,10 +142,13 @@ impl Resolver {
             }
         }
 
-        // Block until the transaction is actually committed
-        r.await.unwrap();
-        info!("Transaction {} finally committed!", transaction_id);
-        Ok(())
+        // Block until the transaction is actually committed (or aborted)
+        let result = r.await.unwrap();
+        match &result {
+            Ok(_) => info!("Transaction {} finally committed!", transaction_id),
+            Err(_) => info!("Transaction {} was aborted", transaction_id),
+        }
+        result
     }
 
     async fn trigger_commit(
@@ -167,7 +170,7 @@ impl Resolver {
             let mut waiting_transactions = resolver.waiting_transactions.write().await;
             for transaction in finished_transactions {
                 let sender = waiting_transactions.remove(&transaction.id).unwrap();
-                sender.send(()).unwrap();
+                sender.send(Ok(())).unwrap();  // Send Ok to indicate successful commit
             }
             // TODO: Clean up other state too here?
         }
@@ -317,11 +320,13 @@ impl Resolver {
                 info!("Transaction {:?} marked as resolved (aborted)", transaction_id);
             }
 
-            // Unblock waiting transactions (notify them they're done, even though aborted)
+            // Unblock waiting transactions (notify them they're aborted)
             let mut waiting_transactions = resolver.waiting_transactions.write().await;
             for transaction_id in &transaction_ids {
                 if let Some(sender) = waiting_transactions.remove(transaction_id) {
-                    let _ = sender.send(());  // Unblock the transaction
+                    let _ = sender.send(Err(Error::TransactionAborted(
+                        coordinator_rangeclient::transaction_abort_reason::TransactionAbortReason::DependencyAborted
+                    )));  // Send error to indicate abort
                     info!("Notified transaction {:?} of abort", transaction_id);
                 }
             }
