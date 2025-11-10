@@ -127,9 +127,9 @@ if __name__ == "__main__":
     # Initialize ray
     ray.init(ignore_reinit_error=True)
 
-    # Build servers before starting experiments
-    print("Building Atomix servers...")
-    atomix_setup.build_servers()
+    # Build servers before starting experiments (skip if already built)
+    print("Skipping build - assuming servers already built")
+    # atomix_setup.build_servers()
     atomix_setup.dump_servers_config()
 
     # Run the experiment
