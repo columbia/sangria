@@ -131,7 +131,7 @@ impl Transaction for RwTransaction {
                 transaction_id: transaction_id.to_string(),
             })
             .await
-            .map_err(|e| FrontendError::TonicError(e))?;
+            .map_err(|e| FrontendError::InternalError(Arc::new(e)))?;
         // info!(
         //     "Committed transaction with keys: {:?} tx id: {:?}",
         //     self.writeset, transaction_id_int
