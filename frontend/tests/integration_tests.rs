@@ -361,3 +361,121 @@ async fn test_frontend() {
         .unwrap();
     info!("Aborted transaction");
 }
+
+#[tokio::test]
+async fn test_cascading_abort_simple() {
+    tracing_subscriber::fmt::init();
+    let mut context = setup().await;
+
+    // Create keyspace
+    context
+        .client
+        .create_keyspace(CreateKeyspaceRequest {
+            namespace: context.keyspace.namespace.clone(),
+            name: context.keyspace.name.clone(),
+            primary_zone: Some(context.zone.clone()),
+            base_key_ranges: context.base_key_ranges.clone(),
+        })
+        .await
+        .unwrap();
+    info!("Created keyspace");
+
+    // Test: Create dependency chain T1→T2→T3, all should commit with abort_rate=0
+    info!("=== Starting cascading abort test ===");
+
+    // T1: Write to key 0
+    let response = context
+        .client
+        .start_transaction(StartTransactionRequest {
+            keyspace: Some(ProtoKeyspace {
+                namespace: context.keyspace.namespace.clone(),
+                name: context.keyspace.name.clone(),
+            }),
+        })
+        .await
+        .unwrap();
+    let t1_id = Uuid::parse_str(&response.get_ref().transaction_id).unwrap();
+    info!("Started T1: {:?}", t1_id);
+
+    context
+        .client
+        .put(PutRequest {
+            transaction_id: t1_id.to_string(),
+            keyspace: Some(ProtoKeyspace {
+                namespace: context.keyspace.namespace.clone(),
+                name: context.keyspace.name.clone(),
+            }),
+            key: Bytes::from_static(&[0]).to_vec(),
+            value: Bytes::from_static(&[100]).to_vec(),
+        })
+        .await
+        .unwrap();
+    info!("T1 wrote key=0, value=100");
+
+    let commit_result = context
+        .client
+        .commit(CommitRequest {
+            transaction_id: t1_id.to_string(),
+        })
+        .await;
+
+    info!("T1 commit result: {:?}", commit_result);
+    assert!(commit_result.is_ok(), "T1 should commit successfully with abort_rate=0");
+    info!("T1 committed successfully");
+
+    // T2: Read key 0 (depends on T1), write to key 1
+    let response = context
+        .client
+        .start_transaction(StartTransactionRequest {
+            keyspace: Some(ProtoKeyspace {
+                namespace: context.keyspace.namespace.clone(),
+                name: context.keyspace.name.clone(),
+            }),
+        })
+        .await
+        .unwrap();
+    let t2_id = Uuid::parse_str(&response.get_ref().transaction_id).unwrap();
+    info!("Started T2: {:?}", t2_id);
+
+    let val = context
+        .client
+        .get(GetRequest {
+            transaction_id: t2_id.to_string(),
+            keyspace: Some(ProtoKeyspace {
+                namespace: context.keyspace.namespace.clone(),
+                name: context.keyspace.name.clone(),
+            }),
+            key: Bytes::from_static(&[0]).to_vec(),
+        })
+        .await
+        .unwrap();
+    info!("T2 read key=0, value={:?} (depends on T1)", val.get_ref().value);
+
+    context
+        .client
+        .put(PutRequest {
+            transaction_id: t2_id.to_string(),
+            keyspace: Some(ProtoKeyspace {
+                namespace: context.keyspace.namespace.clone(),
+                name: context.keyspace.name.clone(),
+            }),
+            key: Bytes::from_static(&[1]).to_vec(),
+            value: Bytes::from_static(&[200]).to_vec(),
+        })
+        .await
+        .unwrap();
+    info!("T2 wrote key=1, value=200");
+
+    let commit_result = context
+        .client
+        .commit(CommitRequest {
+            transaction_id: t2_id.to_string(),
+        })
+        .await;
+
+    info!("T2 commit result: {:?}", commit_result);
+    assert!(commit_result.is_ok(), "T2 should commit successfully");
+    info!("T2 committed successfully");
+
+    info!("=== Cascading abort test PASSED ===");
+}
