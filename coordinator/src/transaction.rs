@@ -219,9 +219,21 @@ impl Transaction {
             }
             rangeclient::client::Error::Timeout => Error::Timeout,
             rangeclient::client::Error::RangeOwnershipLost => {
-                Error::InternalError(Arc::new(err))
+                // Convert to string to create a std::error::Error implementation
+                let err_msg = format!("Range ownership lost: {:?}", err);
+                Error::InternalError(Arc::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    err_msg,
+                )))
             }
-            _ => Error::InternalError(Arc::new(err)),
+            _ => {
+                // Convert to string to create a std::error::Error implementation
+                let err_msg = format!("Rangeclient error: {:?}", err);
+                Error::InternalError(Arc::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    err_msg,
+                )))
+            }
         }
     }
 
