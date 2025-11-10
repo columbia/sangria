@@ -3,7 +3,7 @@ use proto::resolver::resolver_server::{
     Resolver as ProtoResolver, ResolverServer as ProtoResolverServer,
 };
 use proto::resolver::{
-    CommitRequest, CommitResponse, GetAverageWaitingTransactionsRequest,
+    AbortRequest, AbortResponse, CommitRequest, CommitResponse, GetAverageWaitingTransactionsRequest,
     GetAverageWaitingTransactionsResponse, GetGroupCommitStatusRequest,
     GetGroupCommitStatusResponse, GetNumWaitingTransactionsRequest,
     GetNumWaitingTransactionsResponse, GetResolvedTransactionsStatusRequest,
@@ -57,6 +57,23 @@ impl ProtoResolver for ProtoServer {
 
         Ok(Response::new(CommitResponse {
             status: "Commit ok".to_string(),
+        }))
+    }
+
+    #[instrument(skip(self))]
+    async fn abort(
+        &self,
+        request: Request<AbortRequest>,
+    ) -> Result<Response<AbortResponse>, TStatus> {
+        info!("Got abort request: {:?}", request);
+        let request = request.into_inner();
+        let transaction_id = Uuid::from_str(&request.transaction_id).unwrap();
+
+        let resolver_server = self.resolver_server.clone();
+        let _ = Resolver::abort(resolver_server.resolver.clone(), transaction_id).await;
+
+        Ok(Response::new(AbortResponse {
+            status: "Abort ok".to_string(),
         }))
     }
 

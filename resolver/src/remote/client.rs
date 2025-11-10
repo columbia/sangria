@@ -139,9 +139,14 @@ impl ResolverClientTrait for ResolverClient {
 
     async fn abort(
         &self,
-        _transaction_id: Uuid,
+        transaction_id: Uuid,
     ) -> Result<(), Error> {
-        // TODO: Implement remote abort RPC when proto is updated
-        unimplemented!("Remote abort not yet implemented - use local resolver")
+        let request = proto::resolver::AbortRequest {
+            transaction_id: transaction_id.to_string(),
+        };
+        let mut client = self.client.clone();
+        let response = client.abort(request).await.unwrap();
+        assert!(response.into_inner().status == "Abort ok".to_string());
+        Ok(())
     }
 }
