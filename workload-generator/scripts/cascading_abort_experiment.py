@@ -4,6 +4,8 @@ Experiment to measure throughput under varying abort rates.
 Tests abort rates from 5% to 50% in increments of 5%.
 """
 
+import psutil
+from math import prod
 import subprocess
 from pathlib import Path
 import ray
@@ -66,14 +68,15 @@ def abort_rate_experiment(ray_logs_dir):
     }
 
     reporter = tune.CLIReporter(
-        metric_columns=["throughput", "committed_throughput", "abort_rate", "cascading_aborts"],
+        metric_columns=["throughput"],
         parameter_columns=[
             "baseline",
             "abort_rate",
             "num_keys",
             "max_concurrency",
-            "zipf_exponent",
+            "iteration",
         ],
+        max_report_frequency=20,
     )
 
     print(f"\\nStarting cascading abort experiment: {experiment_name}")
@@ -81,47 +84,31 @@ def abort_rate_experiment(ray_logs_dir):
     print(f"Abort rates: {ABORT_RATES}")
     print()
 
-    fixed_params = {
-        "num_queries": NUM_QUERIES[0],
-        "num_keys": NUM_KEYS[0],
-        "max_concurrency": MAX_CONCURRENCY[0],
-        "zipf_exponent": ZIPFIAN_CONSTANT[0],
-    }
-    free_params = "abort_rate"
-
-    tuner = tune.Tuner(
-        run_workload,
-        param_space=config,
-        tune_config=tune.TuneConfig(
-            search_alg=GridSearcherInOrder(
-                metric="throughput", mode="max", fixed_params=fixed_params, free_params=free_params
-            ),
-            num_samples=NUM_ITERATIONS,
-            scheduler=FIFOScheduler(),
+    analysis = tune.run(
+        tune.with_parameters(run_workload),
+        config={},
+        num_samples=prod([len(v) for v in list(config.values())]) * NUM_ITERATIONS,
+        resources_per_trial={"cpu": psutil.cpu_count()},
+        storage_path=ray_logs_dir,
+        name=experiment_name,
+        search_alg=GridSearcherInOrder(
+            atomix_setup, NUM_ITERATIONS, config, experiment_name, ray_logs_dir
         ),
-        run_config=ray.train.RunConfig(
-            storage_path=str(ray_logs_dir),
-            name=experiment_name,
-            progress_reporter=reporter,
-            verbose=1,
-        ),
+        reuse_actors=True,
+        max_concurrent_trials=1,
+        scheduler=FIFOScheduler(),
+        verbose=1,
+        progress_reporter=reporter,
     )
 
-    results = tuner.fit()
     print(f"\\nExperiment completed: {experiment_name}")
-    print(f"Results saved to: {ray_logs_dir / experiment_name}")
+    print(f"Results saved to: {ray_logs_dir}/{experiment_name}")
 
     # Print summary
-    df = results.get_dataframe()
+    df = analysis.dataframe()
     if not df.empty:
         print("\\n=== SUMMARY ===")
-        print(df[[
-            "config/abort_rate",
-            "throughput",
-            "committed_throughput",
-            "total_transactions",
-            "aborted_transactions",
-        ]].groupby("config/abort_rate").mean())
+        print(df[["config/abort_rate", "throughput", "total_transactions"]].groupby("config/abort_rate").agg(['mean', 'std']))
 
 
 if __name__ == "__main__":
