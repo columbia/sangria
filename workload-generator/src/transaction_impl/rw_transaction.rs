@@ -130,8 +130,7 @@ impl Transaction for RwTransaction {
             .commit(CommitRequest {
                 transaction_id: transaction_id.to_string(),
             })
-            .await
-            .unwrap();
+            .await?;
         // info!(
         //     "Committed transaction with keys: {:?} tx id: {:?}",
         //     self.writeset, transaction_id_int
