@@ -148,12 +148,9 @@ impl Transaction for RwTransaction {
                     // When cascading abort is enabled, return error so we can track abort metrics
                     // When disabled, return Ok for backward compatibility
                     if self.enable_cascading_abort {
-                        use coordinator_rangeclient::error::{
-                            Error as CoordinatorError, TransactionAbortReason,
-                        };
-                        Err(FrontendError::CoordinatorError(
-                            CoordinatorError::TransactionAborted(TransactionAbortReason::Other),
-                        ))
+                        // Use a simple marker error to distinguish aborts from commits
+                        // The actual error type doesn't matter, just that it's an Err
+                        Err(FrontendError::TransactionNotFound)
                     } else {
                         Ok(())
                     }
