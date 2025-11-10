@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Experiment to measure throughput under varying abort rates.
-Tests abort rates from 5% to 50% in increments of 5%.
+Quick test with abort rates: 5%, 15%, 30%.
 """
 
 import psutil
@@ -21,12 +21,12 @@ from utils import *
 def abort_rate_experiment(ray_logs_dir):
     """
     Measure committed transactions per second under varying abort rates.
-    Abort rates: 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50
+    Quick test with abort rates: 0.05, 0.15, 0.30
     """
     BASELINES = [PIPELINED]  # Only test pipelined (cascading aborts only make sense with pipelined 2PC)
-    ABORT_RATES = [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50]
-    NUM_ITERATIONS = 3  # Run each configuration 3 times for statistical significance
-    NUM_QUERIES = [2500]
+    ABORT_RATES = [0.05, 0.15, 0.30]
+    NUM_ITERATIONS = 2  # Run each configuration 2 times
+    NUM_QUERIES = [100]
     NUM_KEYS = [50]
     MAX_CONCURRENCY = ["50"]  # High concurrency to create dependencies
     ZIPFIAN_CONSTANT = [0.9]  # High contention to create dependencies
