@@ -55,6 +55,7 @@ impl Resolver {
             state: RwLock::new(State {
                 info_per_transaction: HashMap::new(),
                 resolved_transactions: HashSet::new(),
+                committed_transactions: HashSet::new(),
             }),
             group_commit,
             waiting_transactions: RwLock::new(HashMap::new()),
