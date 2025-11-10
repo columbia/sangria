@@ -43,6 +43,26 @@ echo ""
 echo "=== Running workload with abort_rate=0.5 ==="
 echo ""
 
+# Function to wait for a port to be listening
+wait_for_port() {
+    local port=$1
+    local name=$2
+    local max_attempts=30
+    local attempt=0
+
+    echo "Waiting for $name (port $port) to start..."
+    while ! nc -z 127.0.0.1 $port 2>/dev/null; do
+        attempt=$((attempt + 1))
+        if [ $attempt -ge $max_attempts ]; then
+            echo "ERROR: $name failed to start after $max_attempts seconds"
+            return 1
+        fi
+        sleep 1
+    done
+    echo "$name is ready"
+    return 0
+}
+
 # Kill any existing servers
 pkill -f "target/release/frontend" || true
 pkill -f "target/release/rangeserver" || true
@@ -50,14 +70,24 @@ pkill -f "target/release/resolver" || true
 pkill -f "target/release/universe" || true
 sleep 2
 
-# Start servers in background
+# Start servers in correct order with proper wait logic
+echo "Starting universe..."
 RUST_LOG=info target/release/universe --config configs/config.json > /tmp/universe.log 2>&1 &
-RUST_LOG=info target/release/rangeserver --config configs/config.json > /tmp/rangeserver.log 2>&1 &
-RUST_LOG=info target/release/resolver --config configs/config.json > /tmp/resolver.log 2>&1 &
-RUST_LOG=info target/release/frontend --config configs/config.json > /tmp/frontend.log 2>&1 &
+wait_for_port 50056 "universe" || exit 1
 
-echo "Waiting for servers to start..."
-sleep 5
+echo "Starting resolver..."
+RUST_LOG=info target/release/resolver --config configs/config.json > /tmp/resolver.log 2>&1 &
+wait_for_port 50059 "resolver" || exit 1
+
+echo "Starting rangeserver..."
+RUST_LOG=info target/release/rangeserver --config configs/config.json > /tmp/rangeserver.log 2>&1 &
+wait_for_port 50054 "rangeserver" || exit 1
+
+echo "Starting frontend..."
+RUST_LOG=info target/release/frontend --config configs/config.json > /tmp/frontend.log 2>&1 &
+wait_for_port 50057 "frontend" || exit 1
+
+echo "All servers started successfully!"
 
 # Run workload
 echo ""
