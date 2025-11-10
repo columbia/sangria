@@ -37,7 +37,8 @@ impl TransactionInfo {
 #[derive(Default)]
 pub struct State {
     info_per_transaction: HashMap<Uuid, TransactionInfo>,
-    resolved_transactions: HashSet<Uuid>,
+    resolved_transactions: HashSet<Uuid>,  // Both commits AND aborts are resolved
+    committed_transactions: HashSet<Uuid>,  // Only successful commits
 }
 
 pub struct Resolver {
@@ -204,6 +205,7 @@ impl Resolver {
             // TODO: When is it ok to remove transactions from resolved_transactions?
             for transaction_id in transaction_ids {
                 state.resolved_transactions.insert(transaction_id);
+                state.committed_transactions.insert(transaction_id);  // Mark as successfully committed
                 new_resolved_dependencies.push(transaction_id);
             }
 

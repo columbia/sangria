@@ -4,5 +4,6 @@ use strum::Display;
 pub enum TransactionAbortReason {
     WaitDie,
     TransactionLockLost,
+    ArtificialAbort,  // For testing cascading aborts
     Other,
 }

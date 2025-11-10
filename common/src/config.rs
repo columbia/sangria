@@ -138,6 +138,8 @@ pub struct RangeServerConfig {
     pub fast_network_addr: HostPort,
     pub fast_network_polling_core_id: u32,
     pub background_runtime_core_ids: Vec<u32>,
+    #[serde(default)]
+    pub artificial_abort_rate: f64,  // 0.0 to 1.0 - probability of injecting abort in prepare
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

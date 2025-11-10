@@ -11,6 +11,8 @@ pub enum TransactionAbortReason {
     RangePartitioningChanged,
     TransactionTimeout,
     PrepareFailed,
+    ArtificialAbort,  // For testing cascading aborts
+    DependencyAborted,  // Transaction aborted because a dependency aborted
     Other,
 }
 

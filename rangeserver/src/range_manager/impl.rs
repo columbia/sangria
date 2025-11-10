@@ -29,6 +29,8 @@ use tracing::info;
 
 struct PrepareRecord {
     changes: HashMap<Bytes, Option<Bytes>>, // key to change -> new value
+    previous_value: HashMap<Bytes, Option<Bytes>>, // key -> the value BEFORE this tx wrote
+    previous_writer: HashMap<Bytes, Option<Uuid>>, // key -> the tx that wrote previous_value
 }
 
 struct PendingState {
@@ -284,9 +286,12 @@ where
                 // Sanity check that the written keys are all within this range. Build the prepare record while you are at it.
                 // TODO: check delete and write sets are non-overlapping.
                 let prepare_record: Arc<PrepareRecord> = {
-                    let mut prepare_record = PrepareRecord {
-                        changes: HashMap::new(),
-                    };
+                    let mut changes = HashMap::new();
+                    let mut previous_value = HashMap::new();
+                    let mut previous_writer = HashMap::new();
+
+                    // First pass: Collect all keys and validate they're in range
+                    let mut all_keys = Vec::new();
                     for put in prepare.puts().iter() {
                         for put in put.iter() {
                             // TODO: too much copying :(
@@ -296,7 +301,8 @@ where
                                 return Err(Error::KeyIsOutOfRange);
                             }
                             let val = Bytes::copy_from_slice(put.value().unwrap().bytes());
-                            prepare_record.changes.insert(key, Some(val));
+                            changes.insert(key.clone(), Some(val));
+                            all_keys.push(key);
                         }
                     }
                     for del in prepare.deletes().iter() {
@@ -305,10 +311,43 @@ where
                             if !state.range_info.key_range.includes(key.clone()) {
                                 return Err(Error::KeyIsOutOfRange);
                             }
-                            prepare_record.changes.insert(key, None);
+                            changes.insert(key.clone(), None);
+                            all_keys.push(key);
                         }
                     }
-                    Arc::new(prepare_record)
+
+                    // Second pass: Capture previous state for rollback
+                    // Read pending_state to see who owns each key and what value existed
+                    let pending_state = state.pending_state.read().await;
+                    for key in all_keys {
+                        // Capture WHO currently has this key in pending_commit_table
+                        let prev_writer = pending_state.pending_commit_table.get(&key).cloned();
+                        previous_writer.insert(key.clone(), prev_writer);
+
+                        // Capture WHAT VALUE existed before
+                        let prev_value = if let Some(prev_tx_id) = prev_writer {
+                            // Read from previous transaction's PrepareRecord
+                            pending_state
+                                .pending_prepare_records
+                                .get(&prev_tx_id)
+                                .and_then(|record| record.changes.get(&key).cloned())
+                                .flatten()
+                        } else {
+                            // No pending writer, read from storage
+                            self.storage
+                                .get(self.range_id, key.clone())
+                                .await
+                                .map_err(Error::from_storage_error)?
+                        };
+                        previous_value.insert(key.clone(), prev_value);
+                    }
+                    drop(pending_state);
+
+                    Arc::new(PrepareRecord {
+                        changes,
+                        previous_value,
+                        previous_writer,
+                    })
                 };
                 // Validate the transaction lock is not lost, this is essential to ensure 2PL
                 // invariants still hold.
@@ -429,6 +468,24 @@ where
 
                 // 7) Wait for the prepare record to be flushed to the database
                 receiver.await.unwrap().unwrap();
+
+                // 8) Inject artificial abort for testing cascading aborts
+                // At this point, the transaction is fully visible to others:
+                // - PrepareRecord is saved, WAL is flushed, pending_commit_table is updated
+                // - Other transactions can already see and depend on this transaction
+                if self.config.artificial_abort_rate > 0.0 {
+                    use rand::Rng;
+                    let mut rng = rand::thread_rng();
+                    if rng.gen::<f64>() < self.config.artificial_abort_rate {
+                        info!(
+                            "Artificially aborting transaction {:?} (abort_rate={:.2})",
+                            tx.id, self.config.artificial_abort_rate
+                        );
+                        return Err(Error::TransactionAborted(
+                            TransactionAbortReason::ArtificialAbort,
+                        ));
+                    }
+                }
 
                 // let highest_known_epoch = state.highest_known_epoch.read().await;
                 Ok(PrepareResult {
