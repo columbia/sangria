@@ -3,6 +3,7 @@ package resolver;
 
 service Resolver {
     rpc Commit(CommitRequest) returns (CommitResponse) {}
+    rpc Abort(AbortRequest) returns (AbortResponse) {}
     rpc RegisterCommittedTransactions(RegisterCommittedTransactionsRequest) returns (RegisterCommittedTransactionsResponse) {}
     rpc GetStats(GetStatsRequest) returns (GetStatsResponse) {}
     rpc GetTransactionInfoStatus(GetTransactionInfoStatusRequest) returns (GetTransactionInfoStatusResponse) {}
@@ -39,6 +40,14 @@ message CommitRequest {
 }
 
 message CommitResponse {
+    string status = 1;
+}
+
+message AbortRequest {
+    string transaction_id = 1;
+}
+
+message AbortResponse {
     string status = 1;
 }
 
