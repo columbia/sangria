@@ -309,7 +309,17 @@ impl Transaction {
                 }
                 Ok(res) => res,
             };
-            let res = res.map_err(Self::error_from_rangeclient_error)?;
+            let res = match res.map_err(Self::error_from_rangeclient_error) {
+                Err(err) => {
+                    let _ = self.record_abort().await;
+                    // Notify resolver about the abort (for cascading aborts)
+                    if self.commit_strategy != CommitStrategy::Traditional {
+                        let _ = self.resolver.abort(self.id).await;
+                    }
+                    return Err(err);
+                }
+                Ok(res) => res,
+            };
             // Update transaction's dependencies with those returned by the Prepare in each range.
             self.dependencies.extend(res.dependencies);
             if res.released_lock_early {
