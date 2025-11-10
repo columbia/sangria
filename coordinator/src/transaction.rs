@@ -214,8 +214,23 @@ impl Transaction {
 
     fn error_from_rangeclient_error(err: rangeclient::client::Error) -> Error {
         match err {
-            rangeclient::client::Error::TransactionAborted(reason) => {
-                Error::TransactionAborted(reason)
+            rangeclient::client::Error::TransactionAborted(rs_reason) => {
+                // Convert rangeserver::TransactionAbortReason to coordinator_rangeclient::TransactionAbortReason
+                let coord_reason = match rs_reason {
+                    rangeserver::transaction_abort_reason::TransactionAbortReason::WaitDie => {
+                        TransactionAbortReason::DeadlockPrevention
+                    }
+                    rangeserver::transaction_abort_reason::TransactionAbortReason::TransactionLockLost => {
+                        TransactionAbortReason::TransactionLockLost
+                    }
+                    rangeserver::transaction_abort_reason::TransactionAbortReason::ArtificialAbort => {
+                        TransactionAbortReason::ArtificialAbort
+                    }
+                    rangeserver::transaction_abort_reason::TransactionAbortReason::Other => {
+                        TransactionAbortReason::Other
+                    }
+                };
+                Error::TransactionAborted(coord_reason)
             }
             rangeclient::client::Error::Timeout => Error::Timeout,
             rangeclient::client::Error::RangeOwnershipLost => {
