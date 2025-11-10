@@ -337,18 +337,12 @@ impl Resolver {
                 }
             }
 
-            // For each dependent, decrement their pending count and check if they should abort
-            let mut new_aborts = Vec::new();
+            // For each dependent, decrement their pending count
+            // Note: Cascading abort already happened in abort(), so dependents are already marked
             for dependent_id in new_ready_to_check {
                 if let Some(dependent_info) = state.info_per_transaction.get_mut(&dependent_id) {
                     if dependent_info.num_dependencies > 0 {
                         dependent_info.num_dependencies -= 1;
-
-                        if dependent_info.num_dependencies == 0 {
-                            // All dependencies resolved - but were they committed?
-                            // We need to check if this dependent should also abort
-                            // For now, we've already cascaded the abort in abort(), so this is handled
-                        }
                     }
                 }
             }
