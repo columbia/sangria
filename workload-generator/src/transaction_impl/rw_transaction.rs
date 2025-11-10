@@ -130,7 +130,8 @@ impl Transaction for RwTransaction {
             .commit(CommitRequest {
                 transaction_id: transaction_id.to_string(),
             })
-            .await?;
+            .await
+            .map_err(|e| FrontendError::TonicError(e))?;
         // info!(
         //     "Committed transaction with keys: {:?} tx id: {:?}",
         //     self.writeset, transaction_id_int
