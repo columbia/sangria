@@ -20,6 +20,7 @@ pub struct RwTransaction {
     keyspace: Keyspace,
     readset: Vec<usize>,
     writeset: Option<Vec<usize>>,
+    enable_cascading_abort: bool,
 }
 
 impl RwTransaction {
@@ -28,12 +29,14 @@ impl RwTransaction {
         keyspace: Keyspace,
         readset: Vec<usize>,
         writeset: Option<Vec<usize>>,
+        enable_cascading_abort: bool,
     ) -> Arc<Self> {
         Arc::new(Self {
             client,
             keyspace,
             readset,
             writeset,
+            enable_cascading_abort,
         })
     }
 }
@@ -136,26 +139,30 @@ impl Transaction for RwTransaction {
         match commit_result {
             Ok(_) => {
                 // Successful commit
+                Ok(())
             }
             Err(status) => {
                 // Check if this is a transaction abort (expected behavior)
                 if status.message().contains("TransactionAborted") {
                     // Transaction was aborted (either artificially or cascading)
-                    // This is expected behavior, not an error
-                    // info!("Transaction aborted: {:?}", status.message());
+                    // When cascading abort is enabled, return error so we can track abort metrics
+                    // When disabled, return Ok for backward compatibility
+                    if self.enable_cascading_abort {
+                        use coordinator_rangeclient::error::{
+                            Error as CoordinatorError, TransactionAbortReason,
+                        };
+                        Err(FrontendError::CoordinatorError(
+                            CoordinatorError::TransactionAborted(TransactionAbortReason::Other),
+                        ))
+                    } else {
+                        Ok(())
+                    }
                 } else {
                     // Unexpected error - panic since we can't handle it
                     panic!("Unexpected commit error: {:?}", status);
                 }
             }
         }
-        // info!(
-        //     "Committed transaction with keys: {:?} tx id: {:?}",
-        //     self.writeset, transaction_id_int
-        // );
-        // let duration = start_time.elapsed();
-        // info!("RW transaction took {} microseconds", duration.as_micros());
-        Ok(())
     }
 
     // async fn execute(

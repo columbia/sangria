@@ -92,10 +92,9 @@ def run_workload(config):
     del config["resolver_cores"]
     del config["resolver_tx_load"]
     del config["resolver_tx_load_concurrency"]
-    if "enable_cascading_abort" in config:
-        del config["enable_cascading_abort"]
+    # Keep enable_cascading_abort - workload generator needs it to track abort metrics
     if "artificial_abort_rate" in config:
-        del config["artificial_abort_rate"]
+        del config["artificial_abort_rate"]  # Only needed by servers, not workload generator
 
     # Main workload generator -- used to collect performance metrics
     cmd1 = [

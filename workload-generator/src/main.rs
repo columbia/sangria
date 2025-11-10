@@ -126,22 +126,30 @@ fn main() {
     println!(
         "METRICS_START\n\
         Throughput: {:.2} transactions/second\n\
+        Commit Throughput: {:.2} transactions/second\n\
+        Total Transactions: {}\n\
+        Committed Transactions: {}\n\
+        Aborted Transactions: {}\n\
+        Abort Rate: {:.2}%\n\
         Average Latency: {:?}\n\
         P50 Latency: {:?}\n\
         P95 Latency: {:?}\n\
         P99 Latency: {:?}\n\
         Total Duration: {:?}\n\
-        Total Transactions: {}\n\
         Resolver stats: {:?}\n\
         Range server stats: {:?}\n\
         METRICS_END",
         metrics.throughput,
+        metrics.commit_throughput,
+        metrics.total_transactions,
+        metrics.committed_transactions,
+        metrics.aborted_transactions,
+        metrics.abort_rate,
         metrics.avg_latency,
         metrics.p50_latency,
         metrics.p95_latency,
         metrics.p99_latency,
         metrics.total_duration,
-        metrics.total_transactions,
         metrics.resolver_stats,
         metrics.range_server_stats,
     )

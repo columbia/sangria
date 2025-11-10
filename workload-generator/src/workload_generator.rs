@@ -38,11 +38,15 @@ use tokio::signal::unix::{signal, SignalKind};
 pub struct Metrics {
     pub total_duration: Duration,
     pub total_transactions: usize,
+    pub committed_transactions: usize,
+    pub aborted_transactions: usize,
     pub avg_latency: Duration,
     pub p50_latency: Duration,
     pub p95_latency: Duration,
     pub p99_latency: Duration,
     pub throughput: f64,
+    pub commit_throughput: f64,
+    pub abort_rate: f64,
     pub resolver_stats: HashMap<String, f64>,
     pub range_server_stats: HashMap<String, HashMap<String, Vec<String>>>,
 }
@@ -53,6 +57,8 @@ struct InternalMetrics {
     latencies: Vec<Duration>,
     start_time: Option<Instant>,
     completed_transactions: usize,
+    committed_transactions: usize,
+    aborted_transactions: usize,
 }
 
 pub struct WorkloadGenerator {
@@ -219,7 +225,13 @@ impl WorkloadGenerator {
                 )
                 .await
             }
-            false => RwTransaction::new(self.client.clone(), keyspace, keys.clone(), Some(keys)),
+            false => RwTransaction::new(
+                self.client.clone(),
+                keyspace,
+                keys.clone(),
+                Some(keys),
+                self.workload_config.enable_cascading_abort,
+            ),
         };
         transaction
     }
@@ -324,6 +336,11 @@ impl WorkloadGenerator {
                                         let mut metrics = metrics.lock().await;
                                         metrics.latencies.push(latency);
                                         metrics.completed_transactions += 1;
+                                        // Track commits vs aborts separately
+                                        match &result {
+                                            Ok(_) => metrics.committed_transactions += 1,
+                                            Err(_) => metrics.aborted_transactions += 1,
+                                        }
                                         drop(permit);
                                         result
                                     });
@@ -367,11 +384,19 @@ impl WorkloadGenerator {
         let metrics = self.metrics.lock().await;
         let total_duration = metrics.start_time.unwrap().elapsed();
         let total_transactions = metrics.completed_transactions;
+        let committed_transactions = metrics.committed_transactions;
+        let aborted_transactions = metrics.aborted_transactions;
 
         // Calculate statistics
         let avg_latency: Duration =
             metrics.latencies.iter().sum::<Duration>() / metrics.latencies.len() as u32;
         let throughput = total_transactions as f64 / total_duration.as_secs_f64();
+        let commit_throughput = committed_transactions as f64 / total_duration.as_secs_f64();
+        let abort_rate = if total_transactions > 0 {
+            (aborted_transactions as f64 / total_transactions as f64) * 100.0
+        } else {
+            0.0
+        };
 
         // Sort latencies for percentile calculation
         let mut sorted_latencies = metrics.latencies.clone();
@@ -381,13 +406,17 @@ impl WorkloadGenerator {
         let p50_latency = sorted_latencies[(sorted_latencies.len() as f64 * 0.50) as usize];
 
         info!("Workload Complete - Performance Metrics:");
-        info!("Throughput: {:.2} transactions/second", throughput);
+        info!("Total Throughput: {:.2} transactions/second", throughput);
+        info!("Commit Throughput: {:.2} transactions/second", commit_throughput);
+        info!("Total Transactions: {}", total_transactions);
+        info!("Committed Transactions: {}", committed_transactions);
+        info!("Aborted Transactions: {}", aborted_transactions);
+        info!("Abort Rate: {:.2}%", abort_rate);
         info!("Average Latency: {:?}", avg_latency);
         info!("P50 Latency: {:?}", p50_latency);
         info!("P95 Latency: {:?}", p95_latency);
         info!("P99 Latency: {:?}", p99_latency);
         info!("Total Duration: {:?}", total_duration);
-        info!("Total Transactions: {}", total_transactions);
 
         let mut resolver_client_clone = self.resolver_client.clone();
         let response = resolver_client_clone
@@ -440,11 +469,15 @@ impl WorkloadGenerator {
         Metrics {
             total_duration,
             total_transactions,
+            committed_transactions,
+            aborted_transactions,
             avg_latency,
             p50_latency,
             p95_latency,
             p99_latency,
             throughput,
+            commit_throughput,
+            abort_rate,
             resolver_stats: stats_map,
             range_server_stats,
         }

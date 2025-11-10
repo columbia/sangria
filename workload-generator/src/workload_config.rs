@@ -20,4 +20,6 @@ pub struct WorkloadConfig {
     pub fake_transactions: bool,
     #[serde(rename = "workload_type")]
     pub workload_type: String,
+    #[serde(rename = "enable_cascading_abort", default)]
+    pub enable_cascading_abort: bool,
 }
