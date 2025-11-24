@@ -104,6 +104,8 @@ def run_workload(config):
             atomix_setup.servers_config["heuristic"] = "LockContention"
         else:
             atomix_setup.servers_config["heuristic"] = "OpenClients"
+        # Set commit strategy from baseline (Traditional, Pipelined, or Adaptive)
+        atomix_setup.servers_config["commit_strategy"] = baseline
         atomix_setup.servers_config["resolver"][
             "cpu_percentage"
         ] = resolver_cpu_percentage

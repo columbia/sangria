@@ -265,14 +265,14 @@ def traditional_abort_experiment(ray_logs_dir):
     locks are held until commit. So abort_rate should map ~1:1 to failure rate.
 
     Expected results:
-    - 5% abort rate  -> ~95% commit rate (no amplification)
-    - 15% abort rate -> ~85% commit rate
+    - 10% abort rate  -> ~90% commit rate (no amplification)
+    - 20% abort rate -> ~80% commit rate
     - 30% abort rate -> ~70% commit rate
     """
     BASELINES = [TRADITIONAL]
-    ABORT_RATES = [0.0, 0.05, 0.15, 0.30]
+    ABORT_RATES = [0.0, 0.10, 0.20, 0.30]
     NUM_ITERATIONS = 3
-    NUM_QUERIES = [3000]
+    NUM_QUERIES = [2500]
     NUM_KEYS = [50]
     MAX_CONCURRENCY = ["50"]
     ZIPFIAN_CONSTANT = [0.9]

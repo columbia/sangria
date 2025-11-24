@@ -41,7 +41,7 @@ print("Summary saved to traditional_abort_summary.csv")
 
 # Create figure with subplots
 fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-fig.suptitle('Traditional 2PC Abort Experiment Results\n(3000 queries, 50 keys, zipf=0.9)',
+fig.suptitle('Traditional 2PC Abort Experiment Results\n(2500 queries, 50 keys, zipf=0.9)',
              fontsize=14, fontweight='bold')
 
 # Plot 1: Committed Transaction Throughput
