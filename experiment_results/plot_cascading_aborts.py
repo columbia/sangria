@@ -85,7 +85,7 @@ abort_rates_pct = [rate * 100 for rate in abort_rates]
 
 # Create figure with multiple subplots
 fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-fig.suptitle('Cascading Abort Experiment Results\n(Pipelined 2PC, 100 queries, 50 keys, zipf=0.9)',
+fig.suptitle('Cascading Abort Experiment Results\n(Pipelined 2PC, 2500 queries, 50 keys, zipf=0.9)',
              fontsize=14, fontweight='bold')
 
 # Plot 1: Throughput vs Abort Rate with error bars
@@ -139,15 +139,17 @@ ax3.set_xticks(abort_rates_pct)
 ax3.legend()
 
 # Plot 4: Throughput degradation percentage
-baseline_throughput = mean_throughputs[0]  # 5% abort rate as baseline
+baseline_throughput = mean_throughputs[0]  # 0% abort rate as baseline
 degradation_pct = [(baseline_throughput - tp) / baseline_throughput * 100
                    for tp in mean_throughputs]
 
 ax4 = axes[1, 1]
-bars = ax4.bar(abort_rates_pct, degradation_pct, color=['#2E86AB', '#A23B72', '#F18F01'])
+bars = ax4.bar(abort_rates_pct, degradation_pct,
+               color=['green' if x <= 0 else 'purple' for x in degradation_pct],
+               alpha=0.7, edgecolor='black', linewidth=1.5)
 ax4.set_xlabel('Abort Rate (%)', fontsize=11, fontweight='bold')
 ax4.set_ylabel('Throughput Degradation (%)', fontsize=11, fontweight='bold')
-ax4.set_title('Throughput Degradation from Baseline (5%)', fontsize=12, fontweight='bold')
+ax4.set_title('Throughput Degradation from Baseline (0%)', fontsize=12, fontweight='bold')
 ax4.grid(True, alpha=0.3, axis='y')
 ax4.set_xticks(abort_rates_pct)
 
@@ -176,15 +178,15 @@ print("\n" + "="*70)
 print("CASCADING ABORT EXPERIMENT SUMMARY")
 print("="*70)
 print(f"\nExperiment: Pipelined 2PC with varying abort rates")
-print(f"Workload: 100 queries, 50 keys, max_concurrency=50, zipf=0.9")
-print(f"Iterations per configuration: 2")
+print(f"Workload: 2500 queries, 50 keys, max_concurrency=50, zipf=0.9")
+print(f"Iterations per configuration: 3")
 print("\n" + "-"*70)
 print(f"{'Abort Rate':<15} {'Mean Throughput':<20} {'Std Dev':<15} {'Mean Txns':<15}")
 print("-"*70)
 for abort_rate, mean_tp, std_tp, mean_txn in zip(abort_rates, mean_throughputs, std_throughputs, mean_total_txns):
     print(f"{abort_rate*100:>6.0f}%         {mean_tp:>10.2f} txn/s      {std_tp:>10.2f}      {mean_txn:>10.1f}")
 print("-"*70)
-print(f"\nThroughput degradation from 5% baseline:")
+print(f"\nThroughput degradation from 0% baseline:")
 for abort_rate, deg in zip(abort_rates[1:], degradation_pct[1:]):
     print(f"  {abort_rate*100:.0f}% abort rate: {deg:.1f}% degradation")
 print("="*70)

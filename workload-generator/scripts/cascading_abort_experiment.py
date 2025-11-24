@@ -20,13 +20,14 @@ from utils import *
 
 def abort_rate_experiment(ray_logs_dir):
     """
-    Measure committed transactions per second under varying abort rates.
-    Quick test with abort rates: 0.05, 0.15, 0.30
+    Measure committed transactions per second (goodput) under varying abort rates.
+    Test abort rates: 0%, 10%, 20%, 30%
+    Matches Traditional 2PC experiment parameters for direct comparison.
     """
     BASELINES = [PIPELINED]  # Only test pipelined (cascading aborts only make sense with pipelined 2PC)
-    ABORT_RATES = [0.05, 0.15, 0.30]
-    NUM_ITERATIONS = 2  # Run each configuration 2 times
-    NUM_QUERIES = [100]
+    ABORT_RATES = [0.0, 0.10, 0.20, 0.30]
+    NUM_ITERATIONS = 3  # Run each configuration 3 times to match traditional experiment
+    NUM_QUERIES = [2500]
     NUM_KEYS = [50]
     MAX_CONCURRENCY = ["50"]  # High concurrency to create dependencies
     ZIPFIAN_CONSTANT = [0.9]  # High contention to create dependencies
