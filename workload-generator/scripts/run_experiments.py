@@ -256,6 +256,90 @@ def ycsb_experiment(ray_logs_dir):
     )
 
 
+def traditional_abort_experiment(ray_logs_dir):
+    """
+    Experiment to measure goodput (committed transactions/sec) under varying
+    artificial abort rates for Traditional 2PC.
+
+    Unlike Pipelined 2PC, Traditional 2PC does NOT have cascading aborts because
+    locks are held until commit. So abort_rate should map ~1:1 to failure rate.
+
+    Expected results:
+    - 5% abort rate  -> ~95% commit rate (no amplification)
+    - 15% abort rate -> ~85% commit rate
+    - 30% abort rate -> ~70% commit rate
+    """
+    BASELINES = [TRADITIONAL]
+    ABORT_RATES = [0.0, 0.05, 0.15, 0.30]
+    NUM_ITERATIONS = 2
+    NUM_QUERIES = [100]
+    NUM_KEYS = [50]
+    MAX_CONCURRENCY = ["50"]
+    ZIPFIAN_CONSTANT = [0.9]
+    WORKLOAD_TYPE = ["custom"]
+
+    RESOLVER_TX_LOAD = [{
+        "max_concurrency": "0",
+        "num_queries": None,
+        "num_keys": 100,
+        "background_runtime_core_ids": [2, 3],
+    }]
+
+    RESOLVER_CAPACITY = [{
+        "cpu_percentage": 1,
+        "background_runtime_core_ids": [1],
+    }]
+
+    namespace, name = generate_slug(2).split("-")
+    experiment_name = f"traditional_abort_{namespace}_{name}"
+
+    config = {
+        "baseline": BASELINES,
+        "abort_rate": ABORT_RATES,
+        "num_keys": NUM_KEYS,
+        "max_concurrency": MAX_CONCURRENCY,
+        "resolver_capacity": RESOLVER_CAPACITY,
+        "resolver_tx_load": RESOLVER_TX_LOAD,
+        "num_queries": NUM_QUERIES,
+        "zipf_exponent": ZIPFIAN_CONSTANT,
+        "namespace": [namespace],
+        "name": [name],
+        "background_runtime_core_ids": [list(range(3, 32))],
+        "workload_type": WORKLOAD_TYPE,
+    }
+
+    reporter = tune.CLIReporter(
+        metric_columns=["throughput", "total_transactions"],
+        parameter_columns=["baseline", "abort_rate", "num_keys", "max_concurrency", "iteration"],
+        max_report_frequency=20,
+    )
+
+    analysis = tune.run(
+        tune.with_parameters(run_workload),
+        config={},
+        num_samples=prod([len(v) for v in list(config.values())]) * NUM_ITERATIONS,
+        resources_per_trial={"cpu": psutil.cpu_count()},
+        storage_path=ray_logs_dir,
+        name=experiment_name,
+        search_alg=GridSearcherInOrder(
+            atomix_setup, NUM_ITERATIONS, config, experiment_name, ray_logs_dir
+        ),
+        reuse_actors=True,
+        max_concurrent_trials=1,
+        scheduler=FIFOScheduler(),
+        verbose=1,
+        progress_reporter=reporter,
+    )
+
+    df = analysis.results_df
+    if not df.empty:
+        print("\n" + "="*70)
+        print("TRADITIONAL 2PC ABORT EXPERIMENT RESULTS")
+        print("="*70)
+        print(df[["config/abort_rate", "throughput", "total_transactions"]].to_string())
+        df.to_csv(ray_logs_dir / experiment_name / "traditional_abort_results.csv")
+
+
 def run_experiment(
     BASELINES,
     RESOLVER_TX_LOAD,
@@ -357,7 +441,8 @@ def main():
     # runtime_variations_contention_experiment(ray_logs_dir)
     # runtime_variations_resolver_capacity_experiment(ray_logs_dir)
     # mixed_workload_experiment(ray_logs_dir)
-    ycsb_experiment(ray_logs_dir)
+    # ycsb_experiment(ray_logs_dir)
+    traditional_abort_experiment(ray_logs_dir)
     ray.shutdown()
 
 
