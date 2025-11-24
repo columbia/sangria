@@ -449,12 +449,12 @@ def main():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Atomix experiments.")
     parser.add_argument(
-        "--build",
+        "--no-build",
         action="store_true",
-        default=True,
-        help="Build Atomix servers before running experiments.",
+        default=False,
+        help="Skip building Atomix servers (use if already built).",
     )
     args = parser.parse_args()
 
-    BUILD_ATOMIX = args.build
+    BUILD_ATOMIX = not args.no_build
     main()
