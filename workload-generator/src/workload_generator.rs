@@ -323,7 +323,10 @@ impl WorkloadGenerator {
                                         // Record metrics
                                         let mut metrics = metrics.lock().await;
                                         metrics.latencies.push(latency);
-                                        metrics.completed_transactions += 1;
+                                        // Only count successfully committed transactions (goodput)
+                                        if result.is_ok() {
+                                            metrics.completed_transactions += 1;
+                                        }
                                         drop(permit);
                                         result
                                     });
