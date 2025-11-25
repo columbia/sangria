@@ -79,6 +79,7 @@ impl Resolver {
 
         let (s, r) = oneshot::channel();
         let mut num_pending_dependencies = 0;
+        let mut has_aborted_dependency = false;
 
         // Acquire the write lock and update the state with new dependencies
         info!("Updating dependencies for transaction {:?}", transaction_id);
@@ -95,12 +96,27 @@ impl Resolver {
                         .or_insert(TransactionInfo::default(dependency, fake))
                         .dependents
                         .insert(transaction_id);
+                } else if !state.committed_transactions.contains(&dependency) {
+                    // Dependency was resolved but NOT committed - it was aborted
+                    // This transaction must also abort
+                    info!(
+                        "Dependency {:?} was aborted, transaction {:?} must also abort",
+                        dependency, transaction_id
+                    );
+                    has_aborted_dependency = true;
+                    break;
                 } else {
                     info!(
-                        "Dependency {:?} was already resolved in the meantime",
+                        "Dependency {:?} was already committed in the meantime",
                         dependency
                     );
                 }
+            }
+
+            // If any dependency was aborted, abort this transaction immediately
+            if has_aborted_dependency {
+                drop(state);  // Release the lock before returning
+                return Err(Error::TransactionAborted(TransactionAbortReason::DependencyAborted));
             }
 
             let transaction_info = state
