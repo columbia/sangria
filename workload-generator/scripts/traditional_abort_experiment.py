@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Experiment to measure throughput under varying abort rates.
-Quick test with abort rates: 5%, 15%, 30%.
+Experiment to measure throughput under varying abort rates for Traditional 2PC.
 """
 
 import psutil
@@ -18,19 +17,19 @@ from grid_searcher import GridSearcherInOrder
 from atomix_setup import atomix_setup
 from utils import *
 
-def abort_rate_experiment(ray_logs_dir):
+def traditional_abort_experiment(ray_logs_dir):
     """
     Measure committed transactions per second (goodput) under varying abort rates.
     Test abort rates: 0%, 10%, 20%, 30%, 40%, 50%
-    Matches Traditional 2PC experiment parameters for direct comparison.
+    Uses Traditional 2PC (locks held until commit - no cascading aborts).
     """
-    BASELINES = [PIPELINED]  # Only test pipelined (cascading aborts only make sense with pipelined 2PC)
+    BASELINES = [TRADITIONAL]  # Traditional 2PC only
     ABORT_RATES = [0.0, 0.10, 0.20, 0.30, 0.40, 0.50]
-    NUM_ITERATIONS = 3  # Run each configuration 3 times to match traditional experiment
-    NUM_QUERIES = [2500]  # Match Traditional 2PC experiment
+    NUM_ITERATIONS = 3  # Run each configuration 3 times for statistical significance
+    NUM_QUERIES = [2500]
     NUM_KEYS = [50]
-    MAX_CONCURRENCY = ["50"]  # High concurrency to create dependencies
-    ZIPFIAN_CONSTANT = [0.9]  # High contention to create dependencies
+    MAX_CONCURRENCY = ["50"]  # High concurrency
+    ZIPFIAN_CONSTANT = [0.9]  # High contention
     WORKLOAD_TYPE = ["custom"]
 
     # No background resolver load for simplicity
@@ -51,11 +50,11 @@ def abort_rate_experiment(ray_logs_dir):
     ]
 
     namespace, name = generate_slug(2).split("-")
-    experiment_name = f"cascading_aborts_{namespace}_{name}"
+    experiment_name = f"traditional_aborts_{namespace}_{name}"
 
     config = {
         "baseline": BASELINES,
-        "abort_rate": ABORT_RATES,  # New parameter
+        "abort_rate": ABORT_RATES,
         "num_keys": NUM_KEYS,
         "max_concurrency": MAX_CONCURRENCY,
         "resolver_capacity": RESOLVER_CAPACITY,
@@ -80,7 +79,7 @@ def abort_rate_experiment(ray_logs_dir):
         max_report_frequency=20,
     )
 
-    print(f"\\nStarting cascading abort experiment: {experiment_name}")
+    print(f"\nStarting traditional abort experiment: {experiment_name}")
     print(f"Configurations to test: {len(ABORT_RATES)} abort rates x {NUM_ITERATIONS} iterations = {len(ABORT_RATES) * NUM_ITERATIONS} runs")
     print(f"Abort rates: {ABORT_RATES}")
     print()
@@ -102,18 +101,18 @@ def abort_rate_experiment(ray_logs_dir):
         progress_reporter=reporter,
     )
 
-    print(f"\\nExperiment completed: {experiment_name}")
+    print(f"\nExperiment completed: {experiment_name}")
     print(f"Results saved to: {ray_logs_dir}/{experiment_name}")
 
     # Print summary
     df = analysis.dataframe()
     if not df.empty:
-        print("\\n=== SUMMARY ===")
+        print("\n=== SUMMARY ===")
         print(df[["config/abort_rate", "throughput", "total_transactions"]].groupby("config/abort_rate").agg(['mean', 'std']))
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run cascading abort rate experiment")
+    parser = argparse.ArgumentParser(description="Run traditional 2PC abort rate experiment")
     parser.add_argument(
         "--ray-logs-dir",
         type=str,
@@ -134,6 +133,6 @@ if __name__ == "__main__":
     atomix_setup.dump_servers_config()
 
     # Run the experiment
-    abort_rate_experiment(ray_logs_dir)
+    traditional_abort_experiment(ray_logs_dir)
 
     ray.shutdown()
