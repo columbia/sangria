@@ -57,7 +57,7 @@ impl Transaction for RwTransaction {
                 }),
             })
             .await
-            .unwrap();
+            .map_err(|e| FrontendError::InternalError(Arc::new(e)))?;
         let transaction_id = Uuid::parse_str(&response.get_ref().transaction_id).unwrap();
         // let transaction_id_int = transaction_id.as_u128() as u64;
         // info!("Started transaction with ID: {:?}", transaction_id);
@@ -76,7 +76,7 @@ impl Transaction for RwTransaction {
                     key: key.to_be_bytes().to_vec(),
                 })
                 .await
-                .unwrap();
+                .map_err(|e| FrontendError::InternalError(Arc::new(e)))?;
             let value_int = match response.get_ref().value.as_ref() {
                 Some(bytes) => String::from_utf8(bytes.clone())
                     .unwrap()
@@ -115,7 +115,7 @@ impl Transaction for RwTransaction {
                         value: value.to_string().as_bytes().to_vec(),
                     })
                     .await
-                    .unwrap();
+                    .map_err(|e| FrontendError::InternalError(Arc::new(e)))?;
                 if VERIFICATION {
                     let mut value_per_key = value_per_key.lock().await;
                     // info!("Writing key: {:?}, value: {:?}", key, value);
