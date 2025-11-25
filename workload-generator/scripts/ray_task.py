@@ -126,7 +126,9 @@ def run_workload(config):
         os.makedirs(os.path.dirname(MAIN_RAY_WORKLOAD_CONFIG_PATH), exist_ok=True)
         with open(MAIN_RAY_WORKLOAD_CONFIG_PATH, "w") as f:
             json.dump(config, f)
-        cmd1.append("--create-keyspace")
+        # Only create keyspace when abort_rate is 0 to avoid cascading abort slowdown
+        if abort_rate == 0.0:
+            cmd1.append("--create-keyspace")
 
         # Create a temporary config file with the parameters of the secondary workload generator
         config["fake_transactions"] = True
