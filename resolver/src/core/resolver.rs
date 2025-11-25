@@ -114,7 +114,15 @@ impl Resolver {
             }
 
             // If any dependency was aborted, abort this transaction immediately
+            // BUT we must register this transaction as resolved (aborted) so future
+            // transactions depending on it will also know to abort
             if has_aborted_dependency {
+                state.resolved_transactions.insert(transaction_id);
+                // Do NOT insert into committed_transactions - this marks it as aborted
+                info!(
+                    "Transaction {:?} marked as resolved (aborted due to dependency)",
+                    transaction_id
+                );
                 drop(state);  // Release the lock before returning
                 return Err(Error::TransactionAborted(TransactionAbortReason::DependencyAborted));
             }
