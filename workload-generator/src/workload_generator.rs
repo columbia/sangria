@@ -372,16 +372,23 @@ impl WorkloadGenerator {
         let total_transactions = metrics.completed_transactions;
 
         // Calculate statistics
-        let avg_latency: Duration =
-            metrics.latencies.iter().sum::<Duration>() / metrics.latencies.len() as u32;
-        let throughput = total_transactions as f64 / total_duration.as_secs_f64();
+        let (avg_latency, p50_latency, p95_latency, p99_latency) = if metrics.latencies.is_empty() {
+            // Handle case where no transactions completed (e.g., all aborted due to cascading aborts)
+            (Duration::from_secs(0), Duration::from_secs(0), Duration::from_secs(0), Duration::from_secs(0))
+        } else {
+            let avg_latency: Duration =
+                metrics.latencies.iter().sum::<Duration>() / metrics.latencies.len() as u32;
 
-        // Sort latencies for percentile calculation
-        let mut sorted_latencies = metrics.latencies.clone();
-        sorted_latencies.sort();
-        let p99_latency = sorted_latencies[(sorted_latencies.len() as f64 * 0.99) as usize];
-        let p95_latency = sorted_latencies[(sorted_latencies.len() as f64 * 0.95) as usize];
-        let p50_latency = sorted_latencies[(sorted_latencies.len() as f64 * 0.50) as usize];
+            // Sort latencies for percentile calculation
+            let mut sorted_latencies = metrics.latencies.clone();
+            sorted_latencies.sort();
+            let p99_latency = sorted_latencies[(sorted_latencies.len() as f64 * 0.99) as usize];
+            let p95_latency = sorted_latencies[(sorted_latencies.len() as f64 * 0.95) as usize];
+            let p50_latency = sorted_latencies[(sorted_latencies.len() as f64 * 0.50) as usize];
+
+            (avg_latency, p50_latency, p95_latency, p99_latency)
+        };
+        let throughput = total_transactions as f64 / total_duration.as_secs_f64();
 
         info!("Workload Complete - Performance Metrics:");
         info!("Throughput: {:.2} transactions/second", throughput);
