@@ -169,8 +169,10 @@ impl Resolver {
             info!("Notifying transactions");
             let mut waiting_transactions = resolver.waiting_transactions.write().await;
             for transaction in finished_transactions {
-                let sender = waiting_transactions.remove(&transaction.id).unwrap();
-                sender.send(Ok(())).unwrap();  // Send Ok to indicate successful commit
+                // Use if-let to handle case where transaction was already notified (e.g., by abort cascade)
+                if let Some(sender) = waiting_transactions.remove(&transaction.id) {
+                    let _ = sender.send(Ok(()));  // Send Ok to indicate successful commit
+                }
             }
             // TODO: Clean up other state too here?
         }
