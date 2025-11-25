@@ -2,6 +2,25 @@
 """
 Plot Pipelined 2PC vs Traditional 2PC comparison using fixed-duration experiment results.
 This uses data from 60-second fixed duration runs to ensure fair comparison.
+
+=== HOW TO REPRODUCE ===
+1. Run the fixed-duration experiment on CloudLab:
+   cd ~/sangria
+   python3 workload-generator/scripts/fixed_duration_experiment.py --baseline both
+
+2. Copy the experiment directories from ~/ray_results/ to this directory
+   (directories are named like: pipelined_zipf_0.1_fixed_<name>)
+
+3. Update the EXPERIMENTS dict below with the new directory names
+
+4. Run this script:
+   python3 plot_fixed_duration.py
+
+Generated files:
+  - fixed_duration_goodput_comparison.html
+  - fixed_duration_committed_tx_comparison.html
+  - fixed_duration_speedup_comparison.html
+  - fixed_duration_summary.csv
 """
 
 import json

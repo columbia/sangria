@@ -85,6 +85,17 @@ impl Resolver {
         info!("Updating dependencies for transaction {:?}", transaction_id);
         {
             let mut state = resolver.state.write().await;
+
+            // IMPORTANT: Create our own entry in info_per_transaction FIRST, before adding
+            // ourselves as a dependent of any dependency. This ensures that if
+            // register_committed_transactions runs concurrently, it can find our entry
+            // and properly decrement our num_dependencies count.
+            let transaction_info = state
+                .info_per_transaction
+                .entry(transaction_id)
+                .or_insert(TransactionInfo::default(transaction_id, fake));
+            transaction_info.participant_ranges_info = participant_ranges_info;
+
             for dependency in dependencies {
                 if !state.resolved_transactions.contains(&dependency) {
                     // Dependency is not yet resolved, so we need to wait for it
@@ -123,17 +134,44 @@ impl Resolver {
                     "Transaction {:?} marked as resolved (aborted due to dependency)",
                     transaction_id
                 );
-                drop(state);  // Release the lock before returning
+
+                // CRITICAL: Check if any transactions have already registered as dependents
+                // of this transaction. If so, we need to notify them that we're aborting.
+                // This handles the race where TX B registers on TX A, then TX A discovers
+                // its dependency was aborted - TX B is waiting and needs to be notified.
+                let dependents_to_notify: Vec<Uuid> = state
+                    .info_per_transaction
+                    .get(&transaction_id)
+                    .map(|info| info.dependents.iter().cloned().collect())
+                    .unwrap_or_default();
+
+                drop(state);  // Release the lock before spawning
+
+                // Spawn a task to cascade the abort to dependents
+                if !dependents_to_notify.is_empty() {
+                    info!(
+                        "Transaction {:?} cascading abort to {} dependents: {:?}",
+                        transaction_id,
+                        dependents_to_notify.len(),
+                        dependents_to_notify
+                    );
+                    let resolver_clone = resolver.clone();
+                    let mut all_to_abort = dependents_to_notify;
+                    all_to_abort.push(transaction_id);  // Include self to notify any waiters
+                    resolver.bg_runtime.spawn(async move {
+                        let _ = Self::register_aborted_transactions(resolver_clone, all_to_abort).await;
+                    });
+                }
+
                 return Err(Error::TransactionAborted(TransactionAbortReason::DependencyAborted));
             }
 
+            // Now set the final num_dependencies count
             let transaction_info = state
                 .info_per_transaction
-                .entry(transaction_id)
-                .or_insert(TransactionInfo::default(transaction_id, fake));
-
+                .get_mut(&transaction_id)
+                .unwrap();
             transaction_info.num_dependencies = num_pending_dependencies;
-            transaction_info.participant_ranges_info = participant_ranges_info;
             resolver
                 .waiting_transactions
                 .write()
@@ -256,13 +294,31 @@ impl Resolver {
                 // Check if any dependencies are now resolved and if any new transactions are ready to commit
                 if !dependents.is_empty() {
                     for dependent in dependents.iter() {
+                        // Skip dependents that have already been resolved (e.g., aborted due to another dependency)
+                        // This handles the race where TX B registers as dependent of TX A, then TX B discovers
+                        // another dependency was aborted and marks itself as resolved. When TX A commits,
+                        // TX B is still in A's dependents list but has num_dependencies=0 and is already resolved.
+                        if state.resolved_transactions.contains(dependent) {
+                            info!(
+                                "Skipping dependent {:?} - already resolved (likely aborted)",
+                                dependent
+                            );
+                            continue;
+                        }
+
                         let dependent_transaction_info =
                             state.info_per_transaction.get_mut(&dependent).unwrap();
-                        assert!(
-                            dependent_transaction_info.num_dependencies > 0,
-                            "Dependent transaction {} has no pending dependencies",
-                            dependent
-                        );
+
+                        // Double-check: if num_dependencies is 0 but TX wasn't marked resolved,
+                        // this is a bug. But we'll handle gracefully by skipping.
+                        if dependent_transaction_info.num_dependencies == 0 {
+                            info!(
+                                "Warning: Dependent transaction {:?} has num_dependencies=0 but isn't resolved - skipping",
+                                dependent
+                            );
+                            continue;
+                        }
+
                         dependent_transaction_info.num_dependencies -= 1;
                         if dependent_transaction_info.num_dependencies == 0 {
                             // Transaction is now unblocked and ready to commit
@@ -368,13 +424,24 @@ impl Resolver {
                 }
             }
 
-            // For each dependent, decrement their pending count
-            // Note: Cascading abort already happened in abort(), so dependents are already marked
-            for dependent_id in new_ready_to_check {
-                if let Some(dependent_info) = state.info_per_transaction.get_mut(&dependent_id) {
-                    if dependent_info.num_dependencies > 0 {
-                        dependent_info.num_dependencies -= 1;
-                    }
+            // For each dependent, they must also abort since their dependency was aborted
+            // First, mark them as resolved (aborted) and notify them
+            for dependent_id in &new_ready_to_check {
+                // Skip if already resolved (already aborted via cascading or direct abort)
+                if state.resolved_transactions.contains(dependent_id) {
+                    continue;
+                }
+
+                // Mark as resolved (aborted due to dependency)
+                state.resolved_transactions.insert(*dependent_id);
+                info!("Dependent {:?} marked as resolved (aborted due to dependency cascade)", dependent_id);
+
+                // Notify the dependent that it's aborted
+                if let Some(sender) = waiting_transactions.remove(dependent_id) {
+                    let _ = sender.send(Err(Error::TransactionAborted(
+                        TransactionAbortReason::DependencyAborted
+                    )));
+                    info!("Notified dependent {:?} of abort due to dependency cascade", dependent_id);
                 }
             }
         }

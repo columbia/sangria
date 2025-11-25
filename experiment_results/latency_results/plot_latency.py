@@ -2,6 +2,23 @@
 """
 Plot latency comparison between Pipelined and Traditional 2PC.
 Data from latency experiment with Zipf=0.3, abort rates: 0%, 10%, 30%.
+
+=== HOW TO REPRODUCE ===
+1. Run the latency experiment on CloudLab:
+   cd ~/sangria
+   python3 workload-generator/scripts/latency_experiment.py --baseline both
+
+2. Copy results from ~/ray_results/ to experiment_results/latency_results/
+
+3. Update the data dict below with the new results
+
+4. Run this script to generate plots:
+   python3 plot_latency.py
+
+Generated files:
+  - latency_comparison.html
+  - tail_latency_comparison.html
+  - latency_speedup.html
 """
 
 import plotly.graph_objects as go

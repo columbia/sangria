@@ -165,19 +165,32 @@ impl WorkloadGenerator {
         use std::fs::File;
         use std::io::{BufRead, BufReader};
 
-        let keys: Vec<usize> = match self.workload_config.workload_type.as_str() {
+        let (readset, writeset): (Vec<usize>, Option<Vec<usize>>) = match self.workload_config.workload_type.as_str() {
             "custom" => {
-                // Sample num_keys uniformly from {1, 2}
+                // Sample 2 keys using Zipf distribution to create hot spots
                 let num_keys = 2;
                 let mut rng = self.rng.lock().await;
-                let mut keys: Vec<usize> = (0..self.workload_config.num_keys)
-                    .choose_multiple(&mut *rng, num_keys)
-                    .into_iter()
-                    .map(|k| k as usize)
-                    .collect();
+                let keys = self.zipf_sample_without_replacement(num_keys, &mut *rng);
                 drop(rng);
-                keys.sort();
-                keys
+                (keys.clone(), Some(keys))
+            }
+            "dependency" => {
+                // Create workload that generates dependencies:
+                // - Write to ONE hot key (using Zipf - concentrates writes on few keys)
+                // - Read from ALL hot keys (so we read uncommitted writes from other txns)
+                // This creates read-write conflicts that lead to dependencies
+                let mut rng = self.rng.lock().await;
+
+                // Pick ONE key to write using Zipf (hot key)
+                let write_key = self.zipf_sample_without_replacement(1, &mut *rng);
+
+                // Read from ALL keys (or first N) to maximize chance of reading uncommitted writes
+                // This ensures we read keys that other transactions are writing to
+                let num_keys_to_read = std::cmp::min(self.workload_config.num_keys as usize, 5);
+                let readset: Vec<usize> = (0..num_keys_to_read).collect();
+
+                drop(rng);
+                (readset, Some(write_key))
             }
             "ycsb" => {
                 // Get the next transaction from the YCSB workload
@@ -189,7 +202,7 @@ impl WorkloadGenerator {
                     .unwrap()
                     .parse::<usize>()
                     .unwrap();
-                vec![key]
+                (vec![key], Some(vec![key]))
             }
             _ => {
                 panic!(
@@ -214,12 +227,12 @@ impl WorkloadGenerator {
                 FakeTransaction::new(
                     self.resolver_client.clone(),
                     keyspace,
-                    keys.clone(),
+                    readset.clone(),
                     self.pending_commit_table.clone(),
                 )
                 .await
             }
-            false => RwTransaction::new(self.client.clone(), keyspace, keys.clone(), Some(keys)),
+            false => RwTransaction::new(self.client.clone(), keyspace, readset, writeset),
         };
         transaction
     }

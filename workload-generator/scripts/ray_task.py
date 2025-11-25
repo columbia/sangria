@@ -72,6 +72,7 @@ def run_workload(config):
     main_background_runtime_core_ids = config["background_runtime_core_ids"]
     workload_type = config["workload_type"]
     abort_rate = config.get("abort_rate", 0.0)  # Get abort_rate, default to 0.0
+    duration_seconds = config.get("duration_seconds", None)  # Fixed duration mode
 
     del config["iteration"]
     del config["baseline"]
@@ -81,6 +82,8 @@ def run_workload(config):
     del config["resolver_tx_load_concurrency"]
     if "abort_rate" in config:
         del config["abort_rate"]  # Remove from workload config, will be set in server config
+    if "duration_seconds" in config:
+        del config["duration_seconds"]  # Remove from workload config, handled by ray_task
 
     # Main workload generator -- used to collect performance metrics
     cmd1 = [
@@ -126,9 +129,8 @@ def run_workload(config):
         os.makedirs(os.path.dirname(MAIN_RAY_WORKLOAD_CONFIG_PATH), exist_ok=True)
         with open(MAIN_RAY_WORKLOAD_CONFIG_PATH, "w") as f:
             json.dump(config, f)
-        # Only create keyspace when abort_rate is 0 to avoid cascading abort slowdown
-        if abort_rate == 0.0:
-            cmd1.append("--create-keyspace")
+        # Always create keyspace on iteration 0 (after server restart)
+        cmd1.append("--create-keyspace")
 
         # Create a temporary config file with the parameters of the secondary workload generator
         config["fake_transactions"] = True
@@ -158,8 +160,11 @@ def run_workload(config):
     config["resolver_cores"] = resolver_cores
     config["resolver_tx_load_concurrency"] = resolver_tx_load["max_concurrency"]
     config["abort_rate"] = abort_rate
+    if duration_seconds:
+        config["duration_seconds"] = duration_seconds
     print("cmd1: ", cmd1)
     print("cmd2: ", cmd2)
+    print(f"Duration mode: {'fixed ' + str(duration_seconds) + 's' if duration_seconds else 'num_queries based'}")
 
     try:
         process2 = None
@@ -185,10 +190,18 @@ def run_workload(config):
             env={**os.environ, "RUST_LOG": "error"},
         )
         try:
-            # Wait for the main workload generator to finish
-            stdout1, stderr1 = process1.communicate(
-                timeout=60 * 60
-            )  # 60 minutes timeout
+            if duration_seconds:
+                # Fixed duration mode: wait for specified duration, then send SIGUSR1
+                print(f"Running for {duration_seconds} seconds...")
+                time.sleep(duration_seconds)
+                print(f"Duration complete, sending SIGUSR1 to stop workload...")
+                process1.send_signal(subprocess.signal.SIGUSR1)
+                stdout1, stderr1 = process1.communicate(timeout=60)  # 60s grace period
+            else:
+                # Original mode: wait for the main workload generator to finish naturally
+                stdout1, stderr1 = process1.communicate(
+                    timeout=60 * 60
+                )  # 60 minutes timeout
             print(stderr1)
             metrics = parse_metrics(stdout1)
             print("Finished main workload generator")

@@ -12,6 +12,18 @@ This analysis shows:
 1. Estimated lock wait time for Traditional 2PC
 2. What proportion of Traditional latency is due to lock waiting
 3. How early lock release in Pipelined reduces this overhead
+
+=== HOW TO REPRODUCE ===
+1. First run the latency experiment (see plot_latency.py for instructions)
+
+2. Update the data dict below with results from plot_latency.py
+
+3. Run this script:
+   python3 lock_contention_analysis.py
+
+Generated files:
+  - lock_contention_analysis.html
+  - lock_wait_conceptual.html
 """
 
 import plotly.graph_objects as go
