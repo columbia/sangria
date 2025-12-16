@@ -11,6 +11,7 @@ use proto::resolver::{
     GetTransactionInfoStatusRequest, GetTransactionInfoStatusResponse,
     GetWaitingTransactionsStatusRequest, GetWaitingTransactionsStatusResponse,
     RegisterCommittedTransactionsRequest, RegisterCommittedTransactionsResponse,
+    GetDependencyTreeRequest, GetDependencyTreeResponse, TransactionNode,
 };
 use std::{net::ToSocketAddrs, str::FromStr, sync::Arc};
 use tonic::{Request, Response, Status as TStatus, transport::Server as TServer};
@@ -193,6 +194,32 @@ impl ProtoResolver for ProtoServer {
             .await;
         Ok(Response::new(GetAverageWaitingTransactionsResponse {
             average_waiting_transactions,
+        }))
+    }
+
+    #[instrument(skip(self))]
+    async fn get_dependency_tree(
+        &self,
+        request: Request<GetDependencyTreeRequest>,
+    ) -> Result<Response<GetDependencyTreeResponse>, TStatus> {
+        info!("Got get_dependency_tree request");
+        let tree = self.resolver_server.resolver.get_dependency_tree().await;
+
+        let transactions: Vec<TransactionNode> = tree
+            .transactions
+            .into_iter()
+            .map(|tx| TransactionNode {
+                id: tx.id,
+                status: tx.status,
+                dependencies: tx.dependencies,
+                dependents: tx.dependents,
+            })
+            .collect();
+
+        Ok(Response::new(GetDependencyTreeResponse {
+            transactions,
+            num_committed: tree.num_committed,
+            num_aborted: tree.num_aborted,
         }))
     }
 }

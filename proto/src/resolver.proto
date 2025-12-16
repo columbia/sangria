@@ -12,6 +12,7 @@ service Resolver {
     rpc GetGroupCommitStatus(GetGroupCommitStatusRequest) returns (GetGroupCommitStatusResponse) {}
     rpc GetNumWaitingTransactions(GetNumWaitingTransactionsRequest) returns (GetNumWaitingTransactionsResponse) {}
     rpc GetAverageWaitingTransactions(GetAverageWaitingTransactionsRequest) returns (GetAverageWaitingTransactionsResponse) {}
+    rpc GetDependencyTree(GetDependencyTreeRequest) returns (GetDependencyTreeResponse) {}
 }
 
 message RegisterCommittedTransactionsRequest {
@@ -99,4 +100,20 @@ message GetAverageWaitingTransactionsRequest {
 
 message GetAverageWaitingTransactionsResponse {
   double average_waiting_transactions = 1;
+}
+
+message GetDependencyTreeRequest {
+}
+
+message TransactionNode {
+  string id = 1;
+  string status = 2;  // "committed" or "aborted"
+  repeated string dependencies = 3;  // transactions this one depended on
+  repeated string dependents = 4;  // transactions that depended on this one
+}
+
+message GetDependencyTreeResponse {
+  repeated TransactionNode transactions = 1;
+  uint32 num_committed = 2;
+  uint32 num_aborted = 3;
 }

@@ -1,0 +1,79 @@
+{
+  "experiment": "debug_comparison_golden_porpoise",
+  "date": "2025-12-16",
+  "server": "c220g1-030801.wisc.cloudlab.us",
+  "purpose": "Sanity check comparing Pipelined vs Traditional 2PC abort behavior",
+  "config": {
+    "num_keys": 5,
+    "max_concurrency": 20,
+    "num_queries": 500,
+    "zipf_exponent": 0.9,
+    "workload_type": "dependency"
+  },
+  "results": [
+    {
+      "baseline": "Pipelined",
+      "abort_rate": 0.0,
+      "throughput": 253.28,
+      "total_transactions": 500,
+      "avg_latency_ms": 77.73,
+      "p50_latency_ms": 74.71,
+      "p95_latency_ms": 94.09,
+      "resolver_groups": {
+        "size_1": 348,
+        "size_2": 68,
+        "size_3": 5
+      },
+      "notes": "Resolver active - tracking 421 dependency groups, 73 with dependencies"
+    },
+    {
+      "baseline": "Pipelined",
+      "abort_rate": 0.3,
+      "throughput": 176.81,
+      "total_transactions": 381,
+      "avg_latency_ms": 84.79,
+      "p50_latency_ms": 82.95,
+      "p95_latency_ms": 103.17,
+      "resolver_groups": {
+        "size_1": 4
+      },
+      "notes": "30% abort rate - 119 transactions aborted (381 of 500 completed)"
+    },
+    {
+      "baseline": "Traditional",
+      "abort_rate": 0.0,
+      "throughput": 63.29,
+      "total_transactions": 500,
+      "avg_latency_ms": 309.92,
+      "p50_latency_ms": 310.47,
+      "p95_latency_ms": 340.80,
+      "resolver_groups": null,
+      "notes": "No resolver - locks held until commit. 4x slower than Pipelined"
+    },
+    {
+      "baseline": "Traditional",
+      "abort_rate": 0.3,
+      "throughput": 49.03,
+      "total_transactions": 358,
+      "avg_latency_ms": 285.90,
+      "p50_latency_ms": 283.33,
+      "p95_latency_ms": 328.37,
+      "resolver_groups": null,
+      "notes": "30% abort rate - 142 transactions aborted (358 of 500 completed)"
+    }
+  ],
+  "sanity_check": {
+    "pipelined_uses_resolver": true,
+    "traditional_no_resolver": true,
+    "pipelined_faster_than_traditional": true,
+    "throughput_ratio_at_0_abort": 4.0,
+    "latency_ratio_at_0_abort": 4.15
+  },
+  "key_observations": [
+    "Pipelined 2PC is ~4x faster than Traditional at 0% abort rate due to early lock release",
+    "Pipelined resolver tracks dependency groups (348 size-1, 68 size-2, 5 size-3 at 0% abort)",
+    "Traditional has no resolver activity - locks prevent concurrent access",
+    "Both systems handle 30% abort rate with similar completion ratios (~72-76%)",
+    "Pipelined latency is ~4x lower (77ms vs 310ms at p50)"
+  ]
+}

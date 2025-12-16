@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Transaction Dependency Tree</title>
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+        }
+        #network {
+            width: 70%;
+            height: 700px;
+            border: 1px solid #ccc;
+            background: white;
+        }
+        .sidebar {
+            width: 30%;
+        }
+        .stats {
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .stats h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .stat-label {
+            color: #666;
+        }
+        .stat-value {
+            font-weight: bold;
+        }
+        .committed { color: #4CAF50; }
+        .aborted { color: #f44336; }
+        .legend {
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .legend h3 {
+            margin-top: 0;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 5px 0;
+        }
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 3px;
+        }
+        .info-panel {
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .info-panel h3 {
+            margin-top: 0;
+        }
+        #node-details {
+            font-size: 14px;
+        }
+        .detail-label {
+            color: #666;
+            font-size: 12px;
+        }
+        .detail-value {
+            margin-bottom: 10px;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <h1>Transaction Dependency Tree (Pipelined 2PC)</h1>
+    <p>Arrows show dependencies: A → B means transaction B depends on A (B read uncommitted data from A)</p>
+
+    <div class="container">
+        <div id="network"></div>
+        <div class="sidebar">
+            <div class="stats">
+                <h3>Summary</h3>
+                <div class="stat-row">
+                    <span class="stat-label">Total Transactions</span>
+                    <span class="stat-value">48</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Committed</span>
+                    <span class="stat-value committed">2</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Aborted</span>
+                    <span class="stat-value aborted">46</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Abort Rate</span>
+                    <span class="stat-value">95.8%</span>
+                </div>
+            </div>
+
+            <div class="legend">
+                <h3>Legend</h3>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #4CAF50;"></div>
+                    <span>Committed</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #f44336;"></div>
+                    <span>Aborted (cascading or artificial)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #9E9E9E;"></div>
+                    <span>Pending</span>
+                </div>
+                <div class="legend-item">
+                    <span>→</span>
+                    <span>Dependency edge (A→B: B depends on A)</span>
+                </div>
+            </div>
+
+            <div class="info-panel">
+                <h3>Transaction Details</h3>
+                <div id="node-details">
+                    <p style="color: #666;">Click on a node to see details</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        var nodes = new vis.DataSet([{"id": "9db90a74-f44c-4437-b9cf-bdef9ffa784a", "label": "9db90a74\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["2125362c-2245-4d80-9b32-42258fac6de8"], "dependents": []}, {"id": "5174e311-2ac5-478f-b55f-60d2f6824650", "label": "5174e311\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["2125362c-2245-4d80-9b32-42258fac6de8"], "dependents": []}, {"id": "91e7d25e-108f-4e1d-8013-000c0860f83a", "label": "91e7d25e\\n(committed)", "color": {"background": "#4CAF50", "border": "#2E7D32"}, "status": "committed", "dependencies": ["878d09d5-34ac-4e4d-8d65-574ab37e9042"], "dependents": []}, {"id": "e2c6daa0-46d4-465d-a52d-12dda1f4affb", "label": "e2c6daa0\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["c3cb29bd-5148-4dda-8588-40f4cb805939"], "dependents": []}, {"id": "d41eece7-1c24-4fb3-b90c-6e8c903597a7", "label": "d41eece7\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["a089f700-244d-4e1a-9aac-4b7925b03cf8"], "dependents": []}, {"id": "21ba7765-665d-4693-9c70-e14ba0c0bf1f", "label": "21ba7765\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["97859309-2126-41d2-b360-6235ffcacfad"], "dependents": []}, {"id": "2297f7af-de35-4138-8317-03fef9349eb1", "label": "2297f7af\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["5866468e-0762-4ec0-8ab5-715c4f455474"], "dependents": []}, {"id": "c548f69c-f2d9-4073-bce8-a2f7b9b0f368", "label": "c548f69c\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["a4c51130-b279-4c62-8857-47c631aa0119"], "dependents": []}, {"id": "d3e685e1-fde3-4e23-a4d4-7a643dbf0ae7", "label": "d3e685e1\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["a9aaa6f2-0db0-449a-bfed-6898ba269293"], "dependents": []}, {"id": "878c392c-7b81-4a28-9a96-5df9c1194075", "label": "878c392c\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["c5d53a70-12b3-48b4-b6b8-efe4458f3e5e"], "dependents": []}, {"id": "1bb5350f-c631-45a9-8e16-4027f0dbbd64", "label": "1bb5350f\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["d92f4b0d-62f1-4760-8b8f-022b23c84592"], "dependents": []}, {"id": "2aa2f499-07e2-42ca-8632-09b159c3ffc2", "label": "2aa2f499\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["3f21e6da-63c9-4398-8570-c9840b7b69c0"], "dependents": []}, {"id": "d951d4a1-b40d-428b-991a-6d1dbabb6005", "label": "d951d4a1\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["d41eece7-1c24-4fb3-b90c-6e8c903597a7"], "dependents": []}, {"id": "b8a46076-58ca-4404-acd0-18bc1c8a4727", "label": "b8a46076\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["2297f7af-de35-4138-8317-03fef9349eb1"], "dependents": []}, {"id": "540250e8-1417-4e2f-bdab-8b67983b3c1c", "label": "540250e8\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["ac5a65b8-f369-4c76-9ed8-44c5c10cde2a"], "dependents": []}, {"id": "6cd1defa-db3c-418d-a6ee-a74ba73f106b", "label": "6cd1defa\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["2297f7af-de35-4138-8317-03fef9349eb1"], "dependents": []}, {"id": "77cb0966-9374-4a3f-9a0c-e51354ca0c9b", "label": "77cb0966\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["aefb313d-5ecf-42d5-b111-5634db64e2bc"], "dependents": []}, {"id": "39a0a1fa-5a3f-46dd-92df-822230c85181", "label": "39a0a1fa\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["8519486c-9d86-4953-8f9c-d1eb01821624"], "dependents": []}, {"id": "0cadf65b-1af4-406e-9e03-cbac8cd8c3b2", "label": "0cadf65b\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": [], "dependents": ["5871763f-6c82-46fd-a695-73efe1bbdb8f"]}, {"id": "58d4c76b-4d02-4bbd-ac02-e0d77dfaf5dc", "label": "58d4c76b\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["39a0a1fa-5a3f-46dd-92df-822230c85181"], "dependents": []}, {"id": "5dc6b143-14d5-43fd-9e28-db47dad2b662", "label": "5dc6b143\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["0cadf65b-1af4-406e-9e03-cbac8cd8c3b2"], "dependents": []}, {"id": "0c8f9887-159c-4f84-84de-ff859c4788de", "label": "0c8f9887\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["0810e36f-8355-4612-8d8c-d7d26066ca12"], "dependents": []}, {"id": "3f21e6da-63c9-4398-8570-c9840b7b69c0", "label": "3f21e6da\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["ca3ec9b8-bc62-456f-9fa7-b6250bdf0ad8"], "dependents": []}, {"id": "d8fd29fe-b5b1-4ea5-ac46-2099e032ed95", "label": "d8fd29fe\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["910718e8-1b14-47f8-acbf-e593b61ba425"], "dependents": []}, {"id": "ac5a65b8-f369-4c76-9ed8-44c5c10cde2a", "label": "ac5a65b8\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["b79ad846-1565-4489-b834-dda9678627cc"], "dependents": []}, {"id": "ca3ec9b8-bc62-456f-9fa7-b6250bdf0ad8", "label": "ca3ec9b8\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["d86a564c-656c-4da8-bdde-119b5e96ca05"], "dependents": []}, {"id": "79bb192c-c2b1-4f3a-a916-f1dae5d76539", "label": "79bb192c\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["409b0e0b-a7de-41b7-983a-ad6d8f056f82"], "dependents": []}, {"id": "878d09d5-34ac-4e4d-8d65-574ab37e9042", "label": "878d09d5\\n(committed)", "color": {"background": "#4CAF50", "border": "#2E7D32"}, "status": "committed", "dependencies": [], "dependents": []}, {"id": "196a359b-f2c4-4a8e-8565-80e5a39f1b69", "label": "196a359b\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["2b953537-7d5c-41ae-9974-40ffbbd71b6b"], "dependents": []}, {"id": "dad4124c-818b-4f59-af9d-8cff9262b8ad", "label": "dad4124c\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["196a359b-f2c4-4a8e-8565-80e5a39f1b69"], "dependents": []}, {"id": "34c4f326-2c8a-415b-a6ac-f18d21600239", "label": "34c4f326\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["58d4c76b-4d02-4bbd-ac02-e0d77dfaf5dc"], "dependents": []}, {"id": "877d411b-2648-4172-8add-eb7004fce139", "label": "877d411b\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["b7c9ff10-39db-4a69-b935-724b21581ebd"], "dependents": []}, {"id": "910718e8-1b14-47f8-acbf-e593b61ba425", "label": "910718e8\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["a9aaa6f2-0db0-449a-bfed-6898ba269293"], "dependents": []}, {"id": "0efea7a9-980e-4059-ae37-d55152bce276", "label": "0efea7a9\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["1f2a9ee7-6d29-46a4-8ed9-43adf9a1e6d0"], "dependents": []}, {"id": "a9aaa6f2-0db0-449a-bfed-6898ba269293", "label": "a9aaa6f2\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["3ca6b404-1a5c-4865-bc08-54344d7ce7b2"], "dependents": []}, {"id": "99c73ebd-08e3-48be-ba0a-a611b6bc06e8", "label": "99c73ebd\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["9fccc7af-3953-4c29-9d65-ce628671216c"], "dependents": []}, {"id": "2125362c-2245-4d80-9b32-42258fac6de8", "label": "2125362c\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["99c73ebd-08e3-48be-ba0a-a611b6bc06e8"], "dependents": []}, {"id": "1f2a9ee7-6d29-46a4-8ed9-43adf9a1e6d0", "label": "1f2a9ee7\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["d41eece7-1c24-4fb3-b90c-6e8c903597a7"], "dependents": []}, {"id": "7f70a448-4af8-4e09-a505-619af4b94ad5", "label": "7f70a448\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["d8fd29fe-b5b1-4ea5-ac46-2099e032ed95"], "dependents": []}, {"id": "9a3fa539-5246-40cd-967f-408944afbdb5", "label": "9a3fa539\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["fb8cdfd0-ee8d-49f1-8f1b-a0d8ee1640db"], "dependents": []}, {"id": "993a0ed7-033a-46fe-b7a4-0a34cbba789d", "label": "993a0ed7\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["f9aeb5d9-efa5-4deb-b426-52ef6ce74c42"], "dependents": []}, {"id": "27759b4f-8b88-43d2-8966-90aac3fdad21", "label": "27759b4f\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["3c455099-27d0-4327-a18f-9bd476b1b74b"], "dependents": []}, {"id": "5871763f-6c82-46fd-a695-73efe1bbdb8f", "label": "5871763f\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["9fccc7af-3953-4c29-9d65-ce628671216c", "0cadf65b-1af4-406e-9e03-cbac8cd8c3b2"], "dependents": []}, {"id": "00d50cc5-2e29-4165-9a93-71cf2b8b30f0", "label": "00d50cc5\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["27759b4f-8b88-43d2-8966-90aac3fdad21"], "dependents": []}, {"id": "7ed29b88-c4e6-45ae-8006-1826c55c0a00", "label": "7ed29b88\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["b6108b99-c3fc-4105-a3d0-6c0385251c68"], "dependents": []}, {"id": "a6b340dd-253b-4e33-b326-26383f7e418f", "label": "a6b340dd\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["f9aeb5d9-efa5-4deb-b426-52ef6ce74c42"], "dependents": []}, {"id": "9418631c-23bd-42d0-a857-37ae152fc13b", "label": "9418631c\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["df992efc-fb80-4ce0-a534-8da263749054"], "dependents": []}, {"id": "f39acd5b-9aee-4a6b-874a-06612afb45af", "label": "f39acd5b\\n(aborted)", "color": {"background": "#f44336", "border": "#c62828"}, "status": "aborted", "dependencies": ["9418631c-23bd-42d0-a857-37ae152fc13b"], "dependents": []}]);
+        var edges = new vis.DataSet([{"from": "2125362c-2245-4d80-9b32-42258fac6de8", "to": "9db90a74-f44c-4437-b9cf-bdef9ffa784a", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "2125362c-2245-4d80-9b32-42258fac6de8", "to": "5174e311-2ac5-478f-b55f-60d2f6824650", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "878d09d5-34ac-4e4d-8d65-574ab37e9042", "to": "91e7d25e-108f-4e1d-8013-000c0860f83a", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "c3cb29bd-5148-4dda-8588-40f4cb805939", "to": "e2c6daa0-46d4-465d-a52d-12dda1f4affb", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "a089f700-244d-4e1a-9aac-4b7925b03cf8", "to": "d41eece7-1c24-4fb3-b90c-6e8c903597a7", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "97859309-2126-41d2-b360-6235ffcacfad", "to": "21ba7765-665d-4693-9c70-e14ba0c0bf1f", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "5866468e-0762-4ec0-8ab5-715c4f455474", "to": "2297f7af-de35-4138-8317-03fef9349eb1", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "a4c51130-b279-4c62-8857-47c631aa0119", "to": "c548f69c-f2d9-4073-bce8-a2f7b9b0f368", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "a9aaa6f2-0db0-449a-bfed-6898ba269293", "to": "d3e685e1-fde3-4e23-a4d4-7a643dbf0ae7", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "c5d53a70-12b3-48b4-b6b8-efe4458f3e5e", "to": "878c392c-7b81-4a28-9a96-5df9c1194075", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "d92f4b0d-62f1-4760-8b8f-022b23c84592", "to": "1bb5350f-c631-45a9-8e16-4027f0dbbd64", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "3f21e6da-63c9-4398-8570-c9840b7b69c0", "to": "2aa2f499-07e2-42ca-8632-09b159c3ffc2", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "d41eece7-1c24-4fb3-b90c-6e8c903597a7", "to": "d951d4a1-b40d-428b-991a-6d1dbabb6005", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "2297f7af-de35-4138-8317-03fef9349eb1", "to": "b8a46076-58ca-4404-acd0-18bc1c8a4727", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "ac5a65b8-f369-4c76-9ed8-44c5c10cde2a", "to": "540250e8-1417-4e2f-bdab-8b67983b3c1c", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "2297f7af-de35-4138-8317-03fef9349eb1", "to": "6cd1defa-db3c-418d-a6ee-a74ba73f106b", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "aefb313d-5ecf-42d5-b111-5634db64e2bc", "to": "77cb0966-9374-4a3f-9a0c-e51354ca0c9b", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "8519486c-9d86-4953-8f9c-d1eb01821624", "to": "39a0a1fa-5a3f-46dd-92df-822230c85181", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "39a0a1fa-5a3f-46dd-92df-822230c85181", "to": "58d4c76b-4d02-4bbd-ac02-e0d77dfaf5dc", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "0cadf65b-1af4-406e-9e03-cbac8cd8c3b2", "to": "5dc6b143-14d5-43fd-9e28-db47dad2b662", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "0810e36f-8355-4612-8d8c-d7d26066ca12", "to": "0c8f9887-159c-4f84-84de-ff859c4788de", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "ca3ec9b8-bc62-456f-9fa7-b6250bdf0ad8", "to": "3f21e6da-63c9-4398-8570-c9840b7b69c0", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "910718e8-1b14-47f8-acbf-e593b61ba425", "to": "d8fd29fe-b5b1-4ea5-ac46-2099e032ed95", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "b79ad846-1565-4489-b834-dda9678627cc", "to": "ac5a65b8-f369-4c76-9ed8-44c5c10cde2a", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "d86a564c-656c-4da8-bdde-119b5e96ca05", "to": "ca3ec9b8-bc62-456f-9fa7-b6250bdf0ad8", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "409b0e0b-a7de-41b7-983a-ad6d8f056f82", "to": "79bb192c-c2b1-4f3a-a916-f1dae5d76539", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "2b953537-7d5c-41ae-9974-40ffbbd71b6b", "to": "196a359b-f2c4-4a8e-8565-80e5a39f1b69", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "196a359b-f2c4-4a8e-8565-80e5a39f1b69", "to": "dad4124c-818b-4f59-af9d-8cff9262b8ad", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "58d4c76b-4d02-4bbd-ac02-e0d77dfaf5dc", "to": "34c4f326-2c8a-415b-a6ac-f18d21600239", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "b7c9ff10-39db-4a69-b935-724b21581ebd", "to": "877d411b-2648-4172-8add-eb7004fce139", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "a9aaa6f2-0db0-449a-bfed-6898ba269293", "to": "910718e8-1b14-47f8-acbf-e593b61ba425", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "1f2a9ee7-6d29-46a4-8ed9-43adf9a1e6d0", "to": "0efea7a9-980e-4059-ae37-d55152bce276", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "3ca6b404-1a5c-4865-bc08-54344d7ce7b2", "to": "a9aaa6f2-0db0-449a-bfed-6898ba269293", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "9fccc7af-3953-4c29-9d65-ce628671216c", "to": "99c73ebd-08e3-48be-ba0a-a611b6bc06e8", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "99c73ebd-08e3-48be-ba0a-a611b6bc06e8", "to": "2125362c-2245-4d80-9b32-42258fac6de8", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "d41eece7-1c24-4fb3-b90c-6e8c903597a7", "to": "1f2a9ee7-6d29-46a4-8ed9-43adf9a1e6d0", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "d8fd29fe-b5b1-4ea5-ac46-2099e032ed95", "to": "7f70a448-4af8-4e09-a505-619af4b94ad5", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "fb8cdfd0-ee8d-49f1-8f1b-a0d8ee1640db", "to": "9a3fa539-5246-40cd-967f-408944afbdb5", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "f9aeb5d9-efa5-4deb-b426-52ef6ce74c42", "to": "993a0ed7-033a-46fe-b7a4-0a34cbba789d", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "3c455099-27d0-4327-a18f-9bd476b1b74b", "to": "27759b4f-8b88-43d2-8966-90aac3fdad21", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "9fccc7af-3953-4c29-9d65-ce628671216c", "to": "5871763f-6c82-46fd-a695-73efe1bbdb8f", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "0cadf65b-1af4-406e-9e03-cbac8cd8c3b2", "to": "5871763f-6c82-46fd-a695-73efe1bbdb8f", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "27759b4f-8b88-43d2-8966-90aac3fdad21", "to": "00d50cc5-2e29-4165-9a93-71cf2b8b30f0", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "b6108b99-c3fc-4105-a3d0-6c0385251c68", "to": "7ed29b88-c4e6-45ae-8006-1826c55c0a00", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "f9aeb5d9-efa5-4deb-b426-52ef6ce74c42", "to": "a6b340dd-253b-4e33-b326-26383f7e418f", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "df992efc-fb80-4ce0-a534-8da263749054", "to": "9418631c-23bd-42d0-a857-37ae152fc13b", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}, {"from": "9418631c-23bd-42d0-a857-37ae152fc13b", "to": "f39acd5b-9aee-4a6b-874a-06612afb45af", "arrows": "to", "color": {"color": "#666", "highlight": "#333"}}]);
+
+        var container = document.getElementById('network');
+        var data = { nodes: nodes, edges: edges };
+        var options = {
+            layout: {
+                hierarchical: {
+                    enabled: true,
+                    direction: 'UD',
+                    sortMethod: 'directed',
+                    levelSeparation: 80,
+                    nodeSpacing: 120,
+                    treeSpacing: 200
+                }
+            },
+            physics: {
+                enabled: false
+            },
+            nodes: {
+                shape: 'box',
+                font: { size: 11, face: 'monospace' },
+                margin: 8,
+                borderWidth: 2
+            },
+            edges: {
+                smooth: { type: 'cubicBezier', roundness: 0.5 },
+                width: 1.5
+            },
+            interaction: {
+                hover: true,
+                tooltipDelay: 100
+            }
+        };
+
+        var network = new vis.Network(container, data, options);
+
+        network.on("click", function(params) {
+            if (params.nodes.length > 0) {
+                var nodeId = params.nodes[0];
+                var node = nodes.get(nodeId);
+                var details = document.getElementById('node-details');
+
+                var depsHtml = node.dependencies.length > 0
+                    ? node.dependencies.map(d => '<code>' + d.substr(0,8) + '...</code>').join(', ')
+                    : '<span style="color:#999">None</span>';
+                var dependentsHtml = node.dependents.length > 0
+                    ? node.dependents.map(d => '<code>' + d.substr(0,8) + '...</code>').join(', ')
+                    : '<span style="color:#999">None</span>';
+
+                details.innerHTML =
+                    '<div class="detail-label">Transaction ID</div>' +
+                    '<div class="detail-value"><code>' + nodeId + '</code></div>' +
+                    '<div class="detail-label">Status</div>' +
+                    '<div class="detail-value" style="color:' + (node.status === 'committed' ? '#4CAF50' : '#f44336') + '"><strong>' + node.status.toUpperCase() + '</strong></div>' +
+                    '<div class="detail-label">Depends On (' + node.dependencies.length + ')</div>' +
+                    '<div class="detail-value">' + depsHtml + '</div>' +
+                    '<div class="detail-label">Dependents (' + node.dependents.length + ')</div>' +
+                    '<div class="detail-value">' + dependentsHtml + '</div>';
+            }
+        });
+
+        // Highlight cascade paths on hover
+        network.on("hoverNode", function(params) {
+            var nodeId = params.node;
+            var node = nodes.get(nodeId);
+
+            // Highlight all nodes in the dependency chain
+            if (node.status === 'aborted') {
+                var toHighlight = new Set([nodeId]);
+                // Find all dependents (downstream cascade)
+                var queue = [nodeId];
+                while (queue.length > 0) {
+                    var current = queue.shift();
+                    var currentNode = nodes.get(current);
+                    if (currentNode && currentNode.dependents) {
+                        currentNode.dependents.forEach(function(dep) {
+                            if (!toHighlight.has(dep)) {
+                                toHighlight.add(dep);
+                                queue.push(dep);
+                            }
+                        });
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>

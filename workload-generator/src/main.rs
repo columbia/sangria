@@ -31,6 +31,9 @@ struct Args {
 
     #[arg(long, default_value = "false")]
     create_keyspace: bool,
+
+    #[arg(long, help = "Path to save dependency tree JSON file")]
+    dependency_tree_output: Option<String>,
 }
 
 async fn run_workload(
@@ -144,5 +147,30 @@ fn main() {
         metrics.total_transactions,
         metrics.resolver_stats,
         metrics.range_server_stats,
-    )
+    );
+
+    // Save dependency tree to JSON if output path specified
+    if let Some(output_path) = args.dependency_tree_output {
+        if let Some(tree) = &metrics.dependency_tree {
+            let json = serde_json::json!({
+                "transactions": tree.transactions.iter().map(|tx| {
+                    serde_json::json!({
+                        "id": tx.id,
+                        "status": tx.status,
+                        "dependencies": tx.dependencies,
+                        "dependents": tx.dependents,
+                    })
+                }).collect::<Vec<_>>(),
+                "num_committed": tree.num_committed,
+                "num_aborted": tree.num_aborted,
+            });
+            if let Err(e) = fs::write(&output_path, serde_json::to_string_pretty(&json).unwrap()) {
+                eprintln!("Failed to write dependency tree to {}: {}", output_path, e);
+            } else {
+                println!("Dependency tree saved to: {}", output_path);
+            }
+        } else {
+            eprintln!("No dependency tree available (may be Traditional baseline)");
+        }
+    }
 }

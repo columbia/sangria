@@ -18,6 +18,7 @@ pub struct TransactionInfo {
     pub id: Uuid,
     pub num_dependencies: u32,
     pub dependents: HashSet<Uuid>,
+    pub dependencies: HashSet<Uuid>,  // Track actual dependency IDs for tree visualization
     pub participant_ranges_info: Vec<ParticipantRangeInfo>,
     pub fake: bool,
 }
@@ -28,6 +29,7 @@ impl TransactionInfo {
             id,
             num_dependencies: 0,
             dependents: HashSet::new(),
+            dependencies: HashSet::new(),
             participant_ranges_info: Vec::new(),
             fake,
         }
@@ -97,6 +99,14 @@ impl Resolver {
             transaction_info.participant_ranges_info = participant_ranges_info;
 
             for dependency in dependencies {
+                // Track this dependency for tree visualization
+                state
+                    .info_per_transaction
+                    .get_mut(&transaction_id)
+                    .unwrap()
+                    .dependencies
+                    .insert(dependency);
+
                 if !state.resolved_transactions.contains(&dependency) {
                     // Dependency is not yet resolved, so we need to wait for it
                     num_pending_dependencies += 1;
@@ -511,5 +521,59 @@ impl Resolver {
     pub async fn get_group_commit_status(&self) -> String {
         self.group_commit.get_status().await
     }
+
+    /// Returns the full dependency tree for visualization
+    /// Each transaction includes: id, status (committed/aborted), dependencies, dependents
+    pub async fn get_dependency_tree(&self) -> DependencyTree {
+        let state = self.state.read().await;
+
+        let mut transactions = Vec::new();
+        let mut num_committed = 0u32;
+        let mut num_aborted = 0u32;
+
+        for (tx_id, tx_info) in &state.info_per_transaction {
+            let is_resolved = state.resolved_transactions.contains(tx_id);
+            let is_committed = state.committed_transactions.contains(tx_id);
+
+            let status = if !is_resolved {
+                "pending".to_string()
+            } else if is_committed {
+                num_committed += 1;
+                "committed".to_string()
+            } else {
+                num_aborted += 1;
+                "aborted".to_string()
+            };
+
+            transactions.push(TransactionNode {
+                id: tx_id.to_string(),
+                status,
+                dependencies: tx_info.dependencies.iter().map(|id| id.to_string()).collect(),
+                dependents: tx_info.dependents.iter().map(|id| id.to_string()).collect(),
+            });
+        }
+
+        DependencyTree {
+            transactions,
+            num_committed,
+            num_aborted,
+        }
+    }
     // ---------------------- / Statistics ----------------------
+}
+
+/// Struct to hold dependency tree data for visualization
+#[derive(Debug)]
+pub struct TransactionNode {
+    pub id: String,
+    pub status: String,
+    pub dependencies: Vec<String>,
+    pub dependents: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct DependencyTree {
+    pub transactions: Vec<TransactionNode>,
+    pub num_committed: u32,
+    pub num_aborted: u32,
 }

@@ -73,6 +73,7 @@ def run_experiment(ray_logs_dir, baseline_type, zipf_exponent):
         "background_runtime_core_ids": [list(range(3, 32))],
         "workload_type": WORKLOAD_TYPE,
         "duration_seconds": [DURATION_SECONDS],  # Fixed 5 minute duration
+        "collect_dependency_tree": [True],  # Enable dependency tree collection for Pipelined
     }
 
     reporter = tune.CLIReporter(

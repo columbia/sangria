@@ -13,7 +13,7 @@ use proto::{
     frontend::frontend_client::FrontendClient,
     rangeserver::{range_server_client::RangeServerClient, GetStatisticsRequest},
     resolver::resolver_client::ResolverClient,
-    resolver::GetStatsRequest,
+    resolver::{GetStatsRequest, GetDependencyTreeRequest},
     universe::{CreateKeyspaceRequest, KeyRangeRequest, Zone as ProtoZone},
 };
 use rand::{distributions::WeightedIndex, prelude::*, rngs::StdRng, SeedableRng};
@@ -33,6 +33,22 @@ use uuid::Uuid;
 
 use tokio::signal::unix::{signal, SignalKind};
 
+// Struct to hold dependency tree data
+#[derive(Default, Debug, Clone)]
+pub struct DependencyTreeData {
+    pub transactions: Vec<TransactionNodeData>,
+    pub num_committed: u32,
+    pub num_aborted: u32,
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct TransactionNodeData {
+    pub id: String,
+    pub status: String,
+    pub dependencies: Vec<String>,
+    pub dependents: Vec<String>,
+}
+
 // Add a struct to hold our metrics
 #[derive(Default, Debug)]
 pub struct Metrics {
@@ -45,6 +61,7 @@ pub struct Metrics {
     pub throughput: f64,
     pub resolver_stats: HashMap<String, f64>,
     pub range_server_stats: HashMap<String, HashMap<String, Vec<String>>>,
+    pub dependency_tree: Option<DependencyTreeData>,
 }
 
 // Add a struct to hold our metrics
@@ -460,6 +477,45 @@ impl WorkloadGenerator {
             );
         }
         // info!("Range server stats: {:?}", range_server_stats);
+
+        // Fetch dependency tree from resolver
+        let dependency_tree = {
+            let mut resolver_client_clone = self.resolver_client.clone();
+            match resolver_client_clone
+                .get_dependency_tree(GetDependencyTreeRequest {})
+                .await
+            {
+                Ok(response) => {
+                    let response = response.into_inner();
+                    let transactions: Vec<TransactionNodeData> = response
+                        .transactions
+                        .into_iter()
+                        .map(|tx| TransactionNodeData {
+                            id: tx.id,
+                            status: tx.status,
+                            dependencies: tx.dependencies,
+                            dependents: tx.dependents,
+                        })
+                        .collect();
+                    info!(
+                        "Dependency tree: {} transactions, {} committed, {} aborted",
+                        transactions.len(),
+                        response.num_committed,
+                        response.num_aborted
+                    );
+                    Some(DependencyTreeData {
+                        transactions,
+                        num_committed: response.num_committed,
+                        num_aborted: response.num_aborted,
+                    })
+                }
+                Err(e) => {
+                    info!("Failed to fetch dependency tree (may be Traditional baseline): {:?}", e);
+                    None
+                }
+            }
+        };
+
         Metrics {
             total_duration,
             total_transactions,
@@ -470,6 +526,7 @@ impl WorkloadGenerator {
             throughput,
             resolver_stats: stats_map,
             range_server_stats,
+            dependency_tree,
         }
     }
 }

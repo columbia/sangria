@@ -1,10 +1,74 @@
 import json
 import os
 import re
+import sys
 import time
 import subprocess
+import tempfile
 from utils import *
 from atomix_setup import atomix_setup
+
+
+def fetch_dependency_tree(resolver_addr: str) -> dict:
+    """
+    Fetch the dependency tree from the resolver via gRPC.
+    Returns dict with transactions, num_committed, num_aborted.
+    Returns None if fetch fails (e.g., Traditional baseline doesn't track dependencies).
+    """
+    try:
+        # Find proto directory
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        proto_dir = os.path.join(script_dir, "..", "..", "proto", "src")
+        proto_file = os.path.join(proto_dir, "resolver.proto")
+
+        if not os.path.exists(proto_file):
+            print(f"Proto file not found: {proto_file}")
+            return None
+
+        # Generate gRPC stubs in temp directory
+        with tempfile.TemporaryDirectory() as stubs_dir:
+            cmd = [
+                sys.executable, "-m", "grpc_tools.protoc",
+                f"--proto_path={proto_dir}",
+                f"--python_out={stubs_dir}",
+                f"--grpc_python_out={stubs_dir}",
+                proto_file
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"Error generating gRPC stubs: {result.stderr}")
+                return None
+
+            # Add stubs directory to path and import
+            sys.path.insert(0, stubs_dir)
+            import grpc
+            import resolver_pb2
+            import resolver_pb2_grpc
+
+            # Connect to resolver and fetch tree
+            channel = grpc.insecure_channel(resolver_addr)
+            stub = resolver_pb2_grpc.ResolverStub(channel)
+            request = resolver_pb2.GetDependencyTreeRequest()
+            response = stub.GetDependencyTree(request, timeout=10)
+
+            # Convert to dict
+            transactions = []
+            for tx in response.transactions:
+                transactions.append({
+                    "id": tx.id,
+                    "status": tx.status,
+                    "dependencies": list(tx.dependencies),
+                    "dependents": list(tx.dependents),
+                })
+
+            return {
+                "transactions": transactions,
+                "num_committed": response.num_committed,
+                "num_aborted": response.num_aborted,
+            }
+    except Exception as e:
+        print(f"Error fetching dependency tree: {e}")
+        return None
 
 
 def parse_metrics(output):
@@ -73,6 +137,7 @@ def run_workload(config):
     workload_type = config["workload_type"]
     abort_rate = config.get("abort_rate", 0.0)  # Get abort_rate, default to 0.0
     duration_seconds = config.get("duration_seconds", None)  # Fixed duration mode
+    collect_dependency_tree = config.get("collect_dependency_tree", False)  # Dependency tree collection
 
     del config["iteration"]
     del config["baseline"]
@@ -84,6 +149,8 @@ def run_workload(config):
         del config["abort_rate"]  # Remove from workload config, will be set in server config
     if "duration_seconds" in config:
         del config["duration_seconds"]  # Remove from workload config, handled by ray_task
+    if "collect_dependency_tree" in config:
+        del config["collect_dependency_tree"]  # Remove from workload config, handled by ray_task
 
     # Main workload generator -- used to collect performance metrics
     cmd1 = [
@@ -205,6 +272,22 @@ def run_workload(config):
             print(stderr1)
             metrics = parse_metrics(stdout1)
             print("Finished main workload generator")
+
+            # Fetch dependency tree if enabled (for Pipelined baseline only)
+            if collect_dependency_tree and baseline == PIPELINED:
+                # Get resolver address from config
+                with open(RAY_SERVERS_CONFIG_PATH, "r") as f:
+                    servers_config = json.load(f)
+                resolver_addr = servers_config.get("resolver", {}).get("proto_server_addr", "localhost:50059")
+                print(f"Fetching dependency tree from resolver at {resolver_addr}...")
+                dependency_tree = fetch_dependency_tree(resolver_addr)
+                if dependency_tree:
+                    metrics["dependency_tree"] = dependency_tree
+                    metrics["num_committed"] = dependency_tree["num_committed"]
+                    metrics["num_aborted"] = dependency_tree["num_aborted"]
+                    print(f"Dependency tree: {dependency_tree['num_committed']} committed, {dependency_tree['num_aborted']} aborted")
+                else:
+                    print("Failed to fetch dependency tree (or not available)")
 
             # Send interrupt signal to the secondary workload generator
             if process2:
