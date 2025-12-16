@@ -45,8 +45,12 @@ def fetch_dependency_tree(resolver_addr: str) -> dict:
             import resolver_pb2
             import resolver_pb2_grpc
 
-            # Connect to resolver and fetch tree
-            channel = grpc.insecure_channel(resolver_addr)
+            # Connect to resolver and fetch tree (increase max message size for large trees)
+            options = [
+                ('grpc.max_receive_message_length', 50 * 1024 * 1024),  # 50MB
+                ('grpc.max_send_message_length', 50 * 1024 * 1024),  # 50MB
+            ]
+            channel = grpc.insecure_channel(resolver_addr, options=options)
             stub = resolver_pb2_grpc.ResolverStub(channel)
             request = resolver_pb2.GetDependencyTreeRequest()
             response = stub.GetDependencyTree(request, timeout=10)
