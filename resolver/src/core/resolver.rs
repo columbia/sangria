@@ -149,27 +149,47 @@ impl Resolver {
                 // of this transaction. If so, we need to notify them that we're aborting.
                 // This handles the race where TX B registers on TX A, then TX A discovers
                 // its dependency was aborted - TX B is waiting and needs to be notified.
-                let dependents_to_notify: Vec<Uuid> = state
+                //
+                // IMPORTANT: Only cascade to dependents that have a REAL pending dependency
+                // on this transaction (num_dependencies > 0 AND transaction_id in their dependencies)
+                let dependents_to_abort: Vec<Uuid> = state
                     .info_per_transaction
                     .get(&transaction_id)
-                    .map(|info| info.dependents.iter().cloned().collect())
+                    .map(|info| {
+                        info.dependents.iter()
+                            .filter(|dep_id| {
+                                if let Some(dep_info) = state.info_per_transaction.get(dep_id) {
+                                    dep_info.num_dependencies > 0 && dep_info.dependencies.contains(&transaction_id)
+                                } else {
+                                    false
+                                }
+                            })
+                            .cloned()
+                            .collect()
+                    })
                     .unwrap_or_default();
 
                 drop(state);  // Release the lock before spawning
 
-                // Spawn a task to cascade the abort to dependents
-                if !dependents_to_notify.is_empty() {
+                // Spawn a task to cascade the abort to dependents that have real dependencies
+                if !dependents_to_abort.is_empty() {
                     info!(
-                        "Transaction {:?} cascading abort to {} dependents: {:?}",
+                        "Transaction {:?} cascading abort to {} dependents with real dependencies: {:?}",
                         transaction_id,
-                        dependents_to_notify.len(),
-                        dependents_to_notify
+                        dependents_to_abort.len(),
+                        dependents_to_abort
                     );
                     let resolver_clone = resolver.clone();
-                    let mut all_to_abort = dependents_to_notify;
+                    let mut all_to_abort = dependents_to_abort;
                     all_to_abort.push(transaction_id);  // Include self to notify any waiters
                     resolver.bg_runtime.spawn(async move {
                         let _ = Self::register_aborted_transactions(resolver_clone, all_to_abort).await;
+                    });
+                } else {
+                    // Still need to register this transaction as aborted to notify any waiters
+                    let resolver_clone = resolver.clone();
+                    resolver.bg_runtime.spawn(async move {
+                        let _ = Self::register_aborted_transactions(resolver_clone, vec![transaction_id]).await;
                     });
                 }
 
@@ -370,7 +390,9 @@ impl Resolver {
     ) -> Result<(), Error> {
         info!("Aborting transaction {:?} and cascading to dependents", transaction_id);
 
-        // Walk the dependency graph to find ALL transitive dependents
+        // Walk the dependency graph to find transitive dependents that have REAL dependencies
+        // A dependent should only be aborted if it actually has a pending dependency on
+        // an aborted transaction (i.e., it read uncommitted data that won't commit).
         let mut transactions_to_abort = HashSet::new();
         transactions_to_abort.insert(transaction_id);
 
@@ -381,9 +403,25 @@ impl Resolver {
             while let Some(tx_id) = to_explore.pop() {
                 if let Some(tx_info) = state.info_per_transaction.get(&tx_id) {
                     for dependent in &tx_info.dependents {
-                        if transactions_to_abort.insert(*dependent) {
-                            info!("Cascading abort to dependent transaction {:?}", dependent);
+                        // Skip if already in abort set
+                        if transactions_to_abort.contains(dependent) {
+                            continue;
+                        }
+
+                        // Check if this dependent actually has a PENDING dependency on tx_id
+                        // (i.e., num_dependencies > 0 AND tx_id is in its dependencies set)
+                        let should_cascade = if let Some(dep_info) = state.info_per_transaction.get(dependent) {
+                            dep_info.num_dependencies > 0 && dep_info.dependencies.contains(&tx_id)
+                        } else {
+                            false
+                        };
+
+                        if should_cascade {
+                            transactions_to_abort.insert(*dependent);
+                            info!("Cascading abort to dependent transaction {:?} (has real dependency on {:?})", dependent, tx_id);
                             to_explore.push(*dependent);  // Recursively find their dependents
+                        } else {
+                            info!("Skipping cascade to {:?} - no real pending dependency on {:?}", dependent, tx_id);
                         }
                     }
                 }
