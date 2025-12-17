@@ -434,11 +434,32 @@ impl Resolver {
                 }
             }
 
-            // For each dependent, they must also abort since their dependency was aborted
-            // First, mark them as resolved (aborted) and notify them
+            // For each dependent, check if they actually have a pending dependency on one of
+            // the aborted transactions. Only abort them if they do.
+            // This fixes the bug where ALL dependents were being aborted regardless of whether
+            // they actually had a real dependency on the aborted transaction.
+            let aborted_set: std::collections::HashSet<Uuid> = transaction_ids.iter().cloned().collect();
+
             for dependent_id in &new_ready_to_check {
                 // Skip if already resolved (already aborted via cascading or direct abort)
                 if state.resolved_transactions.contains(dependent_id) {
+                    continue;
+                }
+
+                // Check if this dependent actually has a pending dependency on one of the aborted transactions
+                // A dependent should only be aborted if:
+                // 1. It has num_dependencies > 0 (still waiting for something)
+                // 2. One of its recorded dependencies is in the aborted set
+                let should_abort = if let Some(dependent_info) = state.info_per_transaction.get(dependent_id) {
+                    // Check if this dependent has any of the aborted transactions as a dependency
+                    dependent_info.num_dependencies > 0 &&
+                        dependent_info.dependencies.iter().any(|dep| aborted_set.contains(dep))
+                } else {
+                    false
+                };
+
+                if !should_abort {
+                    info!("Dependent {:?} does NOT have a real dependency on aborted transactions, skipping cascade", dependent_id);
                     continue;
                 }
 
