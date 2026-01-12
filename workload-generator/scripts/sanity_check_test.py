@@ -94,26 +94,43 @@ def count_from_logs():
     """Count aborted/committed from server logs."""
     counts = {
         "artificial_aborts": 0,
-        "cascading_aborts": 0,
+        "resolver_aborts": 0,
         "total_aborts_logged": 0,
     }
 
-    # Check rangeserver log for artificial aborts
+    # Check rangeserver log for artificial aborts (root cause)
     rangeserver_log = ROOT_DIR / "log-rangeserver.txt"
     if rangeserver_log.exists():
         with open(rangeserver_log, 'r') as f:
             content = f.read()
             counts["artificial_aborts"] = content.count("Artificially aborting transaction")
 
-    # Check resolver log for cascading aborts
+    # Check resolver log for ALL aborts processed by resolver
+    # "cascading to dependents" is logged for every abort call
     resolver_log = ROOT_DIR / "log-resolver.txt"
     if resolver_log.exists():
         with open(resolver_log, 'r') as f:
             content = f.read()
-            counts["cascading_aborts"] = content.count("Cascading abort")
+            counts["resolver_aborts"] = content.count("cascading to dependents")
 
-    counts["total_aborts_logged"] = counts["artificial_aborts"] + counts["cascading_aborts"]
+    counts["total_aborts_logged"] = counts["artificial_aborts"] + counts["resolver_aborts"]
     return counts
+
+
+def compute_cascade_stats(committed, expected, artificial_aborts):
+    """
+    Compute cascading abort statistics.
+
+    Total aborts = expected - committed
+    Cascaded aborts = Total aborts - Artificial aborts
+    """
+    total_aborts = expected - committed
+    cascaded = max(0, total_aborts - artificial_aborts)
+    return {
+        "total_aborts": total_aborts,
+        "cascaded_aborts": cascaded,
+        "cascade_ratio": cascaded / artificial_aborts if artificial_aborts > 0 else 0
+    }
 
 
 def run_single_test(baseline, abort_rate):
@@ -210,12 +227,24 @@ def run_single_test(baseline, abort_rate):
         result["committed"] = metrics["total_transactions"]
         result["throughput"] = metrics["throughput"]
         result["artificial_aborts"] = log_counts["artificial_aborts"]
-        result["cascading_aborts"] = log_counts["cascading_aborts"]
+
+        # Compute cascading abort stats
+        cascade_stats = compute_cascade_stats(
+            result["committed"],
+            NUM_TRANSACTIONS,
+            log_counts["artificial_aborts"]
+        )
+        result["total_aborts"] = cascade_stats["total_aborts"]
+        result["cascaded_aborts"] = cascade_stats["cascaded_aborts"]
+        result["cascade_ratio"] = cascade_stats["cascade_ratio"]
 
         # Log detailed results
         log_message(f"RESULT: Committed = {result['committed']} / {NUM_TRANSACTIONS}")
-        log_message(f"  Artificial aborts (from logs): {log_counts['artificial_aborts']}")
-        log_message(f"  Cascading aborts (from logs): {log_counts['cascading_aborts']}")
+        log_message(f"  Total Aborted: {cascade_stats['total_aborts']}")
+        log_message(f"  Artificial aborts (root cause): {log_counts['artificial_aborts']}")
+        log_message(f"  Cascaded aborts (computed): {cascade_stats['cascaded_aborts']}")
+        if cascade_stats['cascade_ratio'] > 0:
+            log_message(f"  Cascade ratio: {cascade_stats['cascade_ratio']:.2f}x amplification")
         log_message(f"  Throughput: {metrics['throughput']:.2f} tx/sec")
         log_message(f"  Avg Latency: {metrics['avg_latency']}")
 
@@ -290,18 +319,20 @@ def print_summary(results):
     log_message("="*80)
 
     # Header
-    print(f"\n{'Baseline':<12} {'Abort%':<8} {'Committed':<12} {'Artificial':<12} {'Cascaded':<12} {'Success':<8}")
-    print("-" * 72)
+    print(f"\n{'Baseline':<12} {'Abort%':<8} {'Committed':<12} {'TotalAbort':<12} {'Artificial':<12} {'Cascaded':<12} {'CascadeX':<10}")
+    print("-" * 88)
 
     # Group by baseline
     for baseline in BASELINES:
         baseline_results = [r for r in results if r["baseline"] == baseline]
         for r in baseline_results:
-            status = "✓" if r["success"] else "✗"
-            art_aborts = r.get("artificial_aborts", "N/A")
-            casc_aborts = r.get("cascading_aborts", "N/A")
-            print(f"{r['baseline']:<12} {r['abort_rate']*100:<8.0f} {r['committed']:<12} {str(art_aborts):<12} {str(casc_aborts):<12} {status:<8}")
-        print("-" * 72)
+            total_abort = r.get("total_aborts", 0)
+            art_aborts = r.get("artificial_aborts", 0)
+            casc_aborts = r.get("cascaded_aborts", 0)
+            cascade_ratio = r.get("cascade_ratio", 0)
+            ratio_str = f"{cascade_ratio:.2f}x" if cascade_ratio > 0 else "-"
+            print(f"{r['baseline']:<12} {r['abort_rate']*100:<8.0f} {r['committed']:<12} {total_abort:<12} {art_aborts:<12} {casc_aborts:<12} {ratio_str:<10}")
+        print("-" * 88)
 
     # Analysis
     log_message("\nANALYSIS:")
