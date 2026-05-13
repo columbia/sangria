@@ -911,6 +911,7 @@ pub mod tests {
             universe: UniverseConfig {
                 proto_server_addr: "127.0.0.1:123".parse().unwrap(),
             },
+            early_lock_release_tuning: None,
             frontend: FrontendConfig {
                 proto_server_addr: HostPort::from_str("127.0.0.1:50056").unwrap(),
                 fast_network_addr: HostPort::from_str("127.0.0.1:50057").unwrap(),

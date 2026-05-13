@@ -1,9 +1,13 @@
 use std::fs;
 
+fn builder() -> tonic_build::Builder {
+    tonic_build::configure().protoc_arg("--experimental_allow_proto3_optional")
+}
+
 fn main() {
     let epoch_out_dir = "target/epoch";
     fs::create_dir_all(epoch_out_dir).unwrap();
-    tonic_build::configure()
+    builder()
         .build_server(true)
         .out_dir(epoch_out_dir)
         .compile(
@@ -14,7 +18,7 @@ fn main() {
 
     let epoch_publisher_out_dir = "target/epoch_publisher";
     fs::create_dir_all(epoch_publisher_out_dir).unwrap();
-    tonic_build::configure()
+    builder()
         .build_server(true)
         .out_dir(epoch_publisher_out_dir)
         .compile(
@@ -25,7 +29,7 @@ fn main() {
 
     let range_server_out_dir = "target/rangeserver";
     fs::create_dir_all(range_server_out_dir).unwrap();
-    tonic_build::configure()
+    builder()
         .build_server(true)
         .out_dir(range_server_out_dir)
         .compile(
@@ -36,7 +40,7 @@ fn main() {
 
     let warden_out_dir = "target/warden";
     fs::create_dir_all(warden_out_dir).unwrap();
-    tonic_build::configure()
+    builder()
         .build_server(true)
         .out_dir(warden_out_dir)
         .compile(
@@ -47,7 +51,7 @@ fn main() {
 
     let universe_out_dir = "target/universe";
     fs::create_dir_all(universe_out_dir).unwrap();
-    tonic_build::configure()
+    builder()
         .build_server(true)
         .out_dir(universe_out_dir)
         .compile(
@@ -58,7 +62,7 @@ fn main() {
 
     let frontend_out_dir = "target/frontend";
     fs::create_dir_all(frontend_out_dir).unwrap();
-    tonic_build::configure()
+    builder()
         .build_server(true)
         .out_dir(frontend_out_dir)
         .compile(
@@ -69,7 +73,7 @@ fn main() {
 
     let resolver_out_dir = "target/resolver";
     fs::create_dir_all(resolver_out_dir).unwrap();
-    tonic_build::configure()
+    builder()
         .build_server(true)
         .out_dir(resolver_out_dir)
         .compile(

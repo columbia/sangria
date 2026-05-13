@@ -179,6 +179,15 @@ impl WorkloadGenerator {
                 keys.sort();
                 keys
             }
+            "one-key" => {
+                // Generate exactly 1 key uniformly from available keys.
+                let mut rng = self.rng.lock().await;
+                let key: usize = (0..self.workload_config.num_keys)
+                    .choose(&mut *rng)
+                    .unwrap() as usize;
+                drop(rng);
+                vec![key]
+            }
             "ycsb" => {
                 // Get the next transaction from the YCSB workload
                 let mut txs = self.ycsb_transactions.lock().await;

@@ -7,7 +7,7 @@ use crate::{
 };
 use bytes::Bytes;
 use colored::Colorize;
-use common::config::{CommitStrategy, Config, Heuristic};
+use common::config::{CommitStrategy, Config, EarlyLockReleaseTuning, Heuristic};
 use common::full_range_id::FullRangeId;
 use common::transaction_info::TransactionInfo;
 use std::fs::File;
@@ -804,6 +804,11 @@ where
         resolver_average_load: f64,
         num_open_clients: u32,
     ) -> bool {
+        let t: EarlyLockReleaseTuning = self
+            .config
+            .early_lock_release_tuning
+            .clone()
+            .unwrap_or_default();
         match self.config.commit_strategy {
             CommitStrategy::Pipelined => true,
             CommitStrategy::Traditional => false,
@@ -811,17 +816,21 @@ where
                 match self.config.heuristic {
                     Heuristic::OpenClients => {
                         let contention_proxy = num_open_clients as f64;
-                        if resolver_average_load >= 5000.0 {
+                        if resolver_average_load >= t.resolver_load_high {
                             // avoid resolver
                             return false;
-                        } else if 200.0 <= resolver_average_load && resolver_average_load < 5000.0 {
-                            if contention_proxy > 100.0 {
+                        } else if t.resolver_load_mid <= resolver_average_load
+                            && resolver_average_load < t.resolver_load_high
+                        {
+                            if contention_proxy > t.open_clients_mid {
                                 return true;
                             } else {
                                 return false;
                             }
-                        } else if 50.0 <= resolver_average_load && resolver_average_load < 200.0 {
-                            if contention_proxy > 50.0 {
+                        } else if t.resolver_load_low <= resolver_average_load
+                            && resolver_average_load < t.resolver_load_mid
+                        {
+                            if contention_proxy > t.open_clients_low {
                                 return true;
                             } else {
                                 return false;
@@ -833,17 +842,21 @@ where
                     }
                     Heuristic::LockContention => {
                         let contention_proxy = state.lock_table.get_num_waiters_and_pending().await;
-                        if resolver_average_load >= 5000.0 {
+                        if resolver_average_load >= t.resolver_load_high {
                             // avoid resolver
                             return false;
-                        } else if 200.0 <= resolver_average_load && resolver_average_load < 5000.0 {
-                            if contention_proxy > 40.0 {
+                        } else if t.resolver_load_mid <= resolver_average_load
+                            && resolver_average_load < t.resolver_load_high
+                        {
+                            if contention_proxy > t.lock_contention_mid {
                                 return true;
                             } else {
                                 return false;
                             }
-                        } else if 50.0 <= resolver_average_load && resolver_average_load < 200.0 {
-                            if contention_proxy > 20.0 {
+                        } else if t.resolver_load_low <= resolver_average_load
+                            && resolver_average_load < t.resolver_load_mid
+                        {
+                            if contention_proxy > t.lock_contention_low {
                                 return true;
                             } else {
                                 return false;
@@ -1067,6 +1080,7 @@ mod tests {
             universe: UniverseConfig {
                 proto_server_addr: "127.0.0.1:123".parse().unwrap(),
             },
+            early_lock_release_tuning: None,
             frontend: FrontendConfig {
                 proto_server_addr: "127.0.0.1:124".parse().unwrap(),
                 fast_network_addr: HostPort::from_str("127.0.0.1:125").unwrap(),

@@ -30,6 +30,17 @@ pub enum Heuristic {
     // Static,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct EarlyLockReleaseTuning {
+    pub resolver_load_low: f64,
+    pub resolver_load_mid: f64,
+    pub resolver_load_high: f64,
+    pub open_clients_low: f64,
+    pub open_clients_mid: f64,
+    pub lock_contention_low: f64,
+    pub lock_contention_mid: f64,
+}
+
 /// Represents a host and port combination.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct HostPort {
@@ -176,6 +187,7 @@ pub struct ResolverConfig {
 pub struct Config {
     pub commit_strategy: CommitStrategy,
     pub heuristic: Heuristic,
+    pub early_lock_release_tuning: Option<EarlyLockReleaseTuning>,
     pub print_lock_table_state: bool,
     pub range_server: RangeServerConfig,
     pub epoch: EpochConfig,

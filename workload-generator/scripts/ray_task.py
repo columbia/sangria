@@ -59,6 +59,8 @@ def run_workload(config):
 
     iteration = config["iteration"]
     baseline = config["baseline"]
+    threshold_overrides = config.get("threshold_overrides", {})
+    main_fake = config.get("main_fake", False)
     resolver_background_runtime_core_ids = config["resolver_capacity"][
         "background_runtime_core_ids"
     ]
@@ -72,12 +74,22 @@ def run_workload(config):
     main_background_runtime_core_ids = config["background_runtime_core_ids"]
     workload_type = config["workload_type"]
 
+    # Start from base thresholds and apply explicit overrides.
+    base_thresholds = atomix_setup.servers_config["early_lock_release_tuning"]
+    early_lock_release_tuning = dict(base_thresholds)
+
+    # Allow explicit tuning overrides from run_experiments.py (e.g., open_clients grid).
+    early_lock_release_tuning.update(threshold_overrides)
+
     del config["iteration"]
     del config["baseline"]
     del config["resolver_capacity"]
     del config["resolver_cores"]
     del config["resolver_tx_load"]
     del config["resolver_tx_load_concurrency"]
+    del config["main_fake"]
+    if "threshold_overrides" in config:
+        del config["threshold_overrides"]
 
     # Main workload generator -- used to collect performance metrics
     cmd1 = [
@@ -107,17 +119,23 @@ def run_workload(config):
         atomix_setup.servers_config["resolver"][
             "background_runtime_core_ids"
         ] = resolver_background_runtime_core_ids
+        atomix_setup.servers_config["commit_strategy"] = baseline
+        atomix_setup.servers_config[
+            "early_lock_release_tuning"
+        ] = early_lock_release_tuning
         atomix_setup.dump_servers_config()
         atomix_setup.kill_servers()
         atomix_setup.reset_cassandra()
         atomix_setup.start_servers()
 
         # Create a temporary config file with the parameters of the main workload generator
-        config["fake_transactions"] = False
+        # If `main_fake` is set, run the main workload as the fake-transaction generator.
+        config["fake_transactions"] = True if main_fake else False
         os.makedirs(os.path.dirname(MAIN_RAY_WORKLOAD_CONFIG_PATH), exist_ok=True)
         with open(MAIN_RAY_WORKLOAD_CONFIG_PATH, "w") as f:
             json.dump(config, f)
-        cmd1.append("--create-keyspace")
+        if not main_fake:
+            cmd1.append("--create-keyspace")
 
         # Create a temporary config file with the parameters of the secondary workload generator
         config["fake_transactions"] = True
@@ -146,6 +164,8 @@ def run_workload(config):
     config["baseline"] = baseline
     config["resolver_cores"] = resolver_cores
     config["resolver_tx_load_concurrency"] = resolver_tx_load["max_concurrency"]
+    vals = [str(v) for v in threshold_overrides.values()]
+    config["threshold_overrides"] = ",".join(vals)
     print("cmd1: ", cmd1)
     print("cmd2: ", cmd2)
 
