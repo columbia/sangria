@@ -11,7 +11,8 @@ import pandas as pd
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-pio.kaleido.scope.mathjax = None
+if getattr(pio.kaleido, "scope", None) is not None:
+    pio.kaleido.scope.mathjax = None
 
 colors_list = [
     "red",
@@ -170,7 +171,13 @@ def make_plots(
         # margin=dict(t=0, b=0),
     )
     # fig.show()
-    fig.write_image(f"{output_path}.png", engine="kaleido")
+    fig.write_html(f"{output_path}.html", include_plotlyjs="cdn")
+    try:
+        fig.write_image(f"{output_path}.png")
+    except Exception as error:
+        message = str(error).strip()
+        reason = message.splitlines()[0] if message else type(error).__name__
+        print(f"Could not export {output_path}.png ({reason}); kept HTML output.")
     return fig
 
 

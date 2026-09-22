@@ -2,7 +2,8 @@ from pathlib import Path
 from typing import Dict, List
 import pandas as pd
 import plotly.express as px
-from run_experiments import RAY_LOGS_DIR
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from plotter import (
     make_plots,
     bar,
@@ -17,14 +18,13 @@ from plotter import (
     delta_between_requests,
     avg_entropy,
 )
-import plotly.io as pio
 import argparse
 import json
-from utils import process_resolver_stats_group_sizes, get_unique_key_values
+from utils import RAY_LOGS_DIR, process_resolver_stats_group_sizes, get_unique_key_values
 from itertools import product
-import copy
 import warnings
 from datetime import datetime
+import ast
 
 warnings.filterwarnings("ignore")
 
@@ -73,8 +73,8 @@ class Plotter:
         self.results.columns = self.results.columns.str.replace("config/", "")
 
     def process_results(self):
-        self.results = self.results[self.results["iteration"] != 0]
-        results = self.results.groupby(CONFIG_PARAMS)[METRICS].mean().reset_index()
+        group_params = [param for param in CONFIG_PARAMS if param in self.results]
+        results = self.results.groupby(group_params)[METRICS].mean().reset_index()
         return results
 
     def plot_metrics_vs_x_vs_z(
@@ -128,8 +128,7 @@ class Plotter:
         df.to_csv(out_dir.joinpath(f"{y}_{facet_row}_{x}.csv"), index=False)
 
     def plot_resolver_group_sizes(self, free_param: str, fixed_params: Dict[str, int]):
-        # Only first iteration of each experiment
-        results = self.results[self.results["iteration"] == 1].copy()
+        results = self.results.copy()
 
         keys_fixed = list(fixed_params.keys())
         df = results[["resolver_stats", "baseline", free_param, *keys_fixed]]
@@ -472,6 +471,334 @@ class Plotter:
         make_plots(figs, rows=rows, cols=cols, **figs_args)
 
 
+BASELINE_LABELS = {
+    "Adaptive": "Sangria",
+    "Pipelined": "Pipelined-2PC",
+    "Traditional": "Strict-2PC",
+}
+BASELINE_COLORS = {
+    "Sangria": "#2ca02c",
+    "Pipelined-2PC": "#d62728",
+    "Strict-2PC": "#1f77b4",
+}
+
+
+def _save_figure(fig: go.Figure, output_path: Path):
+    """Always save an interactive plot; save a PNG when Kaleido is available."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.write_html(str(output_path.with_suffix(".html")), include_plotlyjs="cdn")
+    try:
+        fig.write_image(str(output_path.with_suffix(".png")))
+    except Exception as error:
+        message = str(error).strip()
+        reason = message.splitlines()[0] if message else type(error).__name__
+        print(f"Could not export {output_path.name}.png ({reason}); kept HTML output.")
+
+
+def _parse_resolver_stats(value):
+    if isinstance(value, dict):
+        return value
+    if pd.isna(value) or not value:
+        return {}
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        try:
+            return ast.literal_eval(value)
+        except (ValueError, SyntaxError):
+            return {}
+
+
+def _filter_fixed_params(df: pd.DataFrame, fixed_params: Dict):
+    filtered = df.copy()
+    for param, value in fixed_params.items():
+        if param not in filtered:
+            continue
+        numeric = pd.to_numeric(filtered[param], errors="coerce")
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            filtered = filtered[filtered[param].astype(str) == str(value)]
+        else:
+            filtered = filtered[numeric == numeric_value]
+    return filtered
+
+
+def _repeat_traditional_across_resolver_loads(df: pd.DataFrame):
+    load = "resolver_tx_load_concurrency"
+    if load not in df or "baseline" not in df:
+        return df
+    target_loads = df.loc[df["baseline"] != "Traditional", load].dropna().unique()
+    traditional = df[df["baseline"] == "Traditional"]
+    if traditional.empty or len(target_loads) == 0:
+        return df
+    non_traditional = df[df["baseline"] != "Traditional"]
+    copies = []
+    for value in target_loads:
+        copied = traditional.copy()
+        copied[load] = value
+        copies.append(copied)
+    return pd.concat([non_traditional, *copies], ignore_index=True)
+
+
+def _paper_labels(df: pd.DataFrame):
+    labeled = df.copy()
+    labeled["protocol"] = labeled["baseline"].map(BASELINE_LABELS).fillna(
+        labeled["baseline"]
+    )
+    return labeled
+
+
+def plot_generic_throughput(
+    plotter: Plotter, free_params: List[str], fixed_params: Dict
+):
+    df = _filter_fixed_params(plotter.results, fixed_params)
+    df = _repeat_traditional_across_resolver_loads(df)
+    x, facet = free_params[1], free_params[0]
+    if df[x].nunique() == 1 and df[facet].nunique() > 1:
+        x, facet = facet, x
+
+    summary = (
+        df.groupby(["baseline", x, facet], dropna=False)["throughput"]
+        .mean()
+        .reset_index()
+    )
+    summary = _paper_labels(summary)
+    summary.to_csv(plotter.plots_path / "throughput_summary.csv", index=False)
+    facet_arg = facet if summary[facet].nunique() > 1 else None
+    fig = px.bar(
+        summary,
+        x=x,
+        y="throughput",
+        color="protocol",
+        facet_col=facet_arg,
+        barmode="group",
+        labels={"throughput": "Transactions / sec", x: x.replace("_", " ")},
+        color_discrete_map=BASELINE_COLORS,
+    )
+    fig.update_layout(template="simple_white", legend_title_text="", height=430)
+    fig.update_yaxes(matches="y")
+    _save_figure(fig, plotter.plots_path / "throughput")
+
+
+def plot_single_parameter_throughput(
+    plotter: Plotter, free_param: str, fixed_params: Dict
+):
+    df = _filter_fixed_params(plotter.results, fixed_params)
+    if free_param not in df:
+        print(f"Skipping plot: result column '{free_param}' was not produced.")
+        return
+    summary = (
+        df.groupby(["baseline", free_param], dropna=False)["throughput"]
+        .mean()
+        .reset_index()
+    )
+    summary = _paper_labels(summary)
+    summary.to_csv(plotter.plots_path / "throughput_summary.csv", index=False)
+    fig = px.line(
+        summary,
+        x=free_param,
+        y="throughput",
+        color="protocol",
+        markers=True,
+        labels={
+            "throughput": "Transactions / sec",
+            free_param: free_param.replace("_", " "),
+        },
+        color_discrete_map=BASELINE_COLORS,
+    )
+    fig.update_layout(template="simple_white", legend_title_text="", height=430)
+    _save_figure(fig, plotter.plots_path / "throughput")
+
+
+def plot_threshold_sensitivity(plotter: Plotter, threshold_column: str):
+    is_contention = threshold_column.endswith("open_clients_low")
+    adaptive = plotter.results[plotter.results["baseline"] == "Adaptive"].copy()
+    adaptive[threshold_column] = pd.to_numeric(
+        adaptive[threshold_column], errors="coerce"
+    )
+    adaptive = adaptive.dropna(subset=[threshold_column])
+    summary = (
+        adaptive.groupby(threshold_column)["throughput"].mean().reset_index()
+    )
+    summary = summary.sort_values(threshold_column, ascending=not is_contention)
+    summary["profile"] = range(1, len(summary) + 1)
+
+    baseline_means = (
+        plotter.results[plotter.results["baseline"].isin(["Pipelined", "Traditional"])]
+        .groupby("baseline")["throughput"]
+        .mean()
+    )
+    for baseline, value in baseline_means.items():
+        summary[BASELINE_LABELS[baseline]] = value
+    summary = summary.rename(columns={threshold_column: "threshold", "throughput": "Sangria"})
+    summary.to_csv(
+        plotter.plots_path
+        / ("fig10_contention.csv" if is_contention else "fig10_resolver.csv"),
+        index=False,
+    )
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=summary["profile"],
+            y=summary["Sangria"],
+            mode="lines+markers",
+            name="Sangria",
+            line=dict(color=BASELINE_COLORS["Sangria"], width=3),
+        )
+    )
+    for protocol, dash in (("Strict-2PC", "dash"), ("Pipelined-2PC", "dot")):
+        if protocol in summary:
+            fig.add_trace(
+                go.Scatter(
+                    x=summary["profile"],
+                    y=summary[protocol],
+                    mode="lines",
+                    name=protocol,
+                    line=dict(color=BASELINE_COLORS[protocol], dash=dash, width=2),
+                )
+            )
+    reference = 50 if is_contention else 200
+    reference_rows = summary.index[summary["threshold"] == reference].tolist()
+    if reference_rows:
+        fig.add_vline(x=int(summary.loc[reference_rows[0], "profile"]), line_dash="dashdot")
+    symbol = "C_L" if is_contention else "R_M"
+    fig.update_xaxes(
+        tickmode="array",
+        tickvals=summary["profile"],
+        ticktext=summary["threshold"],
+        title=f"Threshold {symbol}",
+    )
+    fig.update_yaxes(title="Transactions / sec", showgrid=True)
+    fig.update_layout(template="simple_white", legend_title_text="", height=430)
+    stem = "fig10_contention" if is_contention else "fig10_resolver"
+    _save_figure(fig, plotter.plots_path / stem)
+
+
+def plot_threshold_grid(plotter: Plotter, low_column: str, mid_column: str):
+    """Plot the older two-threshold sweep without treating it as Figure 10."""
+    df = plotter.results[plotter.results["baseline"] == "Adaptive"].copy()
+    for column in (low_column, mid_column):
+        df[column] = pd.to_numeric(df[column], errors="coerce")
+    summary = (
+        df.dropna(subset=[low_column, mid_column])
+        .groupby([low_column, mid_column])["throughput"]
+        .mean()
+        .reset_index()
+    )
+    summary.to_csv(plotter.plots_path / "threshold_grid.csv", index=False)
+    pivot = summary.pivot(index=mid_column, columns=low_column, values="throughput")
+    fig = go.Figure(
+        go.Heatmap(
+            x=pivot.columns,
+            y=pivot.index,
+            z=pivot.values,
+            colorbar_title="tx/s",
+        )
+    )
+    fig.update_xaxes(title="Open-client low threshold")
+    fig.update_yaxes(title="Open-client middle threshold")
+    fig.update_layout(template="simple_white", height=480)
+    _save_figure(fig, plotter.plots_path / "threshold_grid")
+
+
+def plot_resolver_calibration(plotter: Plotter):
+    rows = []
+    for _, row in plotter.results.iterrows():
+        stats = _parse_resolver_stats(row.get("resolver_stats"))
+        concurrency = str(row["resolver_tx_load_concurrency"]).split(":", 1)[0]
+        rows.append(
+            {
+                "background_clients": pd.to_numeric(concurrency, errors="coerce"),
+                "Resolver load (mean)": stats.get("resolver_load_signal_avg"),
+                "Resolver load (max)": stats.get("resolver_load_signal_max"),
+            }
+        )
+    summary = pd.DataFrame(rows).dropna(subset=["background_clients"])
+    value_columns = [column for column in summary if column != "background_clients"]
+    if summary.empty or summary[value_columns].notna().sum().sum() == 0:
+        print("Skipping calibration plot: no Resolver-load signal was recorded.")
+        return
+    summary = summary.groupby("background_clients", as_index=False).mean()
+    summary.to_csv(plotter.plots_path / "resolver_calibration.csv", index=False)
+    melted = summary.melt(
+        id_vars="background_clients", var_name="signal", value_name="resolver_load"
+    )
+    fig = px.line(
+        melted,
+        x="background_clients",
+        y="resolver_load",
+        color="signal",
+        markers=True,
+        labels={
+            "background_clients": "Background clients",
+            "resolver_load": "Resolver load",
+        },
+    )
+    fig.update_layout(template="simple_white", legend_title_text="", height=430)
+    _save_figure(fig, plotter.plots_path / "resolver_calibration")
+
+
+def plot_dependency_stress(plotter: Plotter):
+    records = []
+    for baseline, rows in plotter.results.groupby("baseline"):
+        parsed_stats = rows["resolver_stats"].apply(_parse_resolver_stats)
+
+        def stat_values(name):
+            return pd.Series(
+                [stats.get(name, 0) for stats in parsed_stats], dtype=float
+            )
+
+        records.append(
+            {
+                "protocol": BASELINE_LABELS.get(baseline, baseline),
+                "throughput": rows["throughput"].mean(),
+                "avg_latency_ms": rows["avg_latency"].mean() * 1000,
+                "p99_latency_ms": rows["p99_latency"].mean() * 1000,
+                "chain_p50": stat_values("dependency_depth_p50").mean(),
+                "chain_p95": stat_values("dependency_depth_p95").mean(),
+                "chain_max": stat_values("dependency_depth_max").max(),
+                "max_resolver_queue": stat_values("max_resolver_queue").max(),
+                "max_participant_batch": stat_values("max_participant_batch").max(),
+            }
+        )
+    summary = pd.DataFrame(records)
+    order = ["Strict-2PC", "Pipelined-2PC", "Sangria"]
+    summary["protocol"] = pd.Categorical(summary["protocol"], order, ordered=True)
+    summary = summary.sort_values("protocol")
+    summary.to_csv(plotter.plots_path / "table4_summary.csv", index=False)
+
+    fig = make_subplots(rows=1, cols=2, subplot_titles=("Throughput", "Latency"))
+    for _, row in summary.iterrows():
+        protocol = str(row["protocol"])
+        color = BASELINE_COLORS.get(protocol)
+        fig.add_trace(
+            go.Bar(
+                x=[protocol], y=[row["throughput"]], name=protocol,
+                marker_color=color, legendgroup=protocol,
+            ),
+            row=1,
+            col=1,
+        )
+        fig.add_trace(
+            go.Bar(
+                x=["Mean", "p99"],
+                y=[row["avg_latency_ms"], row["p99_latency_ms"]],
+                name=protocol,
+                marker_color=color,
+                legendgroup=protocol,
+                showlegend=False,
+            ),
+            row=1,
+            col=2,
+        )
+    fig.update_yaxes(title_text="Transactions / sec", row=1, col=1)
+    fig.update_yaxes(title_text="Latency (ms)", row=1, col=2)
+    fig.update_layout(template="simple_white", barmode="group", height=430)
+    _save_figure(fig, plotter.plots_path / "table4_performance")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Plot metrics for a given Ray Tune experiment"
@@ -502,67 +829,54 @@ def main():
     args = parser.parse_args()
     plotter = Plotter(args.experiment_name)
 
-    fixed_params = {
-        k: float(v)
-        for k, v in [param.split("=") for param in args.fixed_params.split(",")]
-    }
+    fixed_params = {}
+    for parameter in filter(None, args.fixed_params.split(",")):
+        key, value = parameter.split("=", 1)
+        try:
+            fixed_params[key] = float(value)
+        except ValueError:
+            fixed_params[key] = value
 
-    free_params = args.free_params.split(",")
-    assert len(free_params) <= 2
+    free_params = [param for param in args.free_params.split(",") if param]
+    if len(free_params) not in (1, 2):
+        parser.error("--free-params must contain one or two comma-separated columns")
 
-    # Obtain the df_traditional where baseline is Traditional and concat it with the df for every value of resolver_cores
-    df_traditional = plotter.results[plotter.results["baseline"] == "Traditional"]
-    df = plotter.results[plotter.results["baseline"] != "Traditional"]
+    low_threshold = "threshold_overrides/open_clients_low"
+    mid_threshold = "threshold_overrides/open_clients_mid"
+    resolver_threshold = "threshold_overrides/resolver_load_mid"
+    columns = set(plotter.results.columns)
 
-    #  Didn't rerun traditional experiments for each value of resolver_tx_load_concurrency because it's invariant to it
-    for resolver_tx_load_concurrency in get_unique_key_values(
-        df, "resolver_tx_load_concurrency"
-    ):
-        df_traditional["resolver_tx_load_concurrency"] = resolver_tx_load_concurrency
-        df = pd.concat([df, copy.deepcopy(df_traditional)])
-    plotter.results = df
+    if free_params == ["baseline"]:
+        plot_dependency_stress(plotter)
+    elif resolver_threshold in columns:
+        plot_threshold_sensitivity(plotter, resolver_threshold)
+    elif low_threshold in columns and mid_threshold not in columns:
+        plot_threshold_sensitivity(plotter, low_threshold)
+    elif low_threshold in columns and mid_threshold in columns:
+        plot_threshold_grid(plotter, low_threshold, mid_threshold)
+    elif free_params == ["resolver_tx_load_concurrency"]:
+        plot_resolver_calibration(plotter)
+    elif len(free_params) == 1:
+        plot_single_parameter_throughput(plotter, free_params[0], fixed_params)
+    else:
+        plot_generic_throughput(plotter, free_params, fixed_params)
 
-    # --------Plot Metrics vs X vs Z--------
-    facet_row, x_axis = free_params
-    for metric in METRICS:
-        plotter.plot_metrics_vs_x_vs_z(
-            y=metric,
-            x=x_axis,
-            facet_row=facet_row,
-            fixed_params=fixed_params,
-        )
-
-    #     # --------Plot Resolver Stats--------
-    #     facet_row, x_axis = free_params
-    #     for stat in RESOLVER_STATS:
-    #         plotter.plot_resolver_stats(
-    #             y=stat,
-    #             x=x_axis,
-    #             facet_row=facet_row,
-    #             fixed_params=fixed_params,
-    #         )
-
-    # # --------Plot Range Server Stats--------
-    # unique_resolver_loads = get_unique_key_values(df, "resolver_tx_load_concurrency")
-    # unique_baselines = get_unique_key_values(df, "baseline")
-
-    # for unique_baseline in unique_baselines:
-    #     for unique_resolver_load in unique_resolver_loads:
-    #         fixed_params["resolver_tx_load_concurrency"] = unique_resolver_load
-    #         fixed_params["baseline"] = unique_baseline
-    #         plotter.plot_range_server_stats(
-    #             fixed_params=fixed_params,
-    #         )
-
-    # --------Plot Resolver Group Sizes--------
-    subplot_key = free_params[0]
-    unique_values_of_subplot_key = get_unique_key_values(plotter.results, subplot_key)
-    for subplot_key_value in unique_values_of_subplot_key:
-        fixed_params[subplot_key] = subplot_key_value
-        plotter.plot_resolver_group_sizes(
-            free_param=free_params[1],
-            fixed_params=fixed_params,
-        )
+        # Retain the legacy batch-size CDF as a best-effort secondary output.
+        try:
+            plotter.results = _repeat_traditional_across_resolver_loads(
+                plotter.results
+            )
+            subplot_key = free_params[0]
+            for subplot_value in get_unique_key_values(plotter.results, subplot_key):
+                group_fixed_params = dict(fixed_params)
+                group_fixed_params[subplot_key] = subplot_value
+                plotter.plot_resolver_group_sizes(
+                    free_param=free_params[1],
+                    fixed_params=group_fixed_params,
+                )
+        except Exception as error:
+            reason = str(error).splitlines()[0]
+            print(f"Could not generate legacy batch-size plot: {reason}")
 
 
 if __name__ == "__main__":

@@ -57,6 +57,15 @@ def parse_metrics(output):
 def run_workload(config):
     global atomix_setup
 
+    config = dict(config)
+    background_warmup_seconds = config.pop("background_warmup_seconds", 2)
+    measure_dependency_depth = config.pop("measure_dependency_depth", False)
+
+    if measure_dependency_depth:
+        os.environ["SANGRIA_MEASURE_DEPENDENCY_DEPTH"] = "1"
+    else:
+        os.environ.pop("SANGRIA_MEASURE_DEPENDENCY_DEPTH", None)
+
     iteration = config["iteration"]
     baseline = config["baseline"]
     threshold_overrides = config.get("threshold_overrides", {})
@@ -131,6 +140,7 @@ def run_workload(config):
         # Create a temporary config file with the parameters of the main workload generator
         # If `main_fake` is set, run the main workload as the fake-transaction generator.
         config["fake_transactions"] = True if main_fake else False
+        config["collect_server_stats"] = True
         os.makedirs(os.path.dirname(MAIN_RAY_WORKLOAD_CONFIG_PATH), exist_ok=True)
         with open(MAIN_RAY_WORKLOAD_CONFIG_PATH, "w") as f:
             json.dump(config, f)
@@ -139,6 +149,7 @@ def run_workload(config):
 
         # Create a temporary config file with the parameters of the secondary workload generator
         config["fake_transactions"] = True
+        config["collect_server_stats"] = False
         config["workload_type"] = "custom"  # Secondary workload is always custom
         config["max_concurrency"] = resolver_tx_load["max_concurrency"]
         config["num_queries"] = resolver_tx_load["num_queries"]
@@ -151,6 +162,7 @@ def run_workload(config):
         with open(SECONDARY_RAY_WORKLOAD_CONFIG_PATH, "w") as f:
             json.dump(config, f)
         del config["fake_transactions"]
+        config["collect_server_stats"] = True
         # cmd2.append("--create-keyspace")
         config["workload_type"] = workload_type
         config["max_concurrency"] = main_max_concurrency
@@ -181,8 +193,7 @@ def run_workload(config):
                 env={**os.environ, "RUST_LOG": "error"},
             )
 
-        # Let it run for a while
-        time.sleep(2)
+        time.sleep(background_warmup_seconds)
 
         process1 = subprocess.Popen(
             cmd1,
@@ -209,6 +220,8 @@ def run_workload(config):
             try:
                 if process2:
                     process2.wait(timeout=500)
+                    if process2.returncode != 0:
+                        raise RuntimeError("background workload exited unsuccessfully")
             except subprocess.TimeoutExpired:
                 if process2:
                     process2.kill()

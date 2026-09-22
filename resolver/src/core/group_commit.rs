@@ -18,6 +18,7 @@ use uuid::Uuid;
 #[derive(Default)]
 pub struct GroupCommitStats {
     pub committed_group_sizes: HashMap<String, f64>,
+    pub max_participant_batch: usize,
 }
 
 struct State {
@@ -54,7 +55,12 @@ impl GroupCommit {
     pub async fn get_stats(&self) -> HashMap<String, f64> {
         let mut stats = self.stats.write().await;
         let stats = std::mem::take(&mut *stats);
-        stats.committed_group_sizes
+        let mut committed_group_sizes = stats.committed_group_sizes;
+        committed_group_sizes.insert(
+            "max_participant_batch".to_string(),
+            stats.max_participant_batch as f64,
+        );
+        committed_group_sizes
     }
 
     pub async fn get_status(&self) -> String {
@@ -306,6 +312,8 @@ impl GroupCommit {
                         }
                         {
                             let mut stats = stats_clone.write().await;
+                            stats.max_participant_batch =
+                                stats.max_participant_batch.max(transactions.len());
                             stats
                                 .committed_group_sizes
                                 .entry(format!("Group size: {}", transactions.len()))

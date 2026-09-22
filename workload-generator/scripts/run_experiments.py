@@ -15,6 +15,11 @@ from math import prod
 from atomix_setup import atomix_setup
 
 
+# Client counts selected by resolver_load_calibration_experiment on this host.
+FIG10_CONTENTION_BACKGROUND_CLIENTS = 100
+FIG10_RESOLVER_BACKGROUND_CLIENTS = [25, 200, 425, 250, 500, 125, 400, 25]
+
+
 def tradeoff_contention_vs_resolver_capacity_experiment(ray_logs_dir):
     BASELINES = [ADAPTIVE, PIPELINED, TRADITIONAL]
     ZIPFIAN_CONSTANT = [0.0]
@@ -373,6 +378,140 @@ def early_lock_release_sensitivity_experiment(ray_logs_dir):
     )
 
 
+def resolver_load_calibration_experiment(ray_logs_dir):
+    """Map fake-client concurrency to the Resolver-load signal on this host."""
+    background_clients = [
+        25,
+        50,
+        75,
+        100,
+        125,
+        150,
+        200,
+        250,
+        300,
+        350,
+        500,
+        750,
+        1000,
+    ]
+    resolver_tx_load = [
+        {
+            "max_concurrency": f"{clients}:4000",
+            "num_queries": None,
+            "num_keys": 100,
+            "background_runtime_core_ids": [2, 3],
+        }
+        for clients in background_clients
+    ]
+    run_experiment(
+        [ADAPTIVE],
+        resolver_tx_load,
+        1,
+        [4000],
+        [50],
+        ["75"],
+        [0.0],
+        ["custom"],
+        ray_logs_dir,
+        {"num_keys": 50},
+        "resolver_tx_load_concurrency",
+        background_warmup_seconds=0,
+    )
+
+
+def threshold_sensitivity_contention_experiment(ray_logs_dir):
+    """Figure 10(a): vary the active open-client boundary at runtime."""
+    resolver_tx_load = [
+        {
+            "max_concurrency": str(FIG10_CONTENTION_BACKGROUND_CLIENTS),
+            "num_queries": None,
+            "num_keys": 100,
+            "background_runtime_core_ids": [2, 3],
+        }
+    ]
+    thresholds = [
+        {"open_clients_low": boundary}
+        for boundary in (180.0, 100.0, 50.0, 20.0, 0.0)
+    ]
+    run_experiment(
+        [ADAPTIVE, PIPELINED, TRADITIONAL],
+        resolver_tx_load,
+        2,
+        [16000],
+        [50],
+        ["20:2000,75:2000,35:2000,180:2000,45:2000,110:2000,55:2000,20:2000"],
+        [0.0],
+        ["custom"],
+        ray_logs_dir,
+        {"num_queries": 16000, "num_keys": 50},
+        "threshold_overrides",
+        threshold_overrides=thresholds,
+    )
+
+
+def threshold_sensitivity_resolver_experiment(ray_logs_dir):
+    """Figure 10(b): vary R_M while Resolver load changes over time."""
+    phase_waves = 60
+    background_schedule = ",".join(
+        f"{clients}:{clients * phase_waves}"
+        for clients in FIG10_RESOLVER_BACKGROUND_CLIENTS
+    )
+    resolver_tx_load = [
+        {
+            "max_concurrency": background_schedule,
+            "num_queries": None,
+            "num_keys": 100,
+            "background_runtime_core_ids": [2, 3],
+        }
+    ]
+    thresholds = [
+        {"resolver_load_mid": boundary}
+        for boundary in (50.0, 100.0, 200.0, 300.0, 600.0)
+    ]
+    run_experiment(
+        [ADAPTIVE, PIPELINED, TRADITIONAL],
+        resolver_tx_load,
+        2,
+        [32000],
+        [50],
+        ["75"],
+        [0.0],
+        ["custom"],
+        ray_logs_dir,
+        {"num_queries": 32000, "num_keys": 50},
+        "threshold_overrides",
+        threshold_overrides=thresholds,
+        background_warmup_seconds=0,
+    )
+
+
+def dependency_stress_experiment(ray_logs_dir):
+    """Table 4: measure dependency depth, queue growth, and batch size."""
+    resolver_tx_load = [
+        {
+            "max_concurrency": "0",
+            "num_queries": None,
+            "num_keys": 100,
+            "background_runtime_core_ids": [2, 3],
+        }
+    ]
+    run_experiment(
+        [ADAPTIVE, PIPELINED, TRADITIONAL],
+        resolver_tx_load,
+        2,
+        [5000],
+        [50],
+        ["50"],
+        [0.95],
+        ["ycsb"],
+        ray_logs_dir,
+        {"num_queries": 5000, "num_keys": 50, "max_concurrency": "50"},
+        "baseline",
+        measure_dependency_depth=True,
+    )
+
+
 def run_experiment(
     BASELINES,
     RESOLVER_TX_LOAD,
@@ -388,6 +527,8 @@ def run_experiment(
     main_fake=None,
     resolver_background_runtime_core_ids=None,
     threshold_overrides=None,
+    background_warmup_seconds=None,
+    measure_dependency_depth=False,
 
 ):
     namespace, name = generate_slug(2).split("-")
@@ -418,7 +559,10 @@ def run_experiment(
         "background_runtime_core_ids": [list(range(3, 32))],
         "workload_type": WORKLOAD_TYPE,
         "threshold_overrides": threshold_overrides,
+        "measure_dependency_depth": [measure_dependency_depth],
     }
+    if background_warmup_seconds is not None:
+        config["background_warmup_seconds"] = [background_warmup_seconds]
 
     # Allow overriding whether the main workload is a fake-transaction generator
     config["main_fake"] = main_fake if main_fake is not None else [False]
@@ -439,6 +583,9 @@ def run_experiment(
     )
     for baseline in BASELINES:
         config["baseline"] = [baseline]
+        config["threshold_overrides"] = (
+            threshold_overrides if baseline == ADAPTIVE else [{}]
+        )
         if baseline == TRADITIONAL:
             config["resolver_capacity"] = [RESOLVER_CAPACITY[0]]
             config["resolver_tx_load"] = [
@@ -473,23 +620,30 @@ def run_experiment(
             ray_logs_dir / experiment_name / f"{baseline}_results.csv"
         )
 
-    # plot_results_df(experiment_name, fixed_params, free_params)
+    plot_results_df(experiment_name, fixed_params, free_params)
 
 
-def main():
+def main(experiment="early-lock-release-sensitivity"):
     ray.init()
     ray_logs_dir = Path(RAY_LOGS_DIR)
     ray_logs_dir.mkdir(parents=True, exist_ok=True)
 
     if BUILD_ATOMIX:
         atomix_setup.build_servers()
-    # resolver_microbenchmark_experiment(ray_logs_dir)
-    early_lock_release_sensitivity_experiment(ray_logs_dir)
-    # tradeoff_contention_vs_resolver_capacity_experiment(ray_logs_dir)
-    # runtime_variations_contention_experiment(ray_logs_dir)
-    # runtime_variations_resolver_capacity_experiment(ray_logs_dir)
-    # mixed_workload_experiment(ray_logs_dir)
-    # ycsb_experiment(ray_logs_dir)
+    experiments = {
+        "resolver-microbenchmark": resolver_microbenchmark_experiment,
+        "early-lock-release-sensitivity": early_lock_release_sensitivity_experiment,
+        "tradeoff-contention-resolver": tradeoff_contention_vs_resolver_capacity_experiment,
+        "runtime-contention": runtime_variations_contention_experiment,
+        "runtime-resolver": runtime_variations_resolver_capacity_experiment,
+        "mixed-workload": mixed_workload_experiment,
+        "ycsb": ycsb_experiment,
+        "resolver-calibration": resolver_load_calibration_experiment,
+        "fig10-contention": threshold_sensitivity_contention_experiment,
+        "fig10-resolver": threshold_sensitivity_resolver_experiment,
+        "table4": dependency_stress_experiment,
+    }
+    experiments[experiment](ray_logs_dir)
     ray.shutdown()
 
 
@@ -501,7 +655,24 @@ if __name__ == "__main__":
         default=True,
         help="Build Atomix servers before running experiments.",
     )
+    parser.add_argument(
+        "--experiment",
+        default="early-lock-release-sensitivity",
+        choices=(
+            "resolver-microbenchmark",
+            "early-lock-release-sensitivity",
+            "tradeoff-contention-resolver",
+            "runtime-contention",
+            "runtime-resolver",
+            "mixed-workload",
+            "ycsb",
+            "resolver-calibration",
+            "fig10-contention",
+            "fig10-resolver",
+            "table4",
+        ),
+    )
     args = parser.parse_args()
 
     BUILD_ATOMIX = args.build
-    main()
+    main(args.experiment)

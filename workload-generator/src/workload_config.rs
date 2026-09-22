@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+fn default_collect_server_stats() -> bool {
+    true
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct WorkloadConfig {
     #[serde(rename = "num_queries")]
@@ -20,4 +24,7 @@ pub struct WorkloadConfig {
     pub fake_transactions: bool,
     #[serde(rename = "workload_type")]
     pub workload_type: String,
+    /// Only the foreground generator should collect destructive server stats.
+    #[serde(default = "default_collect_server_stats")]
+    pub collect_server_stats: bool,
 }

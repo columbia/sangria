@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import subprocess
 import json
+import sys
 
 ROOT_DIR = Path(__file__).parent.parent.parent
 SERVERS_CONFIG_PATH = ROOT_DIR / "configs" / "config.json"
@@ -36,7 +37,7 @@ os.environ["RAY_AIR_NEW_OUTPUT"] = "0"
 
 def plot_results_df(experiment_name, fixed_params, free_params):
     cmd = [
-        "python",
+        sys.executable,
         str(WORKLOAD_GENERATOR_DIR / "scripts" / "plot_experiments.py"),
         "--experiment-name",
         experiment_name,

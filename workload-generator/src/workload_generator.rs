@@ -398,6 +398,20 @@ impl WorkloadGenerator {
         info!("Total Duration: {:?}", total_duration);
         info!("Total Transactions: {}", total_transactions);
 
+        if !self.workload_config.collect_server_stats {
+            return Metrics {
+                total_duration,
+                total_transactions,
+                avg_latency,
+                p50_latency,
+                p95_latency,
+                p99_latency,
+                throughput,
+                resolver_stats: HashMap::new(),
+                range_server_stats: HashMap::new(),
+            };
+        }
+
         let mut resolver_client_clone = self.resolver_client.clone();
         let response = resolver_client_clone
             .get_stats(GetStatsRequest {})

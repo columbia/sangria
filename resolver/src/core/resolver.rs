@@ -1,9 +1,9 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     mem,
     sync::Arc,
 };
-use tokio::sync::{RwLock, oneshot};
+use tokio::sync::{oneshot, RwLock};
 use tracing::info;
 use uuid::Uuid;
 
@@ -18,6 +18,12 @@ pub struct TransactionInfo {
     pub id: Uuid,
     pub num_dependencies: u32,
     pub dependents: HashSet<Uuid>,
+    // These edges are retained for measurement even after the operational
+    // `dependents` set is drained as transactions become unblocked.
+    pub dependency_ids: HashSet<Uuid>,
+    pub depth_dependents: HashSet<Uuid>,
+    pub dependency_depth: usize,
+    pub registered: bool,
     pub participant_ranges_info: Vec<ParticipantRangeInfo>,
     pub fake: bool,
 }
@@ -28,6 +34,10 @@ impl TransactionInfo {
             id,
             num_dependencies: 0,
             dependents: HashSet::new(),
+            dependency_ids: HashSet::new(),
+            depth_dependents: HashSet::new(),
+            dependency_depth: 0,
+            registered: false,
             participant_ranges_info: Vec::new(),
             fake,
         }
@@ -40,12 +50,96 @@ pub struct State {
     resolved_transactions: HashSet<Uuid>,
 }
 
+impl State {
+    fn unresolved_dependency_depth(&self, transaction_id: Uuid) -> usize {
+        self.unresolved_dependency_depth_inner(transaction_id, &mut HashSet::new())
+    }
+
+    fn unresolved_dependency_depth_inner(
+        &self,
+        transaction_id: Uuid,
+        visiting: &mut HashSet<Uuid>,
+    ) -> usize {
+        if !visiting.insert(transaction_id) {
+            return 0;
+        }
+
+        let dependency_ids = self
+            .info_per_transaction
+            .get(&transaction_id)
+            .map(|info| info.dependency_ids.clone())
+            .unwrap_or_default();
+        let mut depth = 0;
+        for dependency_id in dependency_ids {
+            if !self.resolved_transactions.contains(&dependency_id) {
+                depth =
+                    depth.max(1 + self.unresolved_dependency_depth_inner(dependency_id, visiting));
+            }
+        }
+        visiting.remove(&transaction_id);
+        depth
+    }
+
+    /// Installs the unresolved dependency set and refreshes active depths.
+    ///
+    /// A dependency can initially be represented by a depth-zero placeholder.
+    /// If its own commit request arrives later, the retained `depth_dependents`
+    /// edges refresh every already-registered successor. The returned entries
+    /// are real transactions whose current active depths are statistics samples.
+    fn update_dependency_depths(
+        &mut self,
+        transaction_id: Uuid,
+        dependencies: &HashSet<Uuid>,
+    ) -> Vec<(Uuid, usize)> {
+        for dependency in dependencies {
+            self.info_per_transaction
+                .entry(*dependency)
+                .or_insert(TransactionInfo::default(*dependency, false))
+                .depth_dependents
+                .insert(transaction_id);
+        }
+
+        self.info_per_transaction
+            .get_mut(&transaction_id)
+            .expect("transaction info must exist before recording its depth")
+            .dependency_ids = dependencies.clone();
+
+        let mut queue = VecDeque::from([transaction_id]);
+        let mut affected = HashSet::new();
+        while let Some(current_id) = queue.pop_front() {
+            if !affected.insert(current_id) {
+                continue;
+            }
+            let new_depth = self.unresolved_dependency_depth(current_id);
+
+            let current_info = self
+                .info_per_transaction
+                .get_mut(&current_id)
+                .expect("depth propagation referenced an unknown transaction");
+            current_info.dependency_depth = new_depth;
+            let depth_dependents = current_info.depth_dependents.clone();
+            for dependent_id in depth_dependents {
+                queue.push_back(dependent_id);
+            }
+        }
+
+        affected
+            .into_iter()
+            .filter_map(|affected_id| {
+                let info = self.info_per_transaction.get(&affected_id)?;
+                (info.registered && !info.fake).then_some((affected_id, info.dependency_depth))
+            })
+            .collect()
+    }
+}
+
 pub struct Resolver {
     state: RwLock<State>,
     group_commit: GroupCommit,
     waiting_transactions: RwLock<HashMap<Uuid, oneshot::Sender<()>>>,
     bg_runtime: tokio::runtime::Handle,
     stats_tracker: RwLock<StatisticsTracker>,
+    measure_dependency_depth: bool,
 }
 
 impl Resolver {
@@ -59,6 +153,8 @@ impl Resolver {
             waiting_transactions: RwLock::new(HashMap::new()),
             bg_runtime,
             stats_tracker: RwLock::new(StatisticsTracker::new()),
+            measure_dependency_depth: std::env::var_os("SANGRIA_MEASURE_DEPENDENCY_DEPTH")
+                .is_some(),
         }
     }
 
@@ -74,23 +170,24 @@ impl Resolver {
         if participant_ranges_info.iter().all(|info| !info.has_writes) {
             return Ok(());
         }
-
         let (s, r) = oneshot::channel();
         let mut num_pending_dependencies = 0;
+        let mut pending_dependencies = HashSet::new();
 
         // Acquire the write lock and update the state with new dependencies
         info!("Updating dependencies for transaction {:?}", transaction_id);
         {
             let mut state = resolver.state.write().await;
-            for dependency in dependencies {
-                if !state.resolved_transactions.contains(&dependency) {
+            for dependency in &dependencies {
+                if !state.resolved_transactions.contains(dependency) {
                     // Dependency is not yet resolved, so we need to wait for it
                     num_pending_dependencies += 1;
+                    pending_dependencies.insert(*dependency);
                     // Add the transaction as a dependent of the dependency
                     state
                         .info_per_transaction
-                        .entry(dependency)
-                        .or_insert(TransactionInfo::default(dependency, fake))
+                        .entry(*dependency)
+                        .or_insert(TransactionInfo::default(*dependency, fake))
                         .dependents
                         .insert(transaction_id);
                 } else {
@@ -101,23 +198,37 @@ impl Resolver {
                 }
             }
 
-            let transaction_info = state
-                .info_per_transaction
-                .entry(transaction_id)
-                .or_insert(TransactionInfo::default(transaction_id, fake));
+            {
+                let transaction_info = state
+                    .info_per_transaction
+                    .entry(transaction_id)
+                    .or_insert(TransactionInfo::default(transaction_id, fake));
 
-            transaction_info.num_dependencies = num_pending_dependencies;
-            transaction_info.participant_ranges_info = participant_ranges_info;
-            resolver
-                .waiting_transactions
-                .write()
-                .await
-                .insert(transaction_id, s);
+                transaction_info.num_dependencies = num_pending_dependencies;
+                transaction_info.participant_ranges_info = participant_ranges_info;
+                transaction_info.fake = fake;
+                transaction_info.registered = true;
+            }
 
+            let depth_updates = if resolver.measure_dependency_depth && !fake {
+                state.update_dependency_depths(transaction_id, &pending_dependencies)
+            } else {
+                Vec::new()
+            };
+            let mut waiting_transactions = resolver.waiting_transactions.write().await;
+            waiting_transactions.insert(transaction_id, s);
             // {
             //     let mut stats_tracker = resolver.stats_tracker.write().await;
             //     stats_tracker.record_request();
             // }
+            {
+                let mut stats_tracker = resolver.stats_tracker.write().await;
+                stats_tracker.record_waiting_transactions_count(waiting_transactions.len());
+                for (depth_transaction_id, depth) in depth_updates {
+                    stats_tracker.record_dependency_depth(depth_transaction_id, depth);
+                }
+            }
+            drop(waiting_transactions);
 
             info!("Updated dependencies for transaction {:?}", transaction_id);
             if num_pending_dependencies == 0 {
@@ -127,7 +238,11 @@ impl Resolver {
                     transaction_id
                 );
                 // Add transaction while holding the write lock
-                let transaction_info_clone = transaction_info.clone();
+                let transaction_info_clone = state
+                    .info_per_transaction
+                    .get(&transaction_id)
+                    .expect("registered transaction info must exist")
+                    .clone();
                 resolver
                     .group_commit
                     .add_transactions(&vec![transaction_info_clone.clone()])
@@ -268,8 +383,8 @@ impl Resolver {
 
     // ---------------------- Statistics ----------------------
     pub async fn sample_waiting_transactions(&self) {
-        let mut stats_tracker = self.stats_tracker.write().await;
         let waiting_count = self.waiting_transactions.read().await.len();
+        let mut stats_tracker = self.stats_tracker.write().await;
         stats_tracker.record_waiting_transactions_sample(waiting_count);
     }
 
