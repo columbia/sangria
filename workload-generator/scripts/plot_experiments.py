@@ -581,6 +581,72 @@ def plot_generic_throughput(
     _save_figure(fig, plotter.plots_path / "throughput")
 
 
+def plot_q1_tradeoff_details(plotter: Plotter, fixed_params: Dict):
+    """Create the two Figure 6 views from the Figure 4 measurements."""
+    df = _filter_fixed_params(plotter.results, fixed_params)
+    df = _repeat_traditional_across_resolver_loads(df)
+    df["concurrency"] = pd.to_numeric(df["max_concurrency"], errors="coerce")
+    df["background_load"] = pd.to_numeric(
+        df["resolver_tx_load_concurrency"], errors="coerce"
+    )
+    df = df.dropna(subset=["concurrency", "background_load"])
+
+    throughput = (
+        df.groupby(["baseline", "background_load", "concurrency"])["throughput"]
+        .mean()
+        .reset_index()
+    )
+    ratio = throughput.pivot(
+        index=["background_load", "concurrency"],
+        columns="baseline",
+        values="throughput",
+    ).reset_index()
+    if {"Pipelined", "Traditional"}.issubset(ratio.columns):
+        ratio["Pipelined / Strict"] = ratio["Pipelined"] / ratio["Traditional"]
+        ratio = ratio.sort_values(["background_load", "concurrency"])
+        ratio.to_csv(plotter.plots_path / "q1_crossover_ratio.csv", index=False)
+        fig = px.line(
+            ratio,
+            x="concurrency",
+            y="Pipelined / Strict",
+            color="background_load",
+            markers=True,
+            labels={
+                "concurrency": "Concurrency level",
+                "background_load": "Resolver background clients",
+            },
+        )
+        fig.add_hline(y=1, line_dash="dash", line_color="black")
+        fig.update_layout(template="simple_white", legend_title_text="")
+        _save_figure(fig, plotter.plots_path / "q1_crossover_ratio")
+
+    if df.empty:
+        return
+    low_capacity_load = df["background_load"].max()
+    latency = df[df["background_load"] == low_capacity_load]
+    latency = (
+        latency.groupby(["baseline", "concurrency"])["avg_latency"]
+        .mean()
+        .reset_index()
+    )
+    latency["Mean latency (ms)"] = latency["avg_latency"] * 1000
+    latency = _paper_labels(latency).sort_values("concurrency")
+    latency.to_csv(
+        plotter.plots_path / "q1_low_capacity_latency.csv", index=False
+    )
+    fig = px.line(
+        latency,
+        x="concurrency",
+        y="Mean latency (ms)",
+        color="protocol",
+        markers=True,
+        labels={"concurrency": "Concurrency level"},
+        color_discrete_map=BASELINE_COLORS,
+    )
+    fig.update_layout(template="simple_white", legend_title_text="")
+    _save_figure(fig, plotter.plots_path / "q1_low_capacity_latency")
+
+
 def plot_single_parameter_throughput(
     plotter: Plotter, free_param: str, fixed_params: Dict
 ):
@@ -861,6 +927,14 @@ def main():
     else:
         plot_generic_throughput(plotter, free_params, fixed_params)
 
+        is_q1_tradeoff = (
+            free_params
+            == ["resolver_tx_load_concurrency", "max_concurrency"]
+            and float(fixed_params.get("num_queries", -1)) == 2500
+        )
+        if is_q1_tradeoff:
+            plot_q1_tradeoff_details(plotter, fixed_params)
+
         # Retain the legacy batch-size CDF as a best-effort secondary output.
         try:
             plotter.results = _repeat_traditional_across_resolver_loads(
@@ -872,6 +946,19 @@ def main():
                 group_fixed_params[subplot_key] = subplot_value
                 plotter.plot_resolver_group_sizes(
                     free_param=free_params[1],
+                    fixed_params=group_fixed_params,
+                )
+            if is_q1_tradeoff:
+                concurrency_values = get_unique_key_values(
+                    plotter.results, "max_concurrency"
+                )
+                high_contention = next(
+                    value for value in concurrency_values if str(value) == "500"
+                )
+                group_fixed_params = dict(fixed_params)
+                group_fixed_params["max_concurrency"] = high_contention
+                plotter.plot_resolver_group_sizes(
+                    free_param="resolver_tx_load_concurrency",
                     fixed_params=group_fixed_params,
                 )
         except Exception as error:

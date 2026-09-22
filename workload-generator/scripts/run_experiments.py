@@ -656,6 +656,12 @@ if __name__ == "__main__":
         help="Build Atomix servers before running experiments.",
     )
     parser.add_argument(
+        "--no-build",
+        action="store_false",
+        dest="build",
+        help="Reuse server binaries that were already built.",
+    )
+    parser.add_argument(
         "--experiment",
         default="early-lock-release-sensitivity",
         choices=(

@@ -116,6 +116,47 @@ The available experiment names are:
 Only one experiment should run on a host at a time: experiments share fixed
 localhost ports and the `cassandra` container.
 
+### Run the complete paper suite
+
+The wrapper below runs the eight paper experiment invocations sequentially. It
+builds the Rust binaries before the first experiment and reuses them for the
+remaining experiments.
+
+```bash
+source "$HOME/.cargo/env"
+source .venv/bin/activate
+python workload-generator/scripts/run_all_experiments.py
+```
+
+Each invocation retains its raw Ray output under `experiments/ray_logs/`. The
+wrapper additionally gathers the generated HTML, PNG, and summary CSV files in
+a timestamped directory:
+
+```text
+workload-generator/experiments/paper_results/<timestamp>/
+├── figure_04/
+├── figure_05/
+├── figure_06/
+├── figure_07/
+├── figure_08/
+├── figure_09/
+├── figure_10/
+│   ├── panel_a_contention/
+│   └── panel_b_resolver/
+├── figure_11/
+├── table_04/
+└── manifest.json
+```
+
+Figures 4, 6, and 11 are derived from the same contention-versus-Resolver run;
+the wrapper separates its throughput, crossover/latency, and batch-size plots.
+Figure 10 combines two runs in panel-specific subdirectories. The manifest maps
+every collected folder back to its random Ray result directory. Pass
+`--no-build` to reuse binaries that were built previously, or `--output-dir`
+to select a different collection directory. Auxiliary calibration,
+microbenchmark, and legacy threshold sweeps are not part of this default paper
+suite.
+
 ## Results and plots
 
 Each invocation creates a randomly named directory under:
