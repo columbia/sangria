@@ -38,7 +38,8 @@ Install the system packages on a fresh Ubuntu host:
 sudo apt-get update
 sudo apt-get install -y \
   build-essential clang cmake git curl pkg-config libssl-dev \
-  protobuf-compiler python3-venv python3-pip docker.io
+  protobuf-compiler python3-venv python3-pip docker.io \
+  libnspr4 libnss3 libgbm1
 sudo systemctl enable --now docker
 ```
 
@@ -137,6 +138,117 @@ locate the most recently completed result directory later, use:
 find workload-generator/experiments/ray_logs -mindepth 1 -maxdepth 1 \
   -type d -printf '%T@ %p\n' | sort -n | tail -1
 ```
+
+To regenerate plots without rerunning an experiment, set `RESULT_DIR` to that
+run's random directory name (not its full path), activate the environment, and
+run the matching command below. For example: `RESULT_DIR=rousing_taipan`.
+
+```bash
+source .venv/bin/activate
+RESULT_DIR=rousing_taipan
+```
+
+**`tradeoff-contention-resolver` (Figure 4):**
+
+```bash
+python workload-generator/scripts/plot_experiments.py \
+  --experiment-name "$RESULT_DIR" \
+  --fixed-params num_queries=2500,zipf_exponent=0.0,num_keys=50 \
+  --free-params resolver_tx_load_concurrency,max_concurrency
+```
+
+**`ycsb` (Figure 5):**
+
+```bash
+python workload-generator/scripts/plot_experiments.py \
+  --experiment-name "$RESULT_DIR" \
+  --fixed-params num_queries=5000,max_concurrency=50,num_keys=50 \
+  --free-params resolver_tx_load_concurrency,zipf_exponent
+```
+
+**`runtime-contention` (Figure 7):**
+
+```bash
+python workload-generator/scripts/plot_experiments.py \
+  --experiment-name "$RESULT_DIR" \
+  --fixed-params num_queries=16000,zipf_exponent=0.0,num_keys=50 \
+  --free-params resolver_tx_load_concurrency,max_concurrency
+```
+
+**`runtime-resolver` (Figure 8):**
+
+```bash
+python workload-generator/scripts/plot_experiments.py \
+  --experiment-name "$RESULT_DIR" \
+  --fixed-params num_queries=16000,zipf_exponent=0.0,num_keys=50 \
+  --free-params resolver_tx_load_concurrency,max_concurrency
+```
+
+**`mixed-workload` (Figure 9):**
+
+```bash
+python workload-generator/scripts/plot_experiments.py \
+  --experiment-name "$RESULT_DIR" \
+  --fixed-params num_queries=16000,zipf_exponent=0.0,num_keys=50 \
+  --free-params resolver_tx_load_concurrency,max_concurrency
+```
+
+**`fig10-contention` (Figure 10(a)):**
+
+```bash
+python workload-generator/scripts/plot_experiments.py \
+  --experiment-name "$RESULT_DIR" \
+  --fixed-params num_queries=16000,num_keys=50 \
+  --free-params threshold_overrides
+```
+
+**`fig10-resolver` (Figure 10(b)):**
+
+```bash
+python workload-generator/scripts/plot_experiments.py \
+  --experiment-name "$RESULT_DIR" \
+  --fixed-params num_queries=32000,num_keys=50 \
+  --free-params threshold_overrides
+```
+
+**`table4`:**
+
+```bash
+python workload-generator/scripts/plot_experiments.py \
+  --experiment-name "$RESULT_DIR" \
+  --fixed-params num_queries=5000,num_keys=50,max_concurrency=50 \
+  --free-params baseline
+```
+
+**`resolver-calibration`:**
+
+```bash
+python workload-generator/scripts/plot_experiments.py \
+  --experiment-name "$RESULT_DIR" \
+  --fixed-params num_keys=50 \
+  --free-params resolver_tx_load_concurrency
+```
+
+**`resolver-microbenchmark`:**
+
+```bash
+python workload-generator/scripts/plot_experiments.py \
+  --experiment-name "$RESULT_DIR" \
+  --fixed-params num_queries=25000,zipf_exponent=0.0,num_keys=2000,resolver_tx_load_concurrency=0 \
+  --free-params max_concurrency
+```
+
+**`early-lock-release-sensitivity`:**
+
+```bash
+python workload-generator/scripts/plot_experiments.py \
+  --experiment-name "$RESULT_DIR" \
+  --fixed-params num_queries=2500,zipf_exponent=0.0,num_keys=50,resolver_tx_load_concurrency=1000,max_concurrency=50 \
+  --free-params early_lock_release_tuning
+```
+
+Manual plotting rewrites the derived files under the existing `plots/`
+subdirectory but does not modify the raw `*_results.csv` measurements.
 
 ## Configuration notes
 

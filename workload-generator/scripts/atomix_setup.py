@@ -92,7 +92,6 @@ class AtomixSetup:
                     "sudo",
                     "docker",
                     "exec",
-                    "-i",
                     "cassandra",
                     "cqlsh",
                     "-e",
@@ -103,10 +102,14 @@ class AtomixSetup:
                     "TRUNCATE atomix.wal; "
                     "TRUNCATE atomix.transactions; "
                     "TRUNCATE atomix.keyspaces;",
-                ]
+                ],
+                stdin=subprocess.DEVNULL,
+                check=True,
+                timeout=60,
             )
         except Exception as e:
             print(f"Error cleaning Cassandra: {e}")
+            raise
 
     def start_servers(self, servers=None):
         servers = self.get_servers(start_order=True, servers=servers)
