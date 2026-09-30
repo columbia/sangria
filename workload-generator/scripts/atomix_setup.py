@@ -159,7 +159,11 @@ class AtomixSetup:
                     for server_address in server_addresses:
                         _, port = server_address.split(":")
                         for conn in psutil.net_connections(kind="inet"):
-                            if conn.pid is not None and conn.laddr.port == int(port):
+                            if (
+                                conn.pid is not None
+                                and conn.status == psutil.CONN_LISTEN
+                                and conn.laddr.port == int(port)
+                            ):
                                 print(
                                     f"Killing process {conn.pid} listening on port {port}"
                                 )

@@ -12,8 +12,7 @@ def parse_metrics(output):
     # Find the metrics section between METRICS_START and METRICS_END
     metrics_section = re.search(r"METRICS_START\n(.*?)\nMETRICS_END", output, re.DOTALL)
     if not metrics_section:
-        print("Warning: No metrics section found in output")
-        return {"throughput": 0.0}
+        raise RuntimeError("Workload output did not contain a metrics section")
 
     metrics_text = metrics_section.group(1)
 
@@ -60,6 +59,7 @@ def run_workload(config):
     config = dict(config)
     background_warmup_seconds = config.pop("background_warmup_seconds", 2)
     measure_dependency_depth = config.pop("measure_dependency_depth", False)
+    warmup_before_measurement = config.pop("warmup_before_measurement", False)
 
     if measure_dependency_depth:
         os.environ["SANGRIA_MEASURE_DEPENDENCY_DEPTH"] = "1"
@@ -171,6 +171,27 @@ def run_workload(config):
         config["name"] = main_name
         config["background_runtime_core_ids"] = main_background_runtime_core_ids
 
+        if warmup_before_measurement:
+            print("Running unmeasured warm-up workload")
+            warmup = subprocess.run(
+                cmd1,
+                cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env={**os.environ, "RUST_LOG": "error"},
+                timeout=60 * 60,
+            )
+            if warmup.returncode != 0:
+                raise RuntimeError(
+                    f"warm-up workload exited with status {warmup.returncode}: "
+                    f"{warmup.stderr.strip()[-2000:]}"
+                )
+            parse_metrics(warmup.stdout)
+            if "--create-keyspace" in cmd1:
+                cmd1.remove("--create-keyspace")
+            print("Finished unmeasured warm-up workload")
+
     # Add back the config params so that they are reported by ray
     config["iteration"] = iteration
     config["baseline"] = baseline
@@ -181,8 +202,9 @@ def run_workload(config):
     print("cmd1: ", cmd1)
     print("cmd2: ", cmd2)
 
+    process1 = None
+    process2 = None
     try:
-        process2 = None
         if resolver_tx_load["max_concurrency"] != "0":
             process2 = subprocess.Popen(
                 cmd2,
@@ -209,7 +231,24 @@ def run_workload(config):
                 timeout=60 * 60
             )  # 60 minutes timeout
             print(stderr1)
+            if process1.returncode != 0:
+                raise RuntimeError(
+                    f"main workload exited with status {process1.returncode}: "
+                    f"{stderr1.strip()[-2000:]}"
+                )
             metrics = parse_metrics(stdout1)
+            required_metrics = {
+                "throughput",
+                "avg_latency",
+                "p99_latency",
+                "total_transactions",
+            }
+            missing_metrics = required_metrics - metrics.keys()
+            if missing_metrics:
+                raise RuntimeError(
+                    "main workload omitted metrics: "
+                    + ", ".join(sorted(missing_metrics))
+                )
             print("Finished main workload generator")
 
             # Send interrupt signal to the secondary workload generator
@@ -231,10 +270,12 @@ def run_workload(config):
             process1.kill()
             if process2:
                 process2.kill()
-            print(f"Timeout exceeded for config: {config}")
-            metrics = {"throughput": 0.0}
+            raise RuntimeError(f"Timeout exceeded for config: {config}")
 
     except Exception as e:
         print(f"Error running workloads: {e}")
-        metrics = {"throughput": 0.0}
+        for process in (process1, process2):
+            if process is not None and process.poll() is None:
+                process.kill()
+        raise
     return metrics

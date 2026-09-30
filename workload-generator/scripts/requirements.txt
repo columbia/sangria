@@ -4,6 +4,7 @@ coolname
 plotly
 pandas
 numpy
+matplotlib
 kaleido
 black
 termcolor

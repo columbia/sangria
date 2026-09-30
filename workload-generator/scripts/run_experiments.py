@@ -18,6 +18,7 @@ from atomix_setup import atomix_setup
 # Client counts selected by resolver_load_calibration_experiment on this host.
 FIG10_CONTENTION_BACKGROUND_CLIENTS = 100
 FIG10_RESOLVER_BACKGROUND_CLIENTS = [25, 200, 425, 250, 500, 125, 400, 25]
+PLOT_RESULTS = True
 
 
 def tradeoff_contention_vs_resolver_capacity_experiment(ray_logs_dir):
@@ -509,6 +510,7 @@ def dependency_stress_experiment(ray_logs_dir):
         {"num_queries": 5000, "num_keys": 50, "max_concurrency": "50"},
         "baseline",
         measure_dependency_depth=True,
+        warmup_before_measurement=True,
     )
 
 
@@ -529,6 +531,7 @@ def run_experiment(
     threshold_overrides=None,
     background_warmup_seconds=None,
     measure_dependency_depth=False,
+    warmup_before_measurement=False,
 
 ):
     namespace, name = generate_slug(2).split("-")
@@ -560,6 +563,7 @@ def run_experiment(
         "workload_type": WORKLOAD_TYPE,
         "threshold_overrides": threshold_overrides,
         "measure_dependency_depth": [measure_dependency_depth],
+        "warmup_before_measurement": [warmup_before_measurement],
     }
     if background_warmup_seconds is not None:
         config["background_warmup_seconds"] = [background_warmup_seconds]
@@ -611,6 +615,7 @@ def run_experiment(
                 atomix_setup, NUM_ITERATIONS, config, experiment_name, ray_logs_dir
             ),
             reuse_actors=True,
+            max_failures=1,
             max_concurrent_trials=1,
             scheduler=FIFOScheduler(),
             verbose=1,
@@ -620,7 +625,8 @@ def run_experiment(
             ray_logs_dir / experiment_name / f"{baseline}_results.csv"
         )
 
-    plot_results_df(experiment_name, fixed_params, free_params)
+    if PLOT_RESULTS:
+        plot_results_df(experiment_name, fixed_params, free_params)
 
 
 def main(experiment="early-lock-release-sensitivity"):
@@ -662,6 +668,13 @@ if __name__ == "__main__":
         help="Reuse server binaries that were already built.",
     )
     parser.add_argument(
+        "--no-plot",
+        action="store_false",
+        dest="plot",
+        default=True,
+        help="Skip the generic diagnostic plots.",
+    )
+    parser.add_argument(
         "--experiment",
         default="early-lock-release-sensitivity",
         choices=(
@@ -681,4 +694,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     BUILD_ATOMIX = args.build
+    PLOT_RESULTS = args.plot
     main(args.experiment)

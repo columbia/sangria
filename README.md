@@ -116,6 +116,13 @@ The available experiment names are:
 Only one experiment should run on a host at a time: experiments share fixed
 localhost ports and the `cassandra` container.
 
+On Linux, reserve Sangria's fixed service ports before running experiments so
+the kernel cannot assign them as ephemeral client ports:
+
+```bash
+sudo sysctl -w net.ipv4.ip_local_reserved_ports=50050-50060
+```
+
 ### Run the complete paper suite
 
 The wrapper below runs the eight paper experiment invocations sequentially. It
@@ -129,8 +136,8 @@ python workload-generator/scripts/run_all_experiments.py
 ```
 
 Each invocation retains its raw Ray output under `experiments/ray_logs/`. The
-wrapper additionally gathers the generated HTML, PNG, and summary CSV files in
-a timestamped directory:
+wrapper renders dedicated publication figures as PDF and 300-DPI PNG, together
+with their processed CSV data, in a timestamped directory:
 
 ```text
 workload-generator/experiments/paper_results/<timestamp>/
@@ -141,8 +148,6 @@ workload-generator/experiments/paper_results/<timestamp>/
 ├── figure_08/
 ├── figure_09/
 ├── figure_10/
-│   ├── panel_a_contention/
-│   └── panel_b_resolver/
 ├── figure_11/
 ├── table_04/
 └── manifest.json
@@ -150,14 +155,54 @@ workload-generator/experiments/paper_results/<timestamp>/
 
 Figures 4, 6, and 11 are derived from the same contention-versus-Resolver run;
 the wrapper separates its throughput, crossover/latency, and batch-size plots.
-Figure 10 combines two runs in panel-specific subdirectories. The manifest maps
-every collected folder back to its random Ray result directory. Pass
-`--no-build` to reuse binaries that were built previously, or `--output-dir`
-to select a different collection directory. Auxiliary calibration,
-microbenchmark, and legacy threshold sweeps are not part of this default paper
-suite.
+Figure 10 combines two runs into one two-panel figure. The manifest maps every
+figure back to its random Ray result directory. A failed run or rendering step
+can be resumed without repeating valid measurements:
 
-## Results and plots
+```bash
+python workload-generator/scripts/run_all_experiments.py \
+  --resume workload-generator/experiments/paper_results/<timestamp>
+```
+
+Pass `--no-build` to reuse binaries that were built previously, or
+`--output-dir` to select a different directory for a new suite. Auxiliary
+calibration, microbenchmark, and legacy threshold sweeps are not part of this
+default paper suite.
+
+The Table 4 experiment runs one full unmeasured warm-up after starting each
+protocol deployment, clears the collected server statistics, and then records
+two repetitions. This excludes cold-start latency while retaining two measured
+samples.
+
+### Regenerate publication figures
+
+The scripts under `workload-generator/scripts/paper_plots/` read existing raw
+CSV measurements and do not rerun workloads. Each single-source figure accepts
+a Ray result directory followed by an optional output directory. For example:
+
+```bash
+python workload-generator/scripts/paper_plots/figure_04.py \
+  workload-generator/experiments/ray_logs/<figure-4-run> \
+  --output-directory /tmp/figure_04
+```
+
+Figures 5--9 and 11, and Table 4, use the same interface through
+`figure_05.py` ... `figure_11.py` and `table_04.py`. Figure 10 takes its two
+panel sources explicitly:
+
+```bash
+python workload-generator/scripts/paper_plots/figure_10.py \
+  workload-generator/experiments/ray_logs/<contention-run> \
+  workload-generator/experiments/ray_logs/<resolver-run> \
+  --output-directory /tmp/figure_10
+```
+
+## Legacy diagnostic plots
+
+The commands in this section retain the existing Plotly visualizations for
+interactive diagnosis and backward compatibility. They are not used for the
+paper figures; use `run_all_experiments.py` or the dedicated `paper_plots/`
+scripts above for publication output.
 
 Each invocation creates a randomly named directory under:
 
@@ -168,7 +213,7 @@ workload-generator/experiments/ray_logs/<experiment-name>/
 The directory contains one result file per evaluated protocol, for example
 `Adaptive_results.csv`, `Pipelined_results.csv`, and
 `Traditional_results.csv`, together with Ray's per-trial output. Derived data
-and paper-like plots are written to its `plots/` subdirectory after all
+and diagnostic plots are written to its `plots/` subdirectory after all
 protocols finish. The plotting step always writes interactive HTML and summary
 CSV files; it also writes PNG files when Kaleido's image renderer is available.
 

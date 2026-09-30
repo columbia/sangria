@@ -2,7 +2,6 @@ import argparse
 from datetime import datetime
 import json
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 
@@ -23,32 +22,6 @@ PAPER_EXPERIMENTS = [
     "table4",
 ]
 
-PRIMARY_FOLDERS = {
-    "tradeoff-contention-resolver": Path("figure_04"),
-    "ycsb": Path("figure_05"),
-    "runtime-contention": Path("figure_07"),
-    "runtime-resolver": Path("figure_08"),
-    "mixed-workload": Path("figure_09"),
-    "fig10-contention": Path("figure_10") / "panel_a_contention",
-    "fig10-resolver": Path("figure_10") / "panel_b_resolver",
-    "table4": Path("table_04"),
-}
-
-REQUIRED_OUTPUTS = {
-    "tradeoff-contention-resolver": [
-        "throughput.html",
-        "q1_crossover_ratio.html",
-        "q1_low_capacity_latency.html",
-    ],
-    "ycsb": ["throughput.html"],
-    "runtime-contention": ["throughput.html"],
-    "runtime-resolver": ["throughput.html"],
-    "mixed-workload": ["throughput.html"],
-    "fig10-contention": ["fig10_contention.html"],
-    "fig10-resolver": ["fig10_resolver.html"],
-    "table4": ["table4_summary.csv", "table4_performance.html"],
-}
-
 
 def result_directories():
     if not RAY_LOGS_DIR.exists():
@@ -58,14 +31,21 @@ def result_directories():
 
 def run_experiment(name, build):
     before = result_directories()
-    command = [sys.executable, str(RUN_EXPERIMENTS), "--experiment", name]
+    command = [
+        sys.executable,
+        str(RUN_EXPERIMENTS),
+        "--experiment",
+        name,
+        "--no-plot",
+    ]
     if not build:
         command.append("--no-build")
     subprocess.run(command, cwd=ROOT_DIR, check=True)
 
-    new_directories = result_directories() - before
     candidates = [
-        path for path in new_directories if any(path.glob("*_results.csv"))
+        path
+        for path in result_directories() - before
+        if any(path.glob("*_results.csv"))
     ]
     if len(candidates) != 1:
         names = ", ".join(sorted(path.name for path in candidates)) or "none"
@@ -75,60 +55,101 @@ def run_experiment(name, build):
     return candidates[0]
 
 
-def copy_plot_files(files, destination):
-    destination.mkdir(parents=True, exist_ok=True)
-    files = [path for path in files if path.is_file()]
-    if not files:
-        raise RuntimeError(f"No plot files found for {destination.name}")
-    for path in files:
-        shutil.copy2(path, destination / path.name)
-
-
-def collect_plots(experiment, result_directory, suite_directory):
-    plots = result_directory / "plots"
-    for relative_path in REQUIRED_OUTPUTS[experiment]:
-        if not (plots / relative_path).is_file():
-            raise RuntimeError(
-                f"{experiment} completed, but {plots / relative_path} is missing"
-            )
-
-    primary = suite_directory / PRIMARY_FOLDERS[experiment]
-    if experiment == "tradeoff-contention-resolver":
-        copy_plot_files(plots.glob("throughput*"), primary)
-    else:
-        copy_plot_files(plots.iterdir(), primary)
-    destinations = [primary]
-
-    if experiment == "tradeoff-contention-resolver":
-        figure_6 = suite_directory / "figure_06"
-        figure_6.mkdir(parents=True, exist_ok=True)
-        for path in plots.glob("q1_*"):
-            if path.is_file():
-                shutil.copy2(path, figure_6 / path.name)
-        destinations.append(figure_6)
-
-        group_sizes = plots / "resolver" / "group_sizes"
-        if not group_sizes.is_dir() or not any(group_sizes.glob("*.html")):
-            raise RuntimeError("Figure 11 batch-size plots were not generated")
-        figure_11 = suite_directory / "figure_11"
-        shutil.copytree(group_sizes, figure_11)
-        destinations.append(figure_11)
-
-    return [str(path.relative_to(suite_directory)) for path in destinations]
-
-
 def write_manifest(path, manifest):
     path.write_text(json.dumps(manifest, indent=2) + "\n")
 
 
+def set_experiment_entry(manifest, name, **values):
+    entries = manifest.setdefault("experiments", [])
+    entry = next((item for item in entries if item.get("name") == name), None)
+    if entry is None:
+        entry = {"name": name}
+        entries.append(entry)
+    entry.update(values)
+    return entry
+
+
+def existing_source(manifest, experiment):
+    entry = next(
+        (
+            item
+            for item in manifest.get("experiments", [])
+            if item.get("name") == experiment
+        ),
+        None,
+    )
+    if not entry or not entry.get("source"):
+        return None
+    source = Path(entry["source"])
+    if not source.is_absolute():
+        source = ROOT_DIR / source
+    if source.is_dir() and any(source.glob("*_results.csv")):
+        return source.resolve()
+    return None
+
+
+def validate_source(source, experiment):
+    from paper_plots.common import load_results
+
+    results = load_results(source)
+    if experiment == "table4":
+        warmup_column = "warmup_before_measurement"
+        if warmup_column not in results:
+            raise ValueError("Table 4 source predates the unmeasured warm-up")
+        warmed = results[warmup_column].astype(str).str.lower().isin(("true", "1"))
+        if not warmed.all():
+            raise ValueError("Table 4 contains a measurement without warm-up")
+        counts = results.groupby("protocol").size()
+        expected = {"Sangria", "Pipelined-2PC", "Strict-2PC"}
+        if set(counts.index) != expected or not (counts == 2).all():
+            raise ValueError(
+                "Table 4 requires two warmed measurements per protocol"
+            )
+
+
+def render_paper_outputs(sources, suite_directory):
+    from paper_plots.figure_04 import plot as plot_figure_04
+    from paper_plots.figure_05 import plot as plot_figure_05
+    from paper_plots.figure_06 import plot as plot_figure_06
+    from paper_plots.figure_07 import plot as plot_figure_07
+    from paper_plots.figure_08 import plot as plot_figure_08
+    from paper_plots.figure_09 import plot as plot_figure_09
+    from paper_plots.figure_10 import plot as plot_figure_10
+    from paper_plots.figure_11 import plot as plot_figure_11
+    from paper_plots.table_04 import plot as plot_table_04
+
+    tradeoff = sources["tradeoff-contention-resolver"]
+    plot_figure_04(tradeoff, suite_directory / "figure_04")
+    plot_figure_05(sources["ycsb"], suite_directory / "figure_05")
+    plot_figure_06(tradeoff, suite_directory / "figure_06")
+    plot_figure_07(
+        sources["runtime-contention"], suite_directory / "figure_07"
+    )
+    plot_figure_08(sources["runtime-resolver"], suite_directory / "figure_08")
+    plot_figure_09(sources["mixed-workload"], suite_directory / "figure_09")
+    plot_figure_10(
+        sources["fig10-contention"],
+        sources["fig10-resolver"],
+        suite_directory / "figure_10",
+    )
+    plot_figure_11(tradeoff, suite_directory / "figure_11")
+    plot_table_04(sources["table4"], suite_directory / "table_04")
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Run every paper experiment sequentially and collect its plots."
+        description="Run every paper experiment and render publication figures."
     )
-    parser.add_argument(
+    destination = parser.add_mutually_exclusive_group()
+    destination.add_argument(
         "--output-dir",
         type=Path,
-        help="Collection directory (default: a timestamp under paper_results).",
+        help="New suite directory (default: timestamp under paper_results).",
+    )
+    destination.add_argument(
+        "--resume",
+        type=Path,
+        help="Resume an existing suite without rerunning completed measurements.",
     )
     parser.add_argument(
         "--no-build",
@@ -137,50 +158,88 @@ def main():
     )
     args = parser.parse_args()
 
-    if args.output_dir:
-        suite_directory = args.output_dir.expanduser().resolve()
+    if args.resume:
+        suite_directory = args.resume.expanduser().resolve()
+        manifest_path = suite_directory / "manifest.json"
+        if not manifest_path.is_file():
+            parser.error(f"No manifest found at {manifest_path}")
+        manifest = json.loads(manifest_path.read_text())
     else:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        suite_directory = PAPER_RESULTS_DIR / timestamp
-    suite_directory.mkdir(parents=True, exist_ok=False)
+        if args.output_dir:
+            suite_directory = args.output_dir.expanduser().resolve()
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            suite_directory = PAPER_RESULTS_DIR / timestamp
+        suite_directory.mkdir(parents=True, exist_ok=False)
+        manifest = {
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "experiments": [],
+        }
+        manifest_path = suite_directory / "manifest.json"
+        write_manifest(manifest_path, manifest)
 
-    manifest = {
-        "created_at": datetime.now().isoformat(timespec="seconds"),
-        "experiments": [],
-    }
-    manifest_path = suite_directory / "manifest.json"
-    write_manifest(manifest_path, manifest)
-
+    sources = {}
+    build_next = not args.no_build and not args.resume
     for index, experiment in enumerate(PAPER_EXPERIMENTS, start=1):
-        print(
-            f"\n[{index}/{len(PAPER_EXPERIMENTS)}] Running {experiment}",
-            flush=True,
-        )
-        try:
-            result_directory = run_experiment(
-                experiment, build=(index == 1 and not args.no_build)
+        source = existing_source(manifest, experiment)
+        if source is not None:
+            try:
+                validate_source(source, experiment)
+            except ValueError as error:
+                print(
+                    f"[{index}/{len(PAPER_EXPERIMENTS)}] Cannot reuse "
+                    f"{source.name}: {error}",
+                    flush=True,
+                )
+                source = None
+            else:
+                print(
+                    f"[{index}/{len(PAPER_EXPERIMENTS)}] Reusing {experiment}: "
+                    f"{source.name}",
+                    flush=True,
+                )
+        if source is None:
+            print(
+                f"\n[{index}/{len(PAPER_EXPERIMENTS)}] Running {experiment}",
+                flush=True,
             )
-            destinations = collect_plots(
-                experiment, result_directory, suite_directory
-            )
-        except Exception as error:
-            manifest["experiments"].append(
-                {"name": experiment, "status": "failed", "error": str(error)}
-            )
-            write_manifest(manifest_path, manifest)
-            raise
+            try:
+                source = run_experiment(experiment, build=build_next)
+                validate_source(source, experiment)
+            except Exception as error:
+                set_experiment_entry(
+                    manifest, experiment, status="failed", error=str(error)
+                )
+                write_manifest(manifest_path, manifest)
+                raise
+            build_next = False
 
-        manifest["experiments"].append(
-            {
-                "name": experiment,
-                "status": "complete",
-                "source": str(result_directory.relative_to(ROOT_DIR)),
-                "collected_under": destinations,
-            }
+        sources[experiment] = source
+        set_experiment_entry(
+            manifest,
+            experiment,
+            status="measured",
+            source=str(source.relative_to(ROOT_DIR)),
+            error=None,
         )
         write_manifest(manifest_path, manifest)
 
-    print(f"\nCollected paper plots in {suite_directory}")
+    print("\nRendering publication figures", flush=True)
+    try:
+        render_paper_outputs(sources, suite_directory)
+    except Exception as error:
+        manifest["plots"] = {"status": "failed", "error": str(error)}
+        write_manifest(manifest_path, manifest)
+        raise
+
+    for experiment in PAPER_EXPERIMENTS:
+        set_experiment_entry(manifest, experiment, status="complete", error=None)
+    manifest["plots"] = {
+        "status": "complete",
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    write_manifest(manifest_path, manifest)
+    print(f"\nCollected paper figures in {suite_directory}")
 
 
 if __name__ == "__main__":

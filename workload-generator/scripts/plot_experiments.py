@@ -135,7 +135,7 @@ class Plotter:
         for param, value in fixed_params.items():
             df = df[df[param] == value]
 
-        df["resolver_stats"] = df["resolver_stats"].apply(json.loads)
+        df["resolver_stats"] = df["resolver_stats"].apply(_parse_resolver_stats)
         df["resolver_stats"] = df["resolver_stats"].apply(
             lambda x: {k: v for k, v in x.items() if k.startswith("Group size:")}
         )
